@@ -14,10 +14,11 @@ async def run_llm_task(
     from_lang: str = 'zh',
     to_lang: str = 'en',
     enable_correction: bool = True,
-    enable_visualization: bool = True
+    enable_visualization: bool = True,
+    card_side: str = 'front'
 ) -> Dict[str, Any]:
     """
-    处理上传的文件（图片或PDF）
+    处理上传的图片文件
     
     Args:
         file: 上传的文件
@@ -25,6 +26,7 @@ async def run_llm_task(
         to_lang: 目标语言，默认'en'
         enable_correction: 是否启用透视矫正
         enable_visualization: 是否生成可视化图片
+        card_side: 证件面，'front'=正面，'back'=背面（取消自动换行）
     
     Returns:
         包含处理结果的字典
@@ -56,7 +58,8 @@ async def run_llm_task(
             from_lang=from_lang,
             to_lang=to_lang,
             enable_correction=enable_correction,
-            enable_visualization=enable_visualization
+            enable_visualization=enable_visualization,
+            card_side=card_side
         )
         
         # 转换字段名称以匹配前端期望，并标准化路径格式

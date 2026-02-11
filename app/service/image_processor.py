@@ -547,6 +547,89 @@ SINGLE_VALUE_MAP = {
 
 FIELD_KEYS = list(FIELD_TRANSLATIONS.keys())
 
+# -----------------------------
+# 身份证背面（国徽面）固定翻译映射
+# -----------------------------
+BACKSIDE_FIXED_MAP = {
+    '中华人民共和国': "People's Republic of China",
+    '居民身份证': 'Resident Identity Card',
+    '签发机关': 'Issuing Authority',
+    '有效期限': 'Validity Period',
+}
+
+# 背面「签发机关」box 右边界扩展像素，使 "Issuing Authority" 能单行放下（OCR 原 box 太窄）
+BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH = 1000
+
+
+def _expand_box_right(box, extra_width):
+    """将四边形 box 的右边界向右扩展 extra_width 像素。box: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]"""
+    if not box or len(box) < 4:
+        return box
+    # 深拷贝，避免改到原始数据
+    new_box = [[float(p[0]), float(p[1])] for p in box]
+    # 右上 [1]、右下 [2] 的 x 增加
+    new_box[1][0] += extra_width
+    new_box[2][0] += extra_width
+    return new_box
+
+
+def translate_all_items_backside(items, from_lang='zh', to_lang='en'):
+    """
+    身份证背面专用翻译：固定标签用硬编码映射，变量值（机关名、日期）走 DeepSeek。
+    """
+    translated_items = []
+
+    for i, item in enumerate(items):
+        text = item.get('text', '').strip()
+        print(f"[{i + 1}/{len(items)}] ", end="")
+
+        # 1. 固定映射命中 → 直接使用
+        if text in BACKSIDE_FIXED_MAP:
+            mapped = BACKSIDE_FIXED_MAP[text]
+            print(f"✅ 背面固定映射: {text} → {mapped}")
+            box = item.get("box")
+            # 「签发机关」英文 "Issuing Authority" 比中文宽，直接拉宽 box 避免换行
+            if text == '签发机关' and box and len(box) >= 4:
+                box = _expand_box_right(box, BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH)
+                print(f"   → 签发机关 box 右扩 {BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH}px")
+            translated_items.append({
+                "text": mapped,
+                "original_text": text,
+                "score": item.get("score"),
+                "box": box,
+                "fixed": True  # 标记为固定映射
+            })
+            continue
+
+        # 2. 日期格式（纯数字+点+横线）→ 保持原文
+        if re.match(r'^[\d.\-/]+$', text):
+            print(f"✅ 日期保持原文: {text}")
+            translated_items.append({
+                "text": text,
+                "original_text": text,
+                "score": item.get("score"),
+                "box": item.get("box")
+            })
+            continue
+
+        # 3. 其余（如签发机关的具体名称）→ 调 DeepSeek 翻译
+        try:
+            translated = translate_basic(text, from_lang, to_lang)
+            print(f"✅ 翻译: {text} → {translated}")
+        except Exception as e:
+            print(f"❌ 翻译出错: {e}")
+            translated = text
+
+        translated_items.append({
+            "text": translated,
+            "original_text": text,
+            "score": item.get("score"),
+            "box": item.get("box")
+        })
+        time.sleep(0.3)
+
+    return translated_items
+
 
 def preprocess_field_item_inline(text):
     """如果文本以字段开头，拆分并返回 (field_key, value)"""
@@ -813,9 +896,12 @@ def wrap_text(text, font, max_width, draw):
 # -----------------------------
 # 图片擦除 + 多行填充
 # -----------------------------
-def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None) -> str:
+def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, auto_wrap: bool = True) -> str:
     """
     智能擦除原文字区域，填充翻译后的文本（支持自动换行 + 底部对齐）
+    
+    Args:
+        auto_wrap: 是否启用自动换行。正面(front)为True，背面(back)为False。
     """
     img = cv2.imread(img_path)
     if img is None:
@@ -884,6 +970,7 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None) 
     for item in items:
         box = item.get("box")
         text = item.get("text", "")
+        original_text = item.get("original_text", "")
 
         if not box or len(box) < 4 or not text:
             continue
@@ -939,7 +1026,7 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None) 
             except:
                 best_font = ImageFont.load_default()
 
-        if is_english:
+        if is_english and auto_wrap:
             if should_wrap_text(item, text, box_width, draw, best_font):
                 lines = wrap_text(text, best_font, box_width, draw)
             else:
@@ -1066,7 +1153,8 @@ def process_image(
     from_lang: str = 'zh',
     to_lang: str = 'en',
     enable_correction: bool = True,
-    enable_visualization: bool = True
+    enable_visualization: bool = True,
+    card_side: str = 'front'
 ) -> Dict[str, Any]:
     """
     完整的图片处理流程
@@ -1078,6 +1166,7 @@ def process_image(
         to_lang: 目标语言
         enable_correction: 是否启用透视矫正
         enable_visualization: 是否生成可视化图片
+        card_side: 证件面，'front'=正面（自动换行），'back'=背面（不换行）
     
     Returns:
         包含处理结果的字典
@@ -1090,7 +1179,7 @@ def process_image(
     base_name = os.path.splitext(os.path.basename(input_path))[0]
     
     print("=" * 60)
-    print("🚀 开始处理图片")
+    print(f"🚀 开始处理图片 | card_side={card_side} | auto_wrap={card_side != 'back'}")
     print("=" * 60)
 
     # 步骤0: 图像预处理
@@ -1138,8 +1227,22 @@ def process_image(
                                      save_path=os.path.join(output_dir, f"{base_name}_vis.jpg"))
 
     # 步骤6: 翻译
-    print("\n🌐 步骤6: DeepSeek 批量翻译（优化格式）...")
-    translated_items = translate_all_items(items, from_lang=from_lang, to_lang=to_lang)
+    if card_side == 'back':
+        print("\n🌐 步骤6: 身份证背面专用翻译（固定映射 + 变量翻译）...")
+        translated_items = translate_all_items_backside(items, from_lang=from_lang, to_lang=to_lang)
+    else:
+        print("\n🌐 步骤6: DeepSeek 批量翻译（优化格式）...")
+        translated_items = translate_all_items(items, from_lang=from_lang, to_lang=to_lang)
+
+    # 仅背面：对「签发机关」项拉宽 box，使 "Issuing Authority" 单行
+    if card_side == 'back':
+        for it in translated_items:
+            if it.get("original_text") != "签发机关":
+                continue
+            box = it.get("box")
+            if box and len(box) >= 4:
+                it["box"] = _expand_box_right(box, BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH)
+                print(f"   → 签发机关 box 右扩 {BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH}px")
 
     trans_json = os.path.join(output_dir, f"{base_name}_translated.json")
     with open(trans_json, "w", encoding="utf-8") as f:
@@ -1147,7 +1250,7 @@ def process_image(
     print(f"\n✅ 翻译结果已保存: {trans_json}")
 
     # 步骤7: 智能修复并填充翻译
-    print("\n🎨 步骤7: 智能修复并填充翻译（底部对齐）...")
+    print("\n🎨 步骤7: 智能修复并填充翻译...")
     output_img = inpaint_and_fill(
         img_path, 
         translated_items,

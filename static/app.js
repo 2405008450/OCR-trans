@@ -18,6 +18,7 @@ const resultSection = document.getElementById('resultSection');
 
 const fromLang = document.getElementById('fromLang');
 const toLang = document.getElementById('toLang');
+const cardSide = document.getElementById('cardSide');
 const enableCorrection = document.getElementById('enableCorrection');
 const enableVisualization = document.getElementById('enableVisualization');
 
@@ -66,9 +67,9 @@ function handleFileSelect(e) {
 
 function handleFile(file) {
     // 验证文件类型
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'application/pdf'];
-    if (!validTypes.includes(file.type)) {
-        alert('不支持的文件类型！请上传 JPG、PNG 或 PDF 文件。');
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'image/tiff'];
+    if (!validTypes.includes(file.type) && !file.type.startsWith('image/')) {
+        alert('不支持的文件类型！请上传图片文件。');
         return;
     }
     
@@ -82,15 +83,11 @@ function handleFile(file) {
     fileName.textContent = file.name;
     
     // 显示预览
-    if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            previewImage.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    } else {
-        previewImage.src = 'https://via.placeholder.com/120?text=PDF';
-    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        previewImage.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
     
     uploadPlaceholder.style.display = 'none';
     filePreview.style.display = 'flex';
@@ -130,6 +127,7 @@ async function processFile() {
         const params = new URLSearchParams({
             from_lang: fromLang.value,
             to_lang: toLang.value,
+            card_side: cardSide.value,
             enable_correction: enableCorrection.checked,
             enable_visualization: enableVisualization.checked
         });
@@ -257,4 +255,3 @@ function resetApp() {
     progressFill.style.width = '0%';
     progressText.textContent = '0%';
 }
-
