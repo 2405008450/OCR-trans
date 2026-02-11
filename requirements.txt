@@ -1,0 +1,24 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+pydantic-settings
+sqlalchemy
+
+# 图片处理
+opencv-python
+pillow>=9.0.0,<11.0.0  # 兼容性版本范围
+numpy
+
+# OCR
+paddleocr
+paddlepaddle
+
+# PDF处理
+PyMuPDF
+
+# AI翻译
+openai
+
+# 图像修复（可选，如果不需要可以注释掉）
+# simple-lama-inpainting
