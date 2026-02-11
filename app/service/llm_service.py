@@ -31,9 +31,10 @@ async def run_llm_task(
     """
     task_id = str(uuid.uuid4())
     
-    # 1. 保存上传文件
-    file_ext = os.path.splitext(file.filename)[1].lower()
-    input_path = os.path.join(settings.UPLOAD_DIR, f"{task_id}_{file.filename}")
+    # 1. 保存上传文件（使用 UUID 风格文件名，避免中文路径导致 cv2 等库无法处理）
+    file_ext = os.path.splitext(file.filename)[1].lower() or ".jpg"
+    safe_filename = f"{task_id}{file_ext}"
+    input_path = os.path.join(settings.UPLOAD_DIR, safe_filename)
     
     with open(input_path, "wb") as f:
         content = await file.read()

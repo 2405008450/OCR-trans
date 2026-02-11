@@ -14,9 +14,6 @@ numpy
 paddleocr
 paddlepaddle
 
-# PDF处理
-PyMuPDF
-
 # AI翻译
 openai
 

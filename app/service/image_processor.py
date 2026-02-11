@@ -15,7 +15,6 @@ from PIL import Image, ImageDraw, ImageFont
 import re
 import time
 from openai import OpenAI
-# import fitz  # PyMuPDF
 from typing import List, Dict, Any, Optional
 
 from app.core.config import settings
@@ -28,49 +27,17 @@ except ImportError:
     print("⚠️ simple_lama_inpainting 未安装，将使用OpenCV作为备选方案")
 
 # -----------------------------
-# PDF转图片
+# 输入转图片列表
 # -----------------------------
 
 def convert_input_to_images(input_path: str, output_dir: str = None) -> List[str]:
     """
-    📂 输入处理器：
-    - 如果是图片：直接返回路径列表
-    - 如果是 PDF：将每一页转为高清图片，保存后返回路径列表
+    📂 输入处理器：仅支持图片，直接返回路径列表；其他格式返回空列表。
     """
-    if output_dir is None:
-        output_dir = settings.TEMP_IMAGES_DIR
-    
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
     file_ext = os.path.splitext(input_path)[1].lower()
-
-    # 1. 如果是图片，直接返回
     if file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff']:
         return [input_path]
-
-    # 2. 如果是 PDF，进行转换
-    if file_ext == '.pdf':
-        print(f"📄 检测到 PDF 文件，正在转换为图片...")
-        image_paths = []
-        doc = fitz.open(input_path)
-
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            mat = fitz.Matrix(3, 3)
-            pix = page.get_pixmap(matrix=mat)
-
-            base_name = os.path.basename(input_path).replace('.pdf', '')
-            img_filename = f"{base_name}_page_{page_num}.jpg"
-            save_path = os.path.join(output_dir, img_filename)
-
-            pix.save(save_path)
-            image_paths.append(save_path)
-            print(f"   -> 第 {page_num + 1} 页已转换: {save_path}")
-
-        return image_paths
-
-    print("❌ 不支持的文件格式")
+    print("❌ 不支持的文件格式，仅支持图片: .jpg, .jpeg, .png, .bmp, .tif, .tiff")
     return []
 
 
