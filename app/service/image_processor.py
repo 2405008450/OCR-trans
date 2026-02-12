@@ -192,6 +192,21 @@ if LAMA_AVAILABLE:
 
 
 # -----------------------------
+# 置信度过滤
+# -----------------------------
+MIN_OCR_CONFIDENCE = 0.5  # 低于 50% 的检测框忽略
+
+
+def filter_items_by_confidence(items: List[Dict], min_score: float = MIN_OCR_CONFIDENCE) -> List[Dict]:
+    """过滤掉置信度低于 min_score 的项。score 为 None 的保留。"""
+    filtered = [it for it in items if it.get("score") is None or it.get("score") >= min_score]
+    dropped = len(items) - len(filtered)
+    if dropped > 0:
+        print(f"   置信度过滤: 保留 {len(filtered)} 个，忽略 {dropped} 个 (score < {min_score:.0%})")
+    return filtered
+
+
+# -----------------------------
 # 通用提取函数
 # -----------------------------
 def extract_all_items(result):
@@ -1076,7 +1091,26 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, 
 # -----------------------------
 # 可视化函数
 # -----------------------------
-def draw_visualization(img_path: str, items: List[Dict], save_path: str = None) -> str:
+def _try_paddle_vis(result, img_path: str, output_dir: str) -> Optional[str]:
+    """优先使用 PaddleOCR 原生可视化（save_to_img），生成 {输入名}_ocr_res_img.jpg。不支持则返回 None。"""
+    if not result:
+        return None
+    try:
+        for res in result:
+            if hasattr(res, "save_to_img"):
+                res.save_to_img(output_dir)
+                break
+        stem = os.path.splitext(os.path.basename(img_path))[0]
+        candidate = os.path.join(output_dir, stem + "_ocr_res_img.jpg")
+        if os.path.exists(candidate):
+            print(f"📊 使用 PaddleOCR 原生可视化: {candidate}")
+            return candidate
+    except Exception as e:
+        print(f"⚠️ PaddleOCR 原生可视化失败: {e}")
+    return None
+
+
+def draw_visualization(img_path: str, items: List[Dict], save_path: str = None) -> Optional[str]:
     """生成OCR结果可视化图片"""
     img = cv2.imread(img_path)
     if img is None:
@@ -1198,10 +1232,20 @@ def process_image(
     except (AttributeError, NotImplementedError):
         result = ocr.ocr(img_path)  # PaddleOCR 2.x 降级兼容
 
+    # 步骤1.5: 可视化（优先使用 PaddleOCR 原生 save_to_img，无则用自绘）
+    vis_path = None
+    if enable_visualization:
+        vis_path = _try_paddle_vis(result, img_path, output_dir)
+        if vis_path is None:
+            pass  # 稍后在步骤5用 draw_visualization 补
+
     # 步骤2: 提取文本
     print("📝 步骤2: 提取文本...")
     items = extract_all_items(result)
     print(f"   检测到 {len(items)} 个文本块")
+
+    # 步骤2.5: 置信度过滤（忽略低于 50% 的框）
+    items = filter_items_by_confidence(items)
 
     # 步骤3: 智能分割
     print("\n🔧 步骤3: 智能分割（保护日期和地址）...")
@@ -1219,12 +1263,11 @@ def process_image(
         json.dump(items, f, ensure_ascii=False, indent=4)
     print(f"   原始OCR结果已保存: {out_json}")
 
-    # 步骤5: 生成可视化（可选）
-    vis_path = None
-    if enable_visualization:
-        print("\n📊 步骤5: 生成分割可视化...")
-        vis_path = draw_visualization(img_path, items, 
-                                     save_path=os.path.join(output_dir, f"{base_name}_vis.jpg"))
+    # 步骤5: 可视化（若步骤1.5未得到原生图则用自绘）
+    if enable_visualization and vis_path is None:
+        print("\n📊 步骤5: 生成分割可视化（备用）...")
+        vis_path = draw_visualization(img_path, items,
+                                      save_path=os.path.join(output_dir, f"{base_name}_vis.jpg"))
 
     # 步骤6: 翻译
     if card_side == 'back':
