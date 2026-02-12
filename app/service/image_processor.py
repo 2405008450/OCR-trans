@@ -573,19 +573,26 @@ BACKSIDE_FIXED_MAP = {
 }
 
 # 背面「签发机关」box 右边界扩展像素，使 "Issuing Authority" 能单行放下（OCR 原 box 太窄）
-BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH = 1000
+BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH = 180
+# 背面「签发机关」右侧机关名称 box 整体右移像素，避免与扩展后的标签框重叠
+BACKSIDE_ISSUING_AUTHORITY_VALUE_SHIFT_RIGHT = 40
 
 
 def _expand_box_right(box, extra_width):
     """将四边形 box 的右边界向右扩展 extra_width 像素。box: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]"""
     if not box or len(box) < 4:
         return box
-    # 深拷贝，避免改到原始数据
     new_box = [[float(p[0]), float(p[1])] for p in box]
-    # 右上 [1]、右下 [2] 的 x 增加
     new_box[1][0] += extra_width
     new_box[2][0] += extra_width
     return new_box
+
+
+def _shift_box_right(box, offset):
+    """将整个四边形 box 整体右移 offset 像素。"""
+    if not box or len(box) < 4 or offset == 0:
+        return box
+    return [[float(p[0]) + offset, float(p[1])] for p in box]
 
 
 def translate_all_items_backside(items, from_lang='zh', to_lang='en'):
@@ -1277,15 +1284,24 @@ def process_image(
         print("\n🌐 步骤6: DeepSeek 批量翻译（优化格式）...")
         translated_items = translate_all_items(items, from_lang=from_lang, to_lang=to_lang)
 
-    # 仅背面：对「签发机关」项拉宽 box，使 "Issuing Authority" 单行
+    # 仅背面：签发机关标签拉宽 + 右侧机关名称 box 右移，避免遮挡
     if card_side == 'back':
-        for it in translated_items:
+        for i, it in enumerate(translated_items):
             if it.get("original_text") != "签发机关":
                 continue
             box = it.get("box")
             if box and len(box) >= 4:
                 it["box"] = _expand_box_right(box, BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH)
                 print(f"   → 签发机关 box 右扩 {BACKSIDE_ISSUING_AUTHORITY_BOX_EXTRA_WIDTH}px")
+            # 紧接其后的机关名称（如「广州市公安局越秀分局」）整体右移，避免与标签框重叠
+            next_idx = i + 1
+            if next_idx < len(translated_items):
+                next_it = translated_items[next_idx]
+                next_box = next_it.get("box")
+                if next_box and len(next_box) >= 4:
+                    next_it["box"] = _shift_box_right(next_box, BACKSIDE_ISSUING_AUTHORITY_VALUE_SHIFT_RIGHT)
+                    print(f"   → 机关名称 box 右移 {BACKSIDE_ISSUING_AUTHORITY_VALUE_SHIFT_RIGHT}px")
+            break
 
     trans_json = os.path.join(output_dir, f"{base_name}_translated.json")
     with open(trans_json, "w", encoding="utf-8") as f:
