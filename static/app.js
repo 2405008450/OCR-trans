@@ -30,6 +30,12 @@ const enableOverlapFix = document.getElementById('enableOverlapFix');
 const enableColonFix = document.getElementById('enableColonFix');
 const marriagePageTemplate = document.getElementById('marriagePageTemplate');
 const fontSizeInput = document.getElementById('fontSize');
+const registrarSignatureText = document.getElementById('registrarSignatureText');
+const registeredByText = document.getElementById('registeredByText');
+const registeredByOffsetX = document.getElementById('registeredByOffsetX');
+const registeredByOffsetY = document.getElementById('registeredByOffsetY');
+const registrarSignatureOffsetX = document.getElementById('registrarSignatureOffsetX');
+const registrarSignatureOffsetY = document.getElementById('registrarSignatureOffsetY');
 
 const processingStatus = document.getElementById('processingStatus');
 const progressFill = document.getElementById('progressFill');
@@ -205,6 +211,30 @@ async function processFile() {
             params.append('enable_merge', checkedOrDefault(enableMerge, true));
             params.append('enable_overlap_fix', checkedOrDefault(enableOverlapFix, true));
             params.append('enable_colon_fix', checkedOrDefault(enableColonFix, false));
+            const signatureText = valueOrDefault(registrarSignatureText, '').trim();
+            if (signatureText) {
+                params.append('registrar_signature_text', signatureText);
+            }
+            const registeredBy = valueOrDefault(registeredByText, '').trim();
+            if (registeredBy) {
+                params.append('registered_by_text', registeredBy);
+            }
+            const regByOffsetX = parseInt(valueOrDefault(registeredByOffsetX, '0'));
+            if (!Number.isNaN(regByOffsetX)) {
+                params.append('registered_by_offset_x', regByOffsetX);
+            }
+            const regByOffsetY = parseInt(valueOrDefault(registeredByOffsetY, '0'));
+            if (!Number.isNaN(regByOffsetY)) {
+                params.append('registered_by_offset_y', regByOffsetY);
+            }
+            const signOffsetX = parseInt(valueOrDefault(registrarSignatureOffsetX, '36'));
+            if (!Number.isNaN(signOffsetX) && signOffsetX >= 0) {
+                params.append('registrar_signature_offset_x', signOffsetX);
+            }
+            const signOffsetY = parseInt(valueOrDefault(registrarSignatureOffsetY, '-12'));
+            if (!Number.isNaN(signOffsetY)) {
+                params.append('registrar_signature_offset_y', signOffsetY);
+            }
             const fs = parseInt(valueOrDefault(fontSizeInput, '18'));
             if (fs && fs >= 8 && fs <= 30) {
                 params.append('font_size', fs);

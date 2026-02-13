@@ -126,6 +126,36 @@
                                     <input type="number" id="fontSize" value="18" min="8" max="30" step="1">
                                     <small>像素(px)，建议 8-30</small>
                                 </label>
+                                <label class="mc-number" style="grid-column: 1 / -1;">
+                                    <span><i class="fas fa-signature"></i> 婚姻登记员手写签名(手动输入):</span>
+                                    <input type="text" id="registrarSignatureText" placeholder="例如：李四 / Li Si" style="width: 320px; text-align: left;">
+                                    <small>将通过LLM翻译/转写后，填充到“婚姻登记员”右侧位置</small>
+                                </label>
+                                <label class="mc-number" style="grid-column: 1 / -1;">
+                                    <span><i class="fas fa-user-check"></i> Registered by 文本(手动输入):</span>
+                                    <input type="text" id="registeredByText" placeholder="例如：张三 / Zhang San" style="width: 320px; text-align: left;">
+                                    <small>将调用LLM翻译/转写，按“Registered by: (xxx)”格式填充在签名上方，其中(xxx)为红色斜体</small>
+                                </label>
+                                <label class="mc-number">
+                                    <span><i class="fas fa-arrows-alt-h"></i> Registered by 右移偏移:</span>
+                                    <input type="number" id="registeredByOffsetX" value="20" min="-300" max="300" step="2">
+                                    <small>单位px，负数左移，正数右移</small>
+                                </label>
+                                <label class="mc-number">
+                                    <span><i class="fas fa-arrows-alt-v"></i> Registered by 纵向偏移:</span>
+                                    <input type="number" id="registeredByOffsetY" value="-80" min="-300" max="300" step="2">
+                                    <small>单位px，负数上移，正数下移</small>
+                                </label>
+                                <label class="mc-number">
+                                    <span><i class="fas fa-arrows-alt-h"></i> 签名右移偏移:</span>
+                                    <input type="number" id="registrarSignatureOffsetX" value="52" min="0" max="400" step="2">
+                                    <small>单位px，值越大越靠右</small>
+                                </label>
+                                <label class="mc-number">
+                                    <span><i class="fas fa-arrows-alt-v"></i> 签名纵向偏移:</span>
+                                    <input type="number" id="registrarSignatureOffsetY" value="-12" min="-200" max="200" step="2">
+                                    <small>单位px，负数上移，正数下移</small>
+                                </label>
                             </div>
                         </div>
                         <!-- 通用选项 -->

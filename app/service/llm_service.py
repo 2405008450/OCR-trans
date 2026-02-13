@@ -19,6 +19,12 @@ async def run_llm_task(
     card_side: str = 'front',
     doc_type: str = 'id_card',
     marriage_page_template: str = 'page2',
+    registrar_signature_text: Optional[str] = None,
+    registered_by_text: Optional[str] = None,
+    registered_by_offset_x: int = 0,
+    registered_by_offset_y: int = 0,
+    registrar_signature_offset_x: int = 36,
+    registrar_signature_offset_y: int = -12,
     enable_merge: bool = True,
     enable_overlap_fix: bool = True,
     enable_colon_fix: bool = False,
@@ -36,6 +42,12 @@ async def run_llm_task(
         card_side: 证件面，'front'=正面，'back'=背面（仅身份证有效）
         doc_type: 证件类型，'id_card'=身份证，'marriage_cert'=结婚证
         marriage_page_template: [结婚证] 模板页，'page1' / 'page2' / 'page3'
+        registrar_signature_text: [结婚证] 婚姻登记员手写签名（手动输入）
+        registered_by_text: [结婚证] Registered by中的xxx（手动输入）
+        registered_by_offset_x: [结婚证] Registered by 右移偏移(px)
+        registered_by_offset_y: [结婚证] Registered by 纵向偏移(px)
+        registrar_signature_offset_x: [结婚证] 婚姻登记员手写签名右移偏移(px)
+        registrar_signature_offset_y: [结婚证] 婚姻登记员手写签名纵向偏移(px)
         enable_merge: [结婚证] 框体合并开关
         enable_overlap_fix: [结婚证] 重叠修正开关
         enable_colon_fix: [结婚证] 冒号修正开关
@@ -107,6 +119,12 @@ async def run_llm_task(
                 font_size=font_size if font_size else 18,
                 confidence_threshold=confidence_threshold,
                 page_template=template,
+                registrar_signature_text=registrar_signature_text,
+                registered_by_text=registered_by_text,
+                registered_by_offset_x=registered_by_offset_x,
+                registered_by_offset_y=registered_by_offset_y,
+                registrar_signature_offset_x=registrar_signature_offset_x,
+                registrar_signature_offset_y=registrar_signature_offset_y,
             )
         else:
             # 默认：身份证处理
