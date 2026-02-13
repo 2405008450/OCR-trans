@@ -16,17 +16,61 @@ const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
 const resultSection = document.getElementById('resultSection');
 
+const docType = document.getElementById('docType');
 const fromLang = document.getElementById('fromLang');
 const toLang = document.getElementById('toLang');
 const cardSide = document.getElementById('cardSide');
-const enableCorrection = document.getElementById('enableCorrection');
 const enableVisualization = document.getElementById('enableVisualization');
+
+// 结婚证专用选项
+const idCardOptions = document.getElementById('idCardOptions');
+const marriageCertOptions = document.getElementById('marriageCertOptions');
+const enableMerge = document.getElementById('enableMerge');
+const enableOverlapFix = document.getElementById('enableOverlapFix');
+const enableColonFix = document.getElementById('enableColonFix');
+const marriagePageTemplate = document.getElementById('marriagePageTemplate');
+const fontSizeInput = document.getElementById('fontSize');
 
 const processingStatus = document.getElementById('processingStatus');
 const progressFill = document.getElementById('progressFill');
 const progressText = document.getElementById('progressText');
 const resultStats = document.getElementById('resultStats');
 const resultGrid = document.getElementById('resultGrid');
+
+function checkedOrDefault(el, defaultValue = false) {
+    return el ? !!el.checked : defaultValue;
+}
+
+function valueOrDefault(el, defaultValue = '') {
+    return el ? el.value : defaultValue;
+}
+
+function applyMarriageTemplate() {
+    const template = valueOrDefault(marriagePageTemplate, 'page2');
+
+    // 第一页(封面): merge=true, overlap=true, colon=false, 置信度0.8
+    if (template === 'page1') {
+        if (enableMerge) enableMerge.checked = true;
+        if (enableOverlapFix) enableOverlapFix.checked = true;
+        if (enableColonFix) enableColonFix.checked = false;
+        return;
+    }
+
+    // 第二页: merge=false, overlap=true, colon=true
+    if (template === 'page2') {
+        if (enableMerge) enableMerge.checked = false;
+        if (enableOverlapFix) enableOverlapFix.checked = true;
+        if (enableColonFix) enableColonFix.checked = true;
+        return;
+    }
+
+    // 第三页: merge=true, overlap=true, colon=false
+    if (template === 'page3') {
+        if (enableMerge) enableMerge.checked = true;
+        if (enableOverlapFix) enableOverlapFix.checked = true;
+        if (enableColonFix) enableColonFix.checked = false;
+    }
+}
 
 // ========== 事件监听 ==========
 uploadArea.addEventListener('click', () => fileInput.click());
@@ -39,6 +83,28 @@ btnRemove.addEventListener('click', (e) => {
 });
 btnProcess.addEventListener('click', processFile);
 btnNewTask.addEventListener('click', resetApp);
+
+// 证件类型切换：显示/隐藏对应选项
+if (docType) {
+    docType.addEventListener('change', handleDocTypeChange);
+    handleDocTypeChange();
+}
+if (marriagePageTemplate) {
+    marriagePageTemplate.addEventListener('change', applyMarriageTemplate);
+}
+
+function handleDocTypeChange() {
+    const type = valueOrDefault(docType, 'id_card');
+    if (!idCardOptions || !marriageCertOptions) return;
+    if (type === 'marriage_cert') {
+        idCardOptions.style.display = 'none';
+        marriageCertOptions.style.display = 'block';
+        applyMarriageTemplate();
+    } else {
+        idCardOptions.style.display = 'block';
+        marriageCertOptions.style.display = 'none';
+    }
+}
 
 // ========== 文件处理函数 ==========
 function handleDragOver(e) {
@@ -123,14 +189,27 @@ async function processFile() {
         const formData = new FormData();
         formData.append('file', selectedFile);
         
-        // 构建URL参数
+        // 构建URL参数（通用参数）
         const params = new URLSearchParams({
-            from_lang: fromLang.value,
-            to_lang: toLang.value,
-            card_side: cardSide.value,
-            enable_correction: enableCorrection.checked,
-            enable_visualization: enableVisualization.checked
+            from_lang: valueOrDefault(fromLang, 'zh'),
+            to_lang: valueOrDefault(toLang, 'en'),
+            enable_visualization: checkedOrDefault(enableVisualization, true),
+            doc_type: valueOrDefault(docType, 'id_card'),
         });
+        
+        // 根据证件类型添加特定参数
+        if (valueOrDefault(docType, 'id_card') === 'id_card') {
+            params.append('card_side', valueOrDefault(cardSide, 'front'));
+        } else if (valueOrDefault(docType, 'id_card') === 'marriage_cert') {
+            params.append('marriage_page_template', valueOrDefault(marriagePageTemplate, 'page2'));
+            params.append('enable_merge', checkedOrDefault(enableMerge, true));
+            params.append('enable_overlap_fix', checkedOrDefault(enableOverlapFix, true));
+            params.append('enable_colon_fix', checkedOrDefault(enableColonFix, false));
+            const fs = parseInt(valueOrDefault(fontSizeInput, '18'));
+            if (fs && fs >= 8 && fs <= 30) {
+                params.append('font_size', fs);
+            }
+        }
         
         // 发送请求
         const response = await fetch(`/task/run?${params}`, {
@@ -165,8 +244,11 @@ function updateProgress(percent) {
     progressFill.style.width = `${percent}%`;
     progressText.textContent = `${Math.round(percent)}%`;
     
+    const currentDocType = valueOrDefault(docType, 'id_card');
+    const docLabel = currentDocType === 'marriage_cert' ? '结婚证' : '身份证';
+    
     if (percent < 30) {
-        processingStatus.textContent = '正在读取文件...';
+        processingStatus.textContent = `正在读取${docLabel}文件...`;
     } else if (percent < 60) {
         processingStatus.textContent = '正在进行OCR识别...';
     } else if (percent < 90) {
@@ -182,11 +264,19 @@ function displayResult(data) {
     resultSection.style.display = 'block';
     
     // 显示统计信息
+    const currentDocType = valueOrDefault(docType, 'id_card');
+    const docLabel = currentDocType === 'marriage_cert' ? '结婚证' : '身份证';
+    
     const stats = `
         <div class="stat-card">
             <i class="fas fa-file-alt"></i>
             <h3>${data.filename}</h3>
             <p>文件名</p>
+        </div>
+        <div class="stat-card">
+            <i class="fas fa-stamp"></i>
+            <h3>${docLabel}</h3>
+            <p>证件类型</p>
         </div>
         <div class="stat-card">
             <i class="fas fa-images"></i>

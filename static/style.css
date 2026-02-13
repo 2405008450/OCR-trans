@@ -209,6 +209,92 @@ body {
     cursor: pointer;
 }
 
+/* ========== 结婚证专用选项 ========== */
+.mc-options-group {
+    grid-column: 1 / -1;
+    background: rgba(99, 102, 241, 0.05);
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+}
+
+.mc-options-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--primary-color);
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.mc-options-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.mc-checkbox,
+.mc-number {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.mc-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.mc-checkbox small,
+.mc-number small {
+    width: 100%;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+    margin-left: 1.4rem;
+}
+
+.mc-number input[type="number"] {
+    width: 58px;
+    padding: 0.3rem 0.4rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.4rem;
+    font-size: 0.95rem;
+    text-align: center;
+}
+
+.mc-number select {
+    padding: 0.3rem 0.4rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.4rem;
+    font-size: 0.95rem;
+    background: #fff;
+}
+
+.mc-number input[type="number"]:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.mc-number select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+@media (max-width: 768px) {
+    .mc-options-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ========== 按钮 ========== */
 .btn-primary,
 .btn-secondary {

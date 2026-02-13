@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "sk-f2a71209abd64087a69147ab6a0bb2ec")
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     
-    # 服务器配置
-    HOST: str = os.getenv("HOST", "0.0.0.0")  # 0.0.0.0 允许所有网络接口访问
-    PORT: int = int(os.getenv("PORT", "8001"))  # 端口号（默认8001，避免与8000冲突）
+    # 服务器配置（部署到局域网 192.168.31.125 时，本机运行后可通过 http://192.168.31.125:8001 访问）
+    HOST: str = os.getenv("HOST", "0.0.0.0")  # 0.0.0.0 监听所有网卡，局域网可访问
+    PORT: int = int(os.getenv("PORT", "8001"))  # 端口号
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"  # 调试模式
     
     # 文件路径配置

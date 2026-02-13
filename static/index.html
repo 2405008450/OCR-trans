@@ -48,6 +48,17 @@
 
                     <!-- 选项设置 -->
                     <div class="options-panel">
+                        <!-- 证件类型 -->
+                        <div class="option-group">
+                            <label>
+                                <i class="fas fa-file-alt"></i> 证件类型:
+                                <select id="docType">
+                                    <option value="id_card">身份证</option>
+                                    <option value="marriage_cert">结婚证</option>
+                                </select>
+                            </label>
+                        </div>
+                        <!-- 语言选项 -->
                         <div class="option-group">
                             <label>
                                 <i class="fas fa-language"></i> 源语言:
@@ -70,7 +81,8 @@
                                 </select>
                             </label>
                         </div>
-                        <div class="option-group">
+                        <!-- 身份证专用选项 -->
+                        <div class="option-group" id="idCardOptions">
                             <label>
                                 <i class="fas fa-id-card"></i> 证件面:
                                 <select id="cardSide">
@@ -79,11 +91,45 @@
                                 </select>
                             </label>
                         </div>
+                        <!-- 结婚证专用选项 -->
+                        <div class="option-group mc-options-group" id="marriageCertOptions" style="display: none;">
+                            <div class="mc-options-title">
+                                <i class="fas fa-cogs"></i> 结婚证处理选项
+                            </div>
+                            <div class="mc-options-grid">
+                                <label class="mc-number">
+                                    <span><i class="fas fa-copy"></i> 模板页:</span>
+                                    <select id="marriagePageTemplate">
+                                        <option value="page1">第一页（封面）</option>
+                                        <option value="page2">第二页</option>
+                                        <option value="page3">第三页</option>
+                                    </select>
+                                    <small>按模板自动设置合并/重叠/冒号参数</small>
+                                </label>
+                                <label class="mc-checkbox">
+                                    <input type="checkbox" id="enableMerge" checked disabled>
+                                    <span><i class="fas fa-link"></i> 框体合并</span>
+                                    <small>连续文本框合并翻译</small>
+                                </label>
+                                <label class="mc-checkbox">
+                                    <input type="checkbox" id="enableOverlapFix" checked disabled>
+                                    <span><i class="fas fa-arrows-alt-h"></i> 重叠修正</span>
+                                    <small>自动检测并右移重叠框</small>
+                                </label>
+                                <label class="mc-checkbox">
+                                    <input type="checkbox" id="enableColonFix" disabled>
+                                    <span><i class="fas fa-text-width"></i> 冒号修正</span>
+                                    <small>为字段名自动添加冒号</small>
+                                </label>
+                                <label class="mc-number">
+                                    <span><i class="fas fa-text-height"></i> 字体大小:</span>
+                                    <input type="number" id="fontSize" value="18" min="8" max="30" step="1">
+                                    <small>像素(px)，建议 8-30</small>
+                                </label>
+                            </div>
+                        </div>
+                        <!-- 通用选项 -->
                         <div class="option-group checkbox-group">
-                            <label>
-                                <input type="checkbox" id="enableCorrection" checked>
-                                <i class="fas fa-adjust"></i> 启用透视矫正
-                            </label>
                             <label>
                                 <input type="checkbox" id="enableVisualization" checked>
                                 <i class="fas fa-eye"></i> 生成可视化图片

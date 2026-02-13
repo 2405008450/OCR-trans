@@ -1008,8 +1008,14 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, 
         is_english = all(ord(c) < 128 or c.isspace() for c in text)
         font_path = font_en_path if is_english else font_zh_path
 
-        font_size = 24
-        min_font_size = 12
+        # 背面大标题（中华人民共和国、居民身份证）按 original_text 识别：加大字号并框内居中
+        is_fixed_title = original_text in ("中华人民共和国", "居民身份证")
+        if is_fixed_title:
+            font_size = 36
+            min_font_size = 20
+        else:
+            font_size = 24
+            min_font_size = 12
         best_font = None
 
         while font_size >= min_font_size:
@@ -1068,18 +1074,35 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, 
 
         total_text_height = len(lines) * line_height
 
-        y_start = y3 - total_text_height
-        if y_start < y1:
-            y_start = y1
+        if is_fixed_title:
+            # 框内垂直居中
+            y_start = y1 + (box_height - total_text_height) / 2
+            y_start = max(y1, min(y_start, y3 - total_text_height))
+        else:
+            y_start = y3 - total_text_height
+            if y_start < y1:
+                y_start = y1
 
         for i, line in enumerate(lines):
             y_line = y_start + i * line_height
-            try:
-                draw.text((int(x1), int(y_line)), line, font=best_font, fill=(0, 0, 0))
-            except AttributeError:
-                # 如果getmask2方法不存在，尝试不使用font参数
+            if is_fixed_title:
                 try:
-                    draw.text((int(x1), int(y_line)), line, fill=(0, 0, 0))
+                    lb = draw.textbbox((0, 0), line, font=best_font)
+                    line_w = lb[2] - lb[0]
+                except AttributeError:
+                    try:
+                        line_w = best_font.getsize(line)[0]
+                    except Exception:
+                        line_w = box_width // 2
+                x_line = x1 + (box_width - line_w) / 2
+                draw_x, draw_y = int(x_line), int(y_line)
+            else:
+                draw_x, draw_y = int(x1), int(y_line)
+            try:
+                draw.text((draw_x, draw_y), line, font=best_font, fill=(0, 0, 0))
+            except AttributeError:
+                try:
+                    draw.text((draw_x, draw_y), line, fill=(0, 0, 0))
                 except Exception as e:
                     print(f"⚠️ 绘制文本失败: {line}, 错误: {e}")
                     continue
@@ -1186,6 +1209,118 @@ def draw_visualization(img_path: str, items: List[Dict], save_path: str = None) 
 
 
 # -----------------------------
+# 水印
+# -----------------------------
+WATERMARK_LINES = [
+    "Translated by Synergy Translations",
+    "广州信实翻译服务有限公司",
+]
+WATERMARK_ALPHA = 255  # 0-255，越小越透明
+WATERMARK_FONT_SIZE = 24
+WATERMARK_RIGHT_PADDING = 28   # 距右边距（像素）
+WATERMARK_BOTTOM_PADDING = 28  # 距下边距（像素），水印整体靠右下角
+
+
+def _get_watermark_font_italic():
+    """仅用于英文的斜体（不含中文，避免乱码）。"""
+    paths = [
+        "C:/Windows/Fonts/ariali.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, WATERMARK_FONT_SIZE)
+            except Exception:
+                continue
+    return None
+
+
+def _get_watermark_font_cjk():
+    """支持中文的水印字体（用于中文行，或斜体不可用时的回退）。"""
+    paths = [
+        "C:/Windows/Fonts/simhei.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, WATERMARK_FONT_SIZE)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def add_watermark(img_path: str, output_path: str = None) -> Optional[str]:
+    """
+    在图片右下角添加半透明文字水印，支持中英文。直接覆盖原图或保存到 output_path。
+    """
+    if output_path is None:
+        output_path = img_path
+    try:
+        img = Image.open(img_path).convert("RGBA")
+    except Exception as e:
+        print(f"⚠️ 水印：无法打开图片 {img_path}: {e}")
+        return None
+    w, h = img.size
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    font_italic = _get_watermark_font_italic()
+    font_cjk = _get_watermark_font_cjk()
+
+    def _font_for_line(line):
+        """英文用斜体，含中文用 CJK 字体，避免中文乱码。"""
+        if font_italic and all(ord(c) < 128 or c.isspace() for c in line):
+            return font_italic
+        return font_cjk
+
+    def _line_size(draw_obj, line, font):
+        try:
+            bbox = draw_obj.textbbox((0, 0), line, font=font)
+            return bbox[2] - bbox[0], bbox[3] - bbox[1]
+        except AttributeError:
+            try:
+                sz = draw_obj.textsize(line, font=font)
+                return sz[0], sz[1]
+            except Exception:
+                return 50, 20
+
+    # 按行选字体，计算每行宽高
+    line_heights = []
+    line_widths = []
+    for line in WATERMARK_LINES:
+        f = _font_for_line(line)
+        lw, lh = _line_size(draw, line, f)
+        line_widths.append(lw)
+        line_heights.append(lh)
+    total_height = sum(line_heights) + 4
+    # 靠右下角：右对齐、底对齐
+    y_start = h - total_height - WATERMARK_BOTTOM_PADDING
+    y_start = max(10, y_start)
+
+    color = (255, 0, 0, WATERMARK_ALPHA)  # 红色半透明
+    for i, line in enumerate(WATERMARK_LINES):
+        font = _font_for_line(line)
+        x = w - line_widths[i] - WATERMARK_RIGHT_PADDING
+        y = y_start + (sum(line_heights[:i]) + 4 * i)
+        try:
+            draw.text((x, y), line, font=font, fill=color)
+        except Exception:
+            draw.text((x, y), line, fill=color)
+
+    out = Image.alpha_composite(img, overlay)
+    out_rgb = out.convert("RGB")
+    out_rgb.save(output_path, "JPEG", quality=95)
+    print(f"✅ 水印已添加: {output_path}")
+    return output_path
+
+
+# -----------------------------
 # 主处理函数
 # -----------------------------
 def process_image(
@@ -1193,7 +1328,7 @@ def process_image(
     output_dir: str = None,
     from_lang: str = 'zh',
     to_lang: str = 'en',
-    enable_correction: bool = True,
+    enable_correction: bool = False,
     enable_visualization: bool = True,
     card_side: str = 'front'
 ) -> Dict[str, Any]:
@@ -1205,7 +1340,7 @@ def process_image(
         output_dir: 输出目录
         from_lang: 源语言
         to_lang: 目标语言
-        enable_correction: 是否启用透视矫正
+        enable_correction: 是否启用透视矫正（已停用，仅兼容旧参数）
         enable_visualization: 是否生成可视化图片
         card_side: 证件面，'front'=正面（自动换行），'back'=背面（不换行）
     
@@ -1223,14 +1358,12 @@ def process_image(
     print(f"🚀 开始处理图片 | card_side={card_side} | auto_wrap={card_side != 'back'}")
     print("=" * 60)
 
-    # 步骤0: 图像预处理
-    print("\n🔨 步骤0: 图像标准化处理...")
-    img_path = preprocess_resize_image(input_path, target_width=settings.TARGET_IMAGE_WIDTH)
-
-    # 步骤0.5: 透视矫正（可选）
+    # 步骤0: 直接使用原图，避免预处理导致清晰度下降
+    # 说明：历史上这里会做缩放和透视矫正，可能引入模糊，影响OCR效果。
+    # 现改为默认走原图处理；enable_correction 参数保留仅为兼容旧接口，不再执行矫正。
+    img_path = input_path
     if enable_correction:
-        print("\n📐 步骤0.5: 透视矫正...")
-        img_path = auto_correct_perspective(img_path)
+        print("\nℹ️ 透视矫正步骤已停用，为保证清晰度将直接使用原图。")
 
     # 步骤1: OCR识别
     print("\n📷 步骤1: OCR 识别中...")
@@ -1239,12 +1372,10 @@ def process_image(
     except (AttributeError, NotImplementedError):
         result = ocr.ocr(img_path)  # PaddleOCR 2.x 降级兼容
 
-    # 步骤1.5: 可视化（优先使用 PaddleOCR 原生 save_to_img，无则用自绘）
+    # 步骤1.5: 可视化（仅使用 PaddleOCR 原生 save_to_img）
     vis_path = None
     if enable_visualization:
         vis_path = _try_paddle_vis(result, img_path, output_dir)
-        if vis_path is None:
-            pass  # 稍后在步骤5用 draw_visualization 补
 
     # 步骤2: 提取文本
     print("📝 步骤2: 提取文本...")
@@ -1270,11 +1401,9 @@ def process_image(
         json.dump(items, f, ensure_ascii=False, indent=4)
     print(f"   原始OCR结果已保存: {out_json}")
 
-    # 步骤5: 可视化（若步骤1.5未得到原生图则用自绘）
+    # 步骤5: 不再使用 OpenCV/PIL 自绘可视化，仅保留 PaddleOCR 原生可视化
     if enable_visualization and vis_path is None:
-        print("\n📊 步骤5: 生成分割可视化（备用）...")
-        vis_path = draw_visualization(img_path, items,
-                                      save_path=os.path.join(output_dir, f"{base_name}_vis.jpg"))
+        print("\n⚠️ 未生成 PaddleOCR 原生可视化图片（期望文件: *_ocr_res_img.jpg）")
 
     # 步骤6: 翻译
     if card_side == 'back':
@@ -1315,6 +1444,10 @@ def process_image(
         translated_items,
         output_path=os.path.join(output_dir, f"{base_name}_translated.jpg")
     )
+
+    # 步骤8: 添加水印
+    if output_img:
+        add_watermark(output_img)
 
     print("\n" + "=" * 60)
     print("✅ 全部完成！")
