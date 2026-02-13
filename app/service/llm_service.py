@@ -35,7 +35,7 @@ async def run_llm_task(
         enable_visualization: 是否生成可视化图片
         card_side: 证件面，'front'=正面，'back'=背面（仅身份证有效）
         doc_type: 证件类型，'id_card'=身份证，'marriage_cert'=结婚证
-        marriage_page_template: [结婚证] 模板页，'page2' 或 'page3'
+        marriage_page_template: [结婚证] 模板页，'page1' / 'page2' / 'page3'
         enable_merge: [结婚证] 框体合并开关
         enable_overlap_fix: [结婚证] 重叠修正开关
         enable_colon_fix: [结婚证] 冒号修正开关

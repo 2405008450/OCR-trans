@@ -14,7 +14,7 @@ async def run_task(
     enable_visualization: bool = Query(True, description="是否生成可视化图片"),
     card_side: str = Query("front", description="[身份证] 证件面: 'front'=正面, 'back'=背面"),
     doc_type: str = Query("id_card", description="证件类型: 'id_card'=身份证, 'marriage_cert'=结婚证"),
-    marriage_page_template: str = Query("page2", description="[结婚证] 模板页: 'page2'=第二页, 'page3'=第三页"),
+    marriage_page_template: str = Query("page2", description="[结婚证] 模板页: 'page1'=第一页, 'page2'=第二页, 'page3'=第三页"),
     enable_merge: bool = Query(True, description="[结婚证] 框体合并: True=连续文本框合并翻译, False=每个框单独翻译"),
     enable_overlap_fix: bool = Query(True, description="[结婚证] 重叠修正: True=自动检测并右移重叠框, False=保持原位"),
     enable_colon_fix: bool = Query(True, description="[结婚证] 冒号修正: True=为字段名自动添加冒号, False=保持原样"),
