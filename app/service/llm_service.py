@@ -100,6 +100,15 @@ async def run_llm_task(
                 enable_overlap_fix = True
                 enable_colon_fix = False
 
+            # 手动输入元素仅第一页生效，第二/三页强制忽略
+            if template != 'page1':
+                registrar_signature_text = None
+                registered_by_text = None
+                registered_by_offset_x = 0
+                registered_by_offset_y = 0
+                registrar_signature_offset_x = 36
+                registrar_signature_offset_y = -12
+
             print(
                 f"结婚证模板: {template} | "
                 f"merge={enable_merge}, overlap_fix={enable_overlap_fix}, "
