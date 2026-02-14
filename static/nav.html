@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>业务导航</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 16px;
+    }
+    .title {
+      color: #fff;
+      text-align: center;
+      margin-bottom: 24px;
+      font-size: 32px;
+      font-weight: 700;
+    }
+    .subtitle {
+      color: rgba(255, 255, 255, 0.9);
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .card {
+      border-radius: 12px;
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .desc {
+      color: #64748b;
+      margin-bottom: 14px;
+      line-height: 1.65;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="wrap">
+    <div class="title">业务导航中心</div>
+    <div class="subtitle">选择要进入的处理模块</div>
+
+    <el-row :gutter="16">
+      <el-col :xs="24" :md="12">
+        <el-card class="card">
+          <template #header>
+            <strong>证件 OCR 翻译</strong>
+          </template>
+          <div class="desc">
+            身份证、结婚证图片识别与翻译模块，支持模板页、人工补填等能力。
+          </div>
+          <div class="actions">
+            <el-button type="primary" @click="go('/ocr')">进入 OCR 页面</el-button>
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :md="12">
+        <el-card class="card">
+          <template #header>
+            <strong>数字专检</strong>
+          </template>
+          <div class="desc">
+            上传原文与译文 DOCX，执行数值对比、自动修复与批注，输出修复文档和报告。
+          </div>
+          <div class="actions">
+            <el-button type="success" @click="go('/number-check')">进入数字专检</el-button>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus/dist/index.full.min.js"></script>
+  <script>
+    const { createApp } = Vue;
+    createApp({
+      methods: {
+        go(path) {
+          window.location.href = path;
+        }
+      }
+    }).use(ElementPlus).mount('#app');
+  </script>
+</body>
+</html>
