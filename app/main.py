@@ -52,15 +52,33 @@ if TEMP_IMAGES_DIR.exists():
 # 注册任务路由
 app.include_router(task.router)
 
-# 根路径返回前端页面
+# 根路径返回导航页面（Element Plus）
 @app.get("/", response_class=HTMLResponse)
 async def root():
+    nav_file = STATIC_DIR / "nav.html"
+    if nav_file.exists():
+        with open(nav_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return f"<h1>错误：找不到 nav.html</h1><p>路径: {nav_file}</p>"
+
+
+# OCR 页面
+@app.get("/ocr", response_class=HTMLResponse)
+async def ocr_page():
     index_file = STATIC_DIR / "index.html"
     if index_file.exists():
         with open(index_file, "r", encoding="utf-8") as f:
             return f.read()
-    else:
-        return f"<h1>错误：找不到 index.html</h1><p>路径: {index_file}</p>"
+    return f"<h1>错误：找不到 index.html</h1><p>路径: {index_file}</p>"
+
+
+@app.get("/number-check", response_class=HTMLResponse)
+async def number_check_page():
+    page_file = STATIC_DIR / "number_check.html"
+    if page_file.exists():
+        with open(page_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return f"<h1>错误：找不到 number_check.html</h1><p>路径: {page_file}</p>"
 
 # 启动（一条命令，局域网访问 http://192.168.31.125:8001）：
 #   python -m app.main

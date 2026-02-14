@@ -1,6 +1,8 @@
 import traceback
-from fastapi import APIRouter, UploadFile, File, Query, HTTPException
+import asyncio
+from fastapi import APIRouter, UploadFile, File, Query, HTTPException, BackgroundTasks
 from app.service.llm_service import run_llm_task
+from app.service.number_check_service import run_number_check_task, _get_task_progress
 from typing import Optional
 
 router = APIRouter(prefix="/task", tags=["Task"])
@@ -82,3 +84,89 @@ async def run_task(
                 "traceback": tb.split("\n")[-10:] if tb else []  # 最后10行便于排查
             }
         )
+
+
+@router.post("/number-check")
+async def run_number_check(
+    background_tasks: BackgroundTasks,
+    original_file: UploadFile = File(..., description="原文 docx"),
+    translated_file: UploadFile = File(..., description="译文 docx"),
+):
+    """
+    数值专检：上传原文/译文 docx，生成修复后的译文与对比报告。
+    任务在后台异步执行，返回 task_id 用于查询进度和结果。
+    """
+    import uuid
+    from pathlib import Path
+    from app.core.config import settings
+
+    task_id = str(uuid.uuid4())
+
+    # 先保存文件
+    upload_dir = Path(settings.UPLOAD_DIR) / "number_check"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    original_path = upload_dir / f"{task_id}_original.docx"
+    translated_path = upload_dir / f"{task_id}_translated.docx"
+
+    # 读取并保存文件内容（需要await）
+    original_content = await original_file.read()
+    translated_content = await translated_file.read()
+
+    with open(original_path, "wb") as f:
+        f.write(original_content)
+    with open(translated_path, "wb") as f:
+        f.write(translated_content)
+
+    # 创建后台任务
+    async def run_task_in_background():
+        try:
+            # 重新读取文件
+            from fastapi import UploadFile
+            with open(original_path, "rb") as f:
+                original_bytes = f.read()
+            with open(translated_path, "rb") as f:
+                translated_bytes = f.read()
+
+            # 创建临时的UploadFile对象
+            import io
+            original_upload = UploadFile(
+                filename=original_file.filename,
+                file=io.BytesIO(original_bytes)
+            )
+            translated_upload = UploadFile(
+                filename=translated_file.filename,
+                file=io.BytesIO(translated_bytes)
+            )
+
+            await run_number_check_task(original_upload, translated_upload)
+        except Exception as e:
+            # 标记任务失败
+            from app.service.number_check_service import _complete_task
+            tb = traceback.format_exc()
+            print("=" * 60)
+            print("数字专检后台任务失败:")
+            print(tb)
+            print("=" * 60)
+            _complete_task(task_id, error=str(e))
+
+    background_tasks.add_task(run_task_in_background)
+
+    # 立即返回task_id，让前端开始轮询
+    return {
+        "status": "ACCEPTED",
+        "task_id": task_id,
+        "message": "任务已提交，正在后台处理"
+    }
+
+
+@router.get("/number-check/status/{task_id}")
+async def get_number_check_status(task_id: str):
+    """
+    查询数值专检任务状态和进度
+    """
+    progress = _get_task_progress(task_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+
+    return progress
