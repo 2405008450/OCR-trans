@@ -139,7 +139,7 @@ async def run_number_check(
                 file=io.BytesIO(translated_bytes)
             )
 
-            await run_number_check_task(original_upload, translated_upload)
+            await run_number_check_task(original_upload, translated_upload, task_id=task_id)
         except Exception as e:
             # 标记任务失败
             from app.service.number_check_service import _complete_task

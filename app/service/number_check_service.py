@@ -161,6 +161,7 @@ def _apply_all_fixes(
 async def run_number_check_task(
     original_file: UploadFile,
     translated_file: UploadFile,
+    task_id: str = "",
 ) -> Dict[str, Any]:
     """
     数值专检流程：
@@ -173,7 +174,8 @@ async def run_number_check_task(
     _validate_docx(original_file, "原文")
     _validate_docx(translated_file, "译文")
 
-    task_id = str(uuid.uuid4())
+    if not task_id:
+        task_id = str(uuid.uuid4())
 
     # 初始化进度跟踪（7个主要步骤）
     _init_task_progress(task_id, total_steps=7)
