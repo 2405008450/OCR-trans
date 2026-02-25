@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多语对照记忆 - 文档对齐工具</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .options-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.25rem;
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            background: var(--bg-color);
+            border-radius: 0.75rem;
+        }
+        .option-group.full-width {
+            grid-column: 1 / -1;
+        }
+        .option-group label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+        }
+        .option-group select,
+        .option-group input[type="file"] {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            font-size: 0.95rem;
+            background: #fff;
+        }
+        .option-group select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+        }
+        .checkbox-inline {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+        .checkbox-inline input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        .model-desc {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+        .result-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .summary-card {
+            background: var(--card-bg);
+            padding: 1.25rem;
+            border-radius: 0.75rem;
+            box-shadow: var(--shadow-md);
+            text-align: center;
+        }
+        .summary-card i {
+            font-size: 1.5rem;
+            color: var(--primary-color);
+            margin-bottom: 0.4rem;
+        }
+        .summary-card h3 {
+            font-size: 1.6rem;
+            margin-bottom: 0.15rem;
+        }
+        .summary-card p {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        .issues-list {
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        .issues-list h4 {
+            color: #92400e;
+            margin-bottom: 0.5rem;
+        }
+        .issues-list ul {
+            padding-left: 1.25rem;
+            color: #78350f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-language"></i>
+                <h1>多语对照记忆</h1>
+            </div>
+            <p class="subtitle">上传原文与译文文档，AI 自动句级对齐，输出 Excel 双语对照表</p>
+        </header>
+
+        <main class="main-content">
+            <!-- 上传区 -->
+            <section class="upload-section" id="uploadSection">
+                <div class="upload-card">
+                    <h2>上传待对齐文档</h2>
+                    <p class="upload-desc">支持 DOCX / PPTX / XLSX，需同时上传原文和译文</p>
+
+                    <div class="options-panel">
+                        <div class="option-group full-width">
+                            <label><i class="fas fa-file-alt"></i> 原文文件:</label>
+                            <input type="file" id="originalFile" accept=".docx,.pptx,.xlsx,.xls">
+                        </div>
+                        <div class="option-group full-width">
+                            <label><i class="fas fa-file-alt"></i> 译文文件:</label>
+                            <input type="file" id="translatedFile" accept=".docx,.pptx,.xlsx,.xls">
+                        </div>
+
+                        <div class="option-group">
+                            <label><i class="fas fa-globe"></i> 原文语言:</label>
+                            <select id="sourceLang"></select>
+                        </div>
+                        <div class="option-group">
+                            <label><i class="fas fa-globe-americas"></i> 译文语言:</label>
+                            <select id="targetLang"></select>
+                        </div>
+
+                        <div class="option-group">
+                            <label><i class="fas fa-robot"></i> 模型选择:</label>
+                            <select id="modelSelect"></select>
+                            <div class="model-desc" id="modelDesc"></div>
+                        </div>
+                        <div class="option-group" style="display:flex;align-items:flex-end;">
+                            <label class="checkbox-inline">
+                                <input type="checkbox" id="enablePostSplit" checked>
+                                <span>启用后处理细粒度分句</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 12px;">
+                        <button class="btn-secondary" onclick="window.location.href='/'">
+                            <i class="fas fa-arrow-left"></i> 返回导航
+                        </button>
+                        <button class="btn-primary" id="btnStart" style="max-width: 360px;">
+                            <i class="fas fa-play"></i> 开始对齐
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 处理中 -->
+            <section class="processing-section" id="processingSection" style="display: none;">
+                <div class="processing-card">
+                    <div class="spinner"></div>
+                    <h2 id="processingTitle">文档对齐处理中...</h2>
+                    <p id="processingText">正在调用 AI 进行句级对齐</p>
+                    <div class="progress-container" style="margin-top: 24px;">
+                        <div class="progress-bar-wrapper">
+                            <div class="progress-bar" id="progressBar">
+                                <span id="progressPercent" class="progress-percent">0%</span>
+                            </div>
+                        </div>
+                        <div class="progress-details" id="progressDetails">
+                            <p id="progressStep">初始化...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 结果 -->
+            <section class="result-section" id="resultSection" style="display: none;">
+                <div class="result-header">
+                    <h2><i class="fas fa-check-circle"></i> 对齐完成</h2>
+                    <button class="btn-secondary" id="btnReset">
+                        <i class="fas fa-rotate-right"></i> 重新开始
+                    </button>
+                </div>
+                <div class="result-summary" id="resultSummary"></div>
+                <div class="result-grid" id="resultGrid"></div>
+            </section>
+        </main>
+    </div>
+    <script src="/static/alignment.js"></script>
+</body>
+</html>

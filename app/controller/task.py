@@ -1,8 +1,13 @@
+import os
 import traceback
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, BackgroundTasks
 from app.service.llm_service import run_llm_task
 from app.service.number_check_service import run_number_check_task, _get_task_progress
+from app.service.alignment_service import (
+    run_alignment_task, get_alignment_progress, _complete_task as _alignment_complete_task,
+    AVAILABLE_MODELS as ALIGNMENT_MODELS, SUPPORTED_LANGUAGES,
+)
 from typing import Optional
 
 router = APIRouter(prefix="/task", tags=["Task"])
@@ -169,4 +174,92 @@ async def get_number_check_status(task_id: str):
     if not progress:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
 
+    return progress
+
+
+# ── 多语对照记忆 ──────────────────────────────────────────
+
+@router.get("/alignment/config")
+async def get_alignment_config():
+    """返回可用模型和语言列表"""
+    return {
+        "models": {k: v["description"] for k, v in ALIGNMENT_MODELS.items()},
+        "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()},
+    }
+
+
+@router.post("/alignment")
+async def run_alignment(
+    background_tasks: BackgroundTasks,
+    original_file: UploadFile = File(..., description="原文文件 (docx/pptx/xlsx)"),
+    translated_file: UploadFile = File(..., description="译文文件 (docx/pptx/xlsx)"),
+    source_lang: str = Query("中文", description="原文语言"),
+    target_lang: str = Query("英语", description="译文语言"),
+    model_name: str = Query("Google Gemini 2.5 Flash", description="模型名称"),
+    enable_post_split: bool = Query(True, description="启用后处理细粒度分句"),
+):
+    """
+    多语对照记忆：上传原文/译文文档，通过 LLM 进行句级对齐，输出 Excel。
+    支持 DOCX / PPTX / XLSX 格式。
+    """
+    import uuid
+    from pathlib import Path
+    from app.core.config import settings
+
+    allowed_ext = {'.docx', '.pptx', '.xlsx', '.xls'}
+    orig_ext = os.path.splitext(original_file.filename or "")[1].lower()
+    trans_ext = os.path.splitext(translated_file.filename or "")[1].lower()
+
+    if orig_ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"不支持的原文文件格式: {orig_ext}")
+    if trans_ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"不支持的译文文件格式: {trans_ext}")
+
+    task_id = str(uuid.uuid4())
+
+    upload_dir = Path(settings.UPLOAD_DIR) / "alignment"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    original_path = upload_dir / f"{task_id}_original{orig_ext}"
+    translated_path = upload_dir / f"{task_id}_translated{trans_ext}"
+
+    original_content = await original_file.read()
+    translated_content = await translated_file.read()
+
+    with open(original_path, "wb") as f:
+        f.write(original_content)
+    with open(translated_path, "wb") as f:
+        f.write(translated_content)
+
+    async def run_task_in_background():
+        try:
+            await run_alignment_task(
+                original_path=str(original_path),
+                translated_path=str(translated_path),
+                task_id=task_id,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                model_name=model_name,
+                enable_post_split=enable_post_split,
+            )
+        except Exception as e:
+            tb = traceback.format_exc()
+            print(f"对齐后台任务失败:\n{tb}")
+            _alignment_complete_task(task_id, error=str(e))
+
+    background_tasks.add_task(run_task_in_background)
+
+    return {
+        "status": "ACCEPTED",
+        "task_id": task_id,
+        "message": "对齐任务已提交，正在后台处理",
+    }
+
+
+@router.get("/alignment/status/{task_id}")
+async def get_alignment_status(task_id: str):
+    """查询对齐任务状态和进度"""
+    progress = get_alignment_progress(task_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return progress

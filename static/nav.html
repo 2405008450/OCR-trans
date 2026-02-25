@@ -13,7 +13,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     .wrap {
-      max-width: 960px;
+      max-width: 1200px;
       margin: 0 auto;
       padding: 48px 16px;
     }
@@ -51,7 +51,7 @@
     <div class="subtitle">选择要进入的处理模块</div>
 
     <el-row :gutter="16">
-      <el-col :xs="24" :md="12">
+      <el-col :xs="24" :md="8">
         <el-card class="card">
           <template #header>
             <strong>证件 OCR 翻译</strong>
@@ -65,7 +65,7 @@
         </el-card>
       </el-col>
 
-      <el-col :xs="24" :md="12">
+      <el-col :xs="24" :md="8">
         <el-card class="card">
           <template #header>
             <strong>数字专检</strong>
@@ -75,6 +75,20 @@
           </div>
           <div class="actions">
             <el-button type="success" @click="go('/number-check')">进入数字专检</el-button>
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :md="8">
+        <el-card class="card">
+          <template #header>
+            <strong>多语对照记忆</strong>
+          </template>
+          <div class="desc">
+            上传原文与译文文档（DOCX/PPTX/Excel），AI 自动句级对齐，输出双语对照 Excel。
+          </div>
+          <div class="actions">
+            <el-button type="warning" @click="go('/alignment')">进入对照记忆</el-button>
           </div>
         </el-card>
       </el-col>
