@@ -6,7 +6,7 @@ from app.service.llm_service import run_llm_task
 from app.service.number_check_service import run_number_check_task, _get_task_progress
 from app.service.alignment_service import (
     run_alignment_task, get_alignment_progress, _complete_task as _alignment_complete_task,
-    AVAILABLE_MODELS as ALIGNMENT_MODELS, SUPPORTED_LANGUAGES,
+    AVAILABLE_MODELS as ALIGNMENT_MODELS, SUPPORTED_LANGUAGES, THRESHOLD_MAP, BUFFER_CHARS,
 )
 from typing import Optional
 
@@ -181,32 +181,49 @@ async def get_number_check_status(task_id: str):
 
 @router.get("/alignment/config")
 async def get_alignment_config():
-    """返回可用模型和语言列表"""
+    """返回可用模型、语言列表、阈值默认值"""
     return {
-        "models": {k: v["description"] for k, v in ALIGNMENT_MODELS.items()},
+        "models": {
+            name: {
+                "description": info["description"],
+                "id": info["id"],
+                "max_output": info["max_output"],
+            }
+            for name, info in ALIGNMENT_MODELS.items()
+        },
         "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()},
+        "thresholds": THRESHOLD_MAP,
+        "buffer_chars": BUFFER_CHARS,
     }
 
 
 @router.post("/alignment")
 async def run_alignment(
     background_tasks: BackgroundTasks,
-    original_file: UploadFile = File(..., description="原文文件 (docx/pptx/xlsx)"),
-    translated_file: UploadFile = File(..., description="译文文件 (docx/pptx/xlsx)"),
+    original_file: UploadFile = File(..., description="原文文件 (docx/doc/pptx/xlsx/xls)"),
+    translated_file: UploadFile = File(..., description="译文文件 (docx/doc/pptx/xlsx/xls)"),
     source_lang: str = Query("中文", description="原文语言"),
     target_lang: str = Query("英语", description="译文语言"),
     model_name: str = Query("Google Gemini 2.5 Flash", description="模型名称"),
     enable_post_split: bool = Query(True, description="启用后处理细粒度分句"),
+    threshold_2: int = Query(25000, description="分割阈值 2 份"),
+    threshold_3: int = Query(50000, description="分割阈值 3 份"),
+    threshold_4: int = Query(75000, description="分割阈值 4 份"),
+    threshold_5: int = Query(100000, description="分割阈值 5 份"),
+    threshold_6: int = Query(125000, description="分割阈值 6 份"),
+    threshold_7: int = Query(150000, description="分割阈值 7 份"),
+    threshold_8: int = Query(175000, description="分割阈值 8 份"),
+    buffer_chars: int = Query(2000, description="缓冲区字数"),
 ):
     """
     多语对照记忆：上传原文/译文文档，通过 LLM 进行句级对齐，输出 Excel。
-    支持 DOCX / PPTX / XLSX 格式。
+    支持 DOCX / DOC / PPTX / XLSX / XLS 格式。
     """
     import uuid
     from pathlib import Path
     from app.core.config import settings
 
-    allowed_ext = {'.docx', '.pptx', '.xlsx', '.xls'}
+    allowed_ext = {'.docx', '.doc', '.pptx', '.xlsx', '.xls'}
     orig_ext = os.path.splitext(original_file.filename or "")[1].lower()
     trans_ext = os.path.splitext(translated_file.filename or "")[1].lower()
 
@@ -241,6 +258,14 @@ async def run_alignment(
                 target_lang=target_lang,
                 model_name=model_name,
                 enable_post_split=enable_post_split,
+                threshold_2=threshold_2,
+                threshold_3=threshold_3,
+                threshold_4=threshold_4,
+                threshold_5=threshold_5,
+                threshold_6=threshold_6,
+                threshold_7=threshold_7,
+                threshold_8=threshold_8,
+                buffer_chars=buffer_chars,
             )
         except Exception as e:
             tb = traceback.format_exc()

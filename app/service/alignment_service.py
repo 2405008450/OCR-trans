@@ -9,6 +9,7 @@ import shutil
 import asyncio
 import uuid
 import traceback
+import threading
 import importlib.util
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +44,11 @@ AVAILABLE_MODELS = {
         "description": "建议先检查文章是否有目录，先将目录删除再处理",
         "max_output": 65536,
     },
+        "Google gemini-3-flash-preview": {
+        "id": "google/gemini-3-flash-preview",
+        "description": "建议先检查文章是否有目录，先将目录删除再处理",
+        "max_output": 65536,
+    },
     "Google Gemini 2.5 Pro": {
         "id": "google/gemini-2.5-pro",
         "description": "PPT推荐-增强，速度稍慢，100万上下文，65K输出",
@@ -50,6 +56,11 @@ AVAILABLE_MODELS = {
     },
     "Google: Gemini 3 Pro Preview": {
         "id": "google/gemini-3-pro-preview",
+        "description": "最强推理，100万上下文，65K输出",
+        "max_output": 65536,
+    },
+        "Google: google/gemini-3.1-pro-preview": {
+        "id": "google/gemini-3.1-pro-preview",
         "description": "最强推理，100万上下文，65K输出",
         "max_output": 65536,
     },
@@ -80,6 +91,8 @@ SUPPORTED_LANGUAGES = {
 # ── 进度追踪 ──────────────────────────────────────────────
 _task_progress: dict = {}
 _memory_module = None
+# 当前执行任务的 task_id，用于将 memory 的 log_stream 写入该任务的 stream_log
+_stream_task_id = threading.local()
 
 
 def _get_memory_module():
@@ -98,18 +111,30 @@ def _get_memory_module():
 
 
 def _update_progress(task_id: str, progress: int, message: str, **extra):
-    _task_progress[task_id] = {
+    data = {
         "status": "processing",
         "progress": progress,
         "message": message,
         **extra,
     }
+    # 保留已有 stream_log，避免被覆盖
+    if task_id in _task_progress and "stream_log" in _task_progress[task_id]:
+        data.setdefault("stream_log", _task_progress[task_id]["stream_log"])
+    _task_progress[task_id] = data
 
 
 def _complete_task(task_id: str, *, result: dict = None, error: str = None):
     if error:
-        _task_progress[task_id] = {"status": "failed", "progress": 100, "message": "处理失败", "error": error}
+        stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
+        _task_progress[task_id] = {
+            "status": "failed", "progress": 100, "message": "处理失败", "error": error,
+            "stream_log": stream_log,
+        }
     else:
+        stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
+        if result is not None:
+            result = dict(result)
+            result["stream_log"] = stream_log
         _task_progress[task_id] = {"status": "done", "progress": 100, "message": "处理完成", "result": result}
 
 
@@ -519,23 +544,21 @@ def _read_full_docx(file_path: str) -> str:
         full_text = []
         consecutive_empty = 0
 
-        # 1. 按文档顺序遍历所有元素（段落和表格）
+        # 1. 按文档顺序遍历所有元素（段落和表格），含 sdt 内容控件内元素
         if hasattr(doc, 'element') and hasattr(doc.element, 'body'):
-            for child in doc.element.body.iterchildren():
-                if child.tag.endswith('p'):
-                    para = Paragraph(child, doc)
-                    if para.text.strip():
-                        full_text.append(para.text)
+            for elem_type, elem in _iter_body_elements(doc.element.body, doc):
+                if elem_type == 'p':
+                    if elem.text.strip():
+                        full_text.append(elem.text)
                         consecutive_empty = 0
                     else:
                         consecutive_empty += 1
                         if consecutive_empty <= 2 and full_text:
                             full_text.append("")
-                elif child.tag.endswith('tbl'):
+                elif elem_type == 'tbl':
                     consecutive_empty = 0
-                    table = Table(child, doc)
                     seen_cells = set()
-                    for row in table.rows:
+                    for row in elem.rows:
                         for cell in row.cells:
                             cell_text = cell.text.strip()
                             if cell_text and cell_text not in seen_cells:
@@ -1454,7 +1477,7 @@ def _run_single_alignment(orig_path, trans_path, output_path, model_id,
     return True
 
 
-# ── 同步主处理（在线程池中执行）─────────────────────────
+# ── 同步主处理（1:1 复刻 memory.py GUI 的 run_processing）─────
 def _run_alignment_sync(
     original_path: str,
     translated_path: str,
@@ -1463,52 +1486,119 @@ def _run_alignment_sync(
     target_lang: str,
     model_name: str,
     enable_post_split: bool,
+    threshold_2: int = 25000,
+    threshold_3: int = 50000,
+    threshold_4: int = 75000,
+    threshold_5: int = 100000,
+    threshold_6: int = 125000,
+    threshold_7: int = 150000,
+    threshold_8: int = 175000,
+    buffer_chars: int = 2000,
 ):
-    """同步执行对齐任务（由后台线程调用）"""
+    """同步执行对齐任务 - 直接调用 memory.py 原生函数，零 monkey-patch"""
+    memory_module = None
+    original_log_stream = None
+    original_log = None
+    original_log_exception = None
     try:
-        _update_progress(task_id, 5, "正在分析文档...")
+        _update_progress(task_id, 5, "正在加载处理引擎...", stream_log="")
 
         memory_module = _get_memory_module()
-        # Web 服务环境下覆盖输出目录与模型列表
-        memory_module.OUTPUT_DIR = OUTPUT_DIR
-        memory_module.AVAILABLE_MODELS = AVAILABLE_MODELS
-        memory_module.DEFAULT_MODEL = DEFAULT_MODEL
+
+        # 仅 patch log_stream 用于前端展示（不改任何处理逻辑）
+        _stream_task_id.task_id = task_id
+        original_log_stream = memory_module.log_manager.log_stream
+
+        def _patched_log_stream(content):
+            original_log_stream(content)
+            tid = getattr(_stream_task_id, "task_id", None)
+            if tid and tid in _task_progress:
+                cur = _task_progress[tid].get("stream_log", "")
+                _task_progress[tid]["stream_log"] = cur + (content if isinstance(content, str) else str(content))
+
+        memory_module.log_manager.log_stream = _patched_log_stream
+
+        # 也捕获 log 和 exception 到 stream_log
+        original_log = memory_module.log_manager.log
+        original_log_exception = memory_module.log_manager.log_exception
+
+        def _patched_log(message, level="INFO"):
+            original_log(message, level)
+            print(f"[memory-log] {message}")
+            tid = getattr(_stream_task_id, "task_id", None)
+            if tid and tid in _task_progress:
+                ts = datetime.now().strftime("%H:%M:%S")
+                line = f"[{ts}] {message}\n"
+                cur = _task_progress[tid].get("stream_log", "")
+                _task_progress[tid]["stream_log"] = cur + line
+
+        def _patched_log_exception(message, data=None):
+            original_log_exception(message, data)
+            print(f"[memory-ERR] {message}" + (f" | {str(data)[:300]}" if data else ""))
+            tid = getattr(_stream_task_id, "task_id", None)
+            if tid and tid in _task_progress:
+                ts = datetime.now().strftime("%H:%M:%S")
+                line = f"[{ts}] ⚠️ {message}"
+                if data:
+                    line += f" | {str(data)[:200]}"
+                cur = _task_progress[tid].get("stream_log", "")
+                _task_progress[tid]["stream_log"] = cur + line + "\n"
+
+        memory_module.log_manager.log = _patched_log
+        memory_module.log_manager.log_exception = _patched_log_exception
+
+        # 绝对路径
+        original_path = os.path.abspath(original_path)
+        translated_path = os.path.abspath(translated_path)
 
         model_info = AVAILABLE_MODELS.get(model_name, AVAILABLE_MODELS[DEFAULT_MODEL])
         model_id = model_info['id']
 
-        file_type = _get_file_type(original_path)
+        file_type = memory_module.get_file_type(original_path)
         base_name = os.path.splitext(os.path.basename(original_path))[0]
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
         task_dir = os.path.join(OUTPUT_DIR, "alignment", f"{base_name}_{timestamp}")
-        temp_dir = os.path.join(task_dir, "temp")
+        temp_dir = os.path.join(task_dir, "中间文件")
         os.makedirs(task_dir, exist_ok=True)
         os.makedirs(temp_dir, exist_ok=True)
 
-        print(f"[alignment] task_id={task_id}, file_type={file_type}")
-        print(f"[alignment] original={original_path}, exists={os.path.exists(original_path)}")
-        print(f"[alignment] translated={translated_path}, exists={os.path.exists(translated_path)}")
-        print(f"[alignment] model={model_name} ({model_id})")
+        print(f"[alignment] task_id={task_id}")
+        print(f"[alignment] original={original_path}, exists={os.path.exists(original_path)}, size={os.path.getsize(original_path) if os.path.exists(original_path) else 'N/A'}")
+        print(f"[alignment] translated={translated_path}, exists={os.path.exists(translated_path)}, size={os.path.getsize(translated_path) if os.path.exists(translated_path) else 'N/A'}")
+        print(f"[alignment] file_type={file_type}, model={model_name} ({model_id})")
         print(f"[alignment] lang: {source_lang} → {target_lang}")
-        print(f"[alignment] task_dir={task_dir}")
+        _patched_log(f"语言对: {source_lang} → {target_lang}")
+        _patched_log(f"后处理分句: {'启用' if enable_post_split else '禁用'}")
+        _patched_log(f"模型: {model_name} ({model_id})")
+        _patched_log(f"文件类型: {file_type.upper()}")
 
-        # Excel 双文件模式
+        _update_progress(task_id, 8, "正在分析文档...")
+
+        # .doc → .docx 转换
+        if file_type == 'doc':
+            _update_progress(task_id, 8, "检测到 .doc 文件，正在转换...")
+            converted_orig = memory_module.convert_doc_to_docx(original_path, temp_dir)
+            converted_trans = memory_module.convert_doc_to_docx(translated_path, temp_dir)
+            if converted_orig is None or converted_trans is None:
+                _complete_task(task_id, error="无法转换 .doc 文件，请安装 pywin32")
+                return
+            original_path = converted_orig
+            translated_path = converted_trans
+            file_type = 'docx'
+
+        # ── Excel 双文件模式 ──
         if file_type == 'excel':
             _update_progress(task_id, 10, "Excel 双文件对齐模式...")
             out_path = os.path.join(task_dir, f"{base_name}_对齐结果.xlsx")
             success = memory_module.process_excel_dual_file_alignment(
-                original_path,
-                translated_path,
-                out_path,
-                model_id,
-                source_lang=source_lang,
-                target_lang=target_lang,
+                original_path, translated_path, out_path, model_id,
+                source_lang=source_lang, target_lang=target_lang,
             )
-            if success:
-                rel_path = os.path.relpath(out_path, ".").replace("\\", "/")
+            if success and os.path.exists(out_path):
+                rel = os.path.relpath(out_path, ".").replace("\\", "/")
                 _complete_task(task_id, result={
-                    "output_excel": rel_path,
+                    "output_excel": rel,
                     "row_count": len(pd.read_excel(out_path)),
                     "file_type": "excel",
                 })
@@ -1516,7 +1606,7 @@ def _run_alignment_sync(
                 _complete_task(task_id, error="Excel 对齐处理失败")
             return
 
-        # Word / PPT
+        # ── Word / PPT ──
         _update_progress(task_id, 10, "分析文档结构...")
         count_a, _ = memory_module.analyze_document_structure(original_path, source_lang)
         count_b, _ = memory_module.analyze_document_structure(translated_path, target_lang)
@@ -1527,41 +1617,56 @@ def _run_alignment_sync(
         t_unit = "字" if not t_info.get('word_based', True) else "词"
 
         print(f"[alignment] 原文: {count_a:,} {s_unit}, 译文: {count_b:,} {t_unit}")
-        _update_progress(task_id, 15,
-                         f"原文 {count_a:,} {s_unit}，译文 {count_b:,} {t_unit}")
+        _patched_log(f"原文: {count_a:,} {s_unit}")
+        _patched_log(f"译文: {count_b:,} {t_unit}")
+        _update_progress(task_id, 15, f"原文 {count_a:,} {s_unit}，译文 {count_b:,} {t_unit}")
 
+        # 分割策略（与 GUI run_processing 1:1）
         if file_type == 'pptx':
             split_parts = 1
+            _patched_log("PPT文件：不进行分割")
         else:
             max_count = max(count_a, count_b)
             split_parts = 1
-            for parts in sorted(THRESHOLD_MAP.keys(), reverse=True):
-                if max_count > THRESHOLD_MAP[parts]:
-                    split_parts = parts
-                    break
+            if max_count > threshold_8:
+                split_parts = 8
+            elif max_count > threshold_7:
+                split_parts = 7
+            elif max_count > threshold_6:
+                split_parts = 6
+            elif max_count > threshold_5:
+                split_parts = 5
+            elif max_count > threshold_4:
+                split_parts = 4
+            elif max_count > threshold_3:
+                split_parts = 3
+            elif max_count > threshold_2:
+                split_parts = 2
+            _patched_log(f"分割策略: {split_parts} 份")
 
-        print(f"[alignment] split_parts={split_parts}")
         _update_progress(task_id, 20, f"分割策略: {split_parts} 份")
 
         tasks_queue = []
-        excel_paths = []
+        generated_excel_paths = []
 
         if split_parts > 1 and file_type == 'docx':
-            _update_progress(task_id, 25, f"正在分割文档（{split_parts} 份）...")
-            files_a, info_a, ratios = memory_module.smart_split_with_buffer(
-                original_path, split_parts, temp_dir, source_lang, BUFFER_CHARS, None
-            )
-            files_b, info_b, _ = memory_module.smart_split_with_buffer(
-                translated_path, split_parts, temp_dir, target_lang, BUFFER_CHARS, ratios
-            )
+            _update_progress(task_id, 25, f"正在分割文档（{split_parts} 份，缓冲区 {buffer_chars} 字）...")
+            _patched_log(f"分割原文（主文档，自主计算分割点）...")
+            files_a, part_info_a, split_ratios = memory_module.smart_split_with_buffer(
+                original_path, split_parts, temp_dir, source_lang, buffer_chars)
+            _patched_log(f"分割译文（从文档，使用原文的分割比例）...")
+            files_b, part_info_b, _ = memory_module.smart_split_with_buffer(
+                translated_path, split_parts, temp_dir, target_lang, buffer_chars,
+                split_element_ratios=split_ratios)
+
             for i in range(len(files_a)):
                 out = os.path.join(temp_dir, f"Part{i + 1}_对齐结果.xlsx")
                 tasks_queue.append({
                     'original': files_a[i], 'trans': files_b[i], 'output': out,
-                    'anchor_orig': info_a[i] if info_a else None,
-                    'anchor_trans': info_b[i] if info_b else None,
+                    'anchor_orig': part_info_a[i] if part_info_a else None,
+                    'anchor_trans': part_info_b[i] if part_info_b else None,
                 })
-                excel_paths.append(out)
+                generated_excel_paths.append(out)
         else:
             out = os.path.join(task_dir, f"{base_name}_对齐结果.xlsx")
             ppt_prompt = memory_module.get_ppt_alignment_prompt(source_lang, target_lang) if file_type == 'pptx' else None
@@ -1570,16 +1675,37 @@ def _run_alignment_sync(
                 'anchor_orig': None, 'anchor_trans': None,
                 'system_prompt_override': ppt_prompt,
             })
-            excel_paths.append(out)
+            generated_excel_paths.append(out)
 
-        total_tasks = len(tasks_queue)
-        fail_reasons = []
+        # ── AI 对齐 ──
+        _update_progress(task_id, 30, f"AI 对齐中（共 {len(tasks_queue)} 个任务）...")
+        _patched_log(f"待处理任务数: {len(tasks_queue)}")
+        progress_per_task = 50 / len(tasks_queue) if tasks_queue else 50
+
         for idx, task in enumerate(tasks_queue):
-            progress = 30 + int(50 * (idx + 1) / total_tasks)
+            progress = 30 + int((idx + 1) * progress_per_task)
             _update_progress(task_id, progress,
-                             f"AI 对齐中 ({idx + 1}/{total_tasks})...")
+                             f"AI 对齐中 ({idx + 1}/{len(tasks_queue)})...")
 
-            print(f"[alignment] 处理任务 {idx + 1}/{total_tasks}: {os.path.basename(task['output'])}")
+            _patched_log(f"处理任务 {idx + 1}/{len(tasks_queue)}: {os.path.basename(task['output'])}")
+            print(f"[alignment] 处理任务 {idx + 1}/{len(tasks_queue)}")
+            print(f"[alignment]   original: {task['original']}")
+            print(f"[alignment]   trans: {task['trans']}")
+            print(f"[alignment]   output: {task['output']}")
+
+            # 诊断：直接用 memory 的 read_file_content 测试读取
+            try:
+                test_orig = memory_module.read_file_content(task['original'])
+                test_trans = memory_module.read_file_content(task['trans'])
+                print(f"[alignment]   read_file_content 原文: {len(test_orig)} 字符")
+                print(f"[alignment]   read_file_content 译文: {len(test_trans)} 字符")
+                if test_orig:
+                    print(f"[alignment]   原文前200字: {test_orig[:200]}")
+                if test_trans:
+                    print(f"[alignment]   译文前200字: {test_trans[:200]}")
+            except Exception as diag_e:
+                print(f"[alignment]   read_file_content 诊断异常: {diag_e}")
+
             success = memory_module.run_llm_alignment(
                 task['original'],
                 task['trans'],
@@ -1591,50 +1717,61 @@ def _run_alignment_sync(
                 source_lang=source_lang,
                 target_lang=target_lang,
                 enable_post_split=enable_post_split,
-                enable_table_separate_processing=True,
             )
-            print(f"[alignment] 任务 {idx + 1} 结果: {'成功' if success else '失败'}")
-            if not success:
-                fail_reasons.append(f"任务{idx + 1}失败")
-                if task['output'] in excel_paths:
-                    excel_paths.remove(task['output'])
 
-        _update_progress(task_id, 85, "合并结果...")
+            print(f"[alignment] 任务 {idx + 1} 结果: success={success}, output_exists={os.path.exists(task['output'])}")
+            if success and os.path.exists(task['output']):
+                _patched_log(f"任务 {idx + 1} 成功: {os.path.basename(task['output'])}")
+            else:
+                _patched_log(f"任务 {idx + 1} 失败: {os.path.basename(task['output'])}")
+                if task['output'] in generated_excel_paths:
+                    generated_excel_paths.remove(task['output'])
 
-        if split_parts > 1 and len(excel_paths) > 0:
-            final_path = os.path.join(task_dir, f"{base_name}_对齐结果.xlsx")
+        # ── 合并 ──
+        _update_progress(task_id, 85, "合并与去重...")
+        final_path = None
+        if split_parts > 1 and len(generated_excel_paths) > 0:
+            final_path = os.path.join(task_dir, f"「最终结果」{base_name}_对齐.xlsx")
             memory_module.merge_and_deduplicate_excels(
-                excel_paths,
-                final_path,
-                source_lang=source_lang,
-                target_lang=target_lang,
+                generated_excel_paths, final_path,
+                source_lang=source_lang, target_lang=target_lang,
             )
         else:
-            final_path = excel_paths[0] if excel_paths else None
+            final_path = generated_excel_paths[0] if generated_excel_paths else None
 
         print(f"[alignment] final_path={final_path}, exists={os.path.exists(final_path) if final_path else 'N/A'}")
-
+        print(f"[alignment] generated_excel_paths={generated_excel_paths}")
         if final_path and os.path.exists(final_path):
-            rel_path = os.path.relpath(final_path, ".").replace("\\", "/")
+            rel = os.path.relpath(final_path, ".").replace("\\", "/")
             row_count = len(pd.read_excel(final_path))
             issues = _quality_check(pd.read_excel(final_path), source_lang, target_lang)
-            print(f"[alignment] 完成! {row_count} 行, 路径: {rel_path}")
+            print(f"[alignment] 完成! {row_count} 行")
+            _patched_log(f"处理完成！{row_count} 行, 路径: {rel}")
             _complete_task(task_id, result={
-                "output_excel": rel_path,
+                "output_excel": rel,
                 "row_count": row_count,
                 "file_type": file_type,
                 "split_parts": split_parts,
                 "issues": issues[:10] if issues else [],
             })
         else:
-            err_detail = "; ".join(fail_reasons) if fail_reasons else "未知原因"
-            print(f"[alignment] 失败: excel_paths={excel_paths}, reasons={fail_reasons}")
-            _complete_task(task_id, error=f"对齐处理失败: {err_detail}。请查看后端日志获取详情")
+            print(f"[alignment] 失败: 无有效输出文件")
+            _complete_task(task_id, error="对齐处理失败，未生成结果文件。请查看实时输出了解详情")
 
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[alignment] 异常:\n{tb}")
         _complete_task(task_id, error=str(e))
+    finally:
+        if memory_module is not None:
+            if original_log_stream is not None:
+                memory_module.log_manager.log_stream = original_log_stream
+            if original_log is not None:
+                memory_module.log_manager.log = original_log
+            if original_log_exception is not None:
+                memory_module.log_manager.log_exception = original_log_exception
+        if hasattr(_stream_task_id, "task_id"):
+            del _stream_task_id.task_id
 
 
 # ── 异步入口（供 BackgroundTasks 调用）────────────────────
@@ -1646,12 +1783,27 @@ async def run_alignment_task(
     target_lang: str = "英语",
     model_name: str = DEFAULT_MODEL,
     enable_post_split: bool = True,
+    threshold_2: int = 25000,
+    threshold_3: int = 50000,
+    threshold_4: int = 75000,
+    threshold_5: int = 100000,
+    threshold_6: int = 125000,
+    threshold_7: int = 150000,
+    threshold_8: int = 175000,
+    buffer_chars: int = 2000,
 ):
     """在后台线程池中执行对齐任务"""
+    import functools
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
-        _run_alignment_sync,
-        original_path, translated_path, task_id,
-        source_lang, target_lang, model_name, enable_post_split,
+        functools.partial(
+            _run_alignment_sync,
+            original_path, translated_path, task_id,
+            source_lang, target_lang, model_name, enable_post_split,
+            threshold_2=threshold_2, threshold_3=threshold_3,
+            threshold_4=threshold_4, threshold_5=threshold_5,
+            threshold_6=threshold_6, threshold_7=threshold_7,
+            threshold_8=threshold_8, buffer_chars=buffer_chars,
+        ),
     )
