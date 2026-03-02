@@ -1477,6 +1477,22 @@ def _run_single_alignment(orig_path, trans_path, output_path, model_id,
     return True
 
 
+# ── 列出中间文件 ──
+def _list_intermediate_files(temp_dir: str) -> list:
+    """扫描中间文件目录，返回 [{name, path, type}] 列表"""
+    files = []
+    if not os.path.isdir(temp_dir):
+        return files
+    for f in sorted(os.listdir(temp_dir)):
+        full = os.path.join(temp_dir, f)
+        if os.path.isfile(full):
+            rel = os.path.relpath(full, ".").replace("\\", "/")
+            ext = os.path.splitext(f)[1].lower()
+            ftype = "excel" if ext in (".xlsx", ".xls") else "word" if ext in (".docx", ".doc") else "other"
+            files.append({"name": f, "path": rel, "type": ftype})
+    return files
+
+
 # ── 同步主处理（1:1 复刻 memory.py GUI 的 run_processing）─────
 def _run_alignment_sync(
     original_path: str,
@@ -1601,6 +1617,7 @@ def _run_alignment_sync(
                     "output_excel": rel,
                     "row_count": len(pd.read_excel(out_path)),
                     "file_type": "excel",
+                    "intermediate_files": _list_intermediate_files(temp_dir),
                 })
             else:
                 _complete_task(task_id, error="Excel 对齐处理失败")
@@ -1753,6 +1770,7 @@ def _run_alignment_sync(
                 "file_type": file_type,
                 "split_parts": split_parts,
                 "issues": issues[:10] if issues else [],
+                "intermediate_files": _list_intermediate_files(temp_dir),
             })
         else:
             print(f"[alignment] 失败: 无有效输出文件")

@@ -303,6 +303,29 @@ function showResult(result) {
         `;
     }
 
+    // 中间文件下载区域
+    let intermediateHtml = '';
+    const files = result.intermediate_files || [];
+    if (files.length > 0) {
+        const fileItems = files.map(f => {
+            const icon = f.type === 'excel' ? 'fa-file-excel' : f.type === 'word' ? 'fa-file-word' : 'fa-file';
+            const cls = f.type === 'excel' ? 'download-btn-sm btn-excel' : f.type === 'word' ? 'download-btn-sm btn-word' : 'download-btn-sm';
+            return `<a href="/${f.path}" download class="${cls}"><i class="fas ${icon}"></i> ${f.name}</a>`;
+        }).join('');
+
+        intermediateHtml = `
+            <div class="intermediate-files">
+                <div class="intermediate-header" onclick="this.parentElement.classList.toggle('open')">
+                    <i class="fas fa-chevron-right"></i>
+                    <span>中间处理文件 (${files.length})</span>
+                </div>
+                <div class="intermediate-list">
+                    ${fileItems}
+                </div>
+            </div>
+        `;
+    }
+
     resultGrid.innerHTML = `
         <div class="result-item">
             <h3>输出文件</h3>
@@ -312,6 +335,7 @@ function showResult(result) {
                 </a>
             </div>
             ${issuesHtml}
+            ${intermediateHtml}
         </div>
     `;
 }

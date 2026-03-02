@@ -25,7 +25,7 @@ import base64
 # === ⚙️ 全局配置 ===
 # ==========================================
 ROW_BUCKET = 20_000
-API_KEY = "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"  # 🔴 请在此处填入您的 Key
+API_KEY = "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"  # 🔴 请在此处填入您的 Key
 BASE_URL = "https://openrouter.ai/api/v1"
 
 # Luzhishen WebSocket 配置

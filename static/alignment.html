@@ -122,6 +122,53 @@
         }
         .collapse-toggle i { transition: transform 0.2s; }
         .collapse-toggle.collapsed i { transform: rotate(-90deg); }
+
+        /* 中间文件下载区域 */
+        .intermediate-files {
+            margin-top: 1.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        .intermediate-header {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: var(--card-bg);
+            cursor: pointer; user-select: none;
+            font-size: 0.9rem; font-weight: 600;
+            color: var(--text-color);
+            transition: background 0.2s;
+        }
+        .intermediate-header:hover { background: #f1f5f9; }
+        .intermediate-header i {
+            font-size: 0.75rem;
+            transition: transform 0.2s;
+        }
+        .intermediate-files.open .intermediate-header i {
+            transform: rotate(90deg);
+        }
+        .intermediate-list {
+            display: none;
+            flex-direction: column;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+        }
+        .intermediate-files.open .intermediate-list {
+            display: flex;
+        }
+        .download-btn-sm {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            padding: 0.5rem 0.85rem;
+            border-radius: 0.375rem;
+            text-decoration: none;
+            font-size: 0.82rem; font-weight: 500;
+            color: #fff;
+            background: #6b7280;
+            transition: opacity 0.2s;
+        }
+        .download-btn-sm:hover { opacity: 0.85; }
+        .download-btn-sm.btn-excel { background: #10b981; }
+        .download-btn-sm.btn-word { background: #3b82f6; }
     </style>
 </head>
 <body>
