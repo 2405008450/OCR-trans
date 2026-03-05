@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  fastapi-llm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fastapi-llm-demo:latest
+    container_name: fastapi-llm
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      # DeepSeek API Key（在此处填写真实的 key，或使用下面的 .env 文件）
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=https://api.deepseek.com
+      - HOST=0.0.0.0
+      - PORT=8001
+      - DEBUG=False
+      - ALLOWED_ORIGINS=*
+    volumes:
+      # 持久化上传和输出文件（容器重启不丢失）
+      - ./uploads:/app/uploads
+      - ./outputs:/app/outputs
+      - ./temp_images:/app/temp_images
+      - ./businesslicence/uploads:/app/businesslicence/uploads
+      - ./businesslicence/outputs:/app/businesslicence/outputs
+      # PaddleOCR 模型缓存持久化（避免每次重启重新下载）
+      - paddleocr_cache:/app/.paddleocr
+    # 如果云服务器有 NVIDIA GPU，取消以下注释：
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  paddleocr_cache:

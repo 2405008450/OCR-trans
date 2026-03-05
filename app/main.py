@@ -13,6 +13,7 @@ STATIC_DIR = BASE_DIR / "static"
 UPLOADS_DIR = BASE_DIR / "uploads"
 OUTPUTS_DIR = BASE_DIR / "outputs"
 TEMP_IMAGES_DIR = BASE_DIR / "temp_images"
+BL_OUTPUTS_DIR = BASE_DIR / "businesslicence" / "outputs"
 
 app = FastAPI(
     title="图片OCR翻译系统",
@@ -48,6 +49,11 @@ if OUTPUTS_DIR.exists():
 if TEMP_IMAGES_DIR.exists():
     app.mount("/temp_images", StaticFiles(directory=str(TEMP_IMAGES_DIR)), name="temp_images")
     print(f"✅ 临时图片目录已挂载: {TEMP_IMAGES_DIR}")
+
+# 营业执照翻译输出目录
+BL_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/bl-outputs", StaticFiles(directory=str(BL_OUTPUTS_DIR)), name="bl_outputs")
+print(f"✅ 营业执照输出目录已挂载: {BL_OUTPUTS_DIR}")
 
 # 注册任务路由
 app.include_router(task.router)
@@ -88,6 +94,15 @@ async def alignment_page():
         with open(page_file, "r", encoding="utf-8") as f:
             return f.read()
     return f"<h1>错误：找不到 alignment.html</h1><p>路径: {page_file}</p>"
+
+
+@app.get("/business-licence", response_class=HTMLResponse)
+async def business_licence_page():
+    page_file = STATIC_DIR / "business_licence.html"
+    if page_file.exists():
+        with open(page_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return f"<h1>错误：找不到 business_licence.html</h1><p>路径: {page_file}</p>"
 
 # 启动（一条命令，局域网访问 http://192.168.31.125:8001）：
 #   python -m app.main

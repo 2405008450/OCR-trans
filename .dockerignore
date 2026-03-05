@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Python 缓存
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+
+# 虚拟环境
+venv/
+env/
+.env/
+*.venv
+
+# 上传/输出（运行时动态生成，不打包进镜像）
+uploads/
+outputs/
+temp_images/
+businesslicence/uploads/
+businesslicence/outputs/
+
+# 调试文件
+debug_*.py
+*.log
+
+# memory 目录：只排除输出缓存，保留 memory.py（被 alignment_service 动态加载）
+memory/Result_Output/
+memory/__pycache__/
+
+# 专检目录：保留代码（含 llm 子模块），只排除临时输出
+专检/中翻译规则检查/llm/llm_project/zhengwen/
+专检/数值检查/llm/llm_project/yejiao/
+专检/数值检查/llm/llm_project/yemei/
+专检/数值检查/llm/llm_project/zhengwen/
+
+# IDE
+.vscode/
+.idea/
+
+# Windows
+*.bat
+Thumbs.db

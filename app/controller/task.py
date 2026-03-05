@@ -2,13 +2,16 @@ import os
 import traceback
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from app.service.llm_service import run_llm_task
 from app.service.number_check_service import run_number_check_task, _get_task_progress
 from app.service.alignment_service import (
     run_alignment_task, get_alignment_progress, _complete_task as _alignment_complete_task,
     AVAILABLE_MODELS as ALIGNMENT_MODELS, SUPPORTED_LANGUAGES, THRESHOLD_MAP, BUFFER_CHARS,
 )
+from app.service import business_licence_service as bl_service
 from typing import Optional
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/task", tags=["Task"])
 
@@ -288,3 +291,70 @@ async def get_alignment_status(task_id: str):
     if not progress:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return progress
+
+
+# ---------------------------------------------------------------------------
+# 营业执照翻译路由
+# ---------------------------------------------------------------------------
+
+class VerifyBody(BaseModel):
+    action: str          # "confirm" | "correct" | "skip"
+    text: Optional[str] = None
+
+
+@router.post("/business-licence")
+async def submit_business_licence(
+    file: UploadFile = File(..., description="营业执照图片"),
+    source_lang: str = Query("zh", description="源语言，默认中文"),
+    target_lang: str = Query("en", description="目标语言，默认英文"),
+    config_file: str = Query("config/auto.yaml", description="配置文件: config/auto.yaml | config/vertical.yaml | config/horizontal.yaml"),
+):
+    """提交营业执照翻译任务，返回 task_id 和 SSE 流地址"""
+    allowed_ext = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+    import os as _os
+    ext = _os.path.splitext(file.filename or "")[1].lower()
+    if ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
+
+    file_bytes = await file.read()
+    task_id = await bl_service.start_business_licence_task(
+        file_bytes=file_bytes,
+        original_filename=file.filename or "image.jpg",
+        source_lang=source_lang,
+        target_lang=target_lang,
+        config_file=config_file,
+    )
+    return {
+        "status": "ACCEPTED",
+        "task_id": task_id,
+        "stream_url": f"/task/business-licence/stream/{task_id}",
+    }
+
+
+@router.get("/business-licence/stream/{task_id}")
+async def stream_business_licence(task_id: str):
+    """SSE 流：推送翻译进度、日志、印章验证请求、完成/错误事件"""
+    task = bl_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    return StreamingResponse(
+        bl_service.stream_task_events(task_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/business-licence/verify/{task_id}")
+async def verify_business_licence_seal(task_id: str, body: VerifyBody):
+    """提交印章验证结果，唤醒流水线继续处理"""
+    if body.action not in ("confirm", "correct", "skip"):
+        raise HTTPException(status_code=400, detail="action 必须为 confirm/correct/skip")
+
+    ok = bl_service.submit_verification(task_id, body.action, body.text)
+    if not ok:
+        raise HTTPException(status_code=409, detail="任务不存在或当前不在等待验证状态")
+    return {"status": "ok"}

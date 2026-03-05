@@ -18,4 +18,5 @@ paddlepaddle
 openai
 
 # 图像修复（可选，如果不需要可以注释掉）
-# simple-lama-inpainting
+simple-lama-inpainting
+python-pptx
