@@ -28,10 +28,7 @@ ROW_BUCKET = 20_000
 API_KEY = "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"  # 🔴 请在此处填入您的 Key
 BASE_URL = "https://openrouter.ai/api/v1"
 
-# Luzhishen WebSocket 配置
-LUZHISHEN_API_KEY = "zd-cce061a739a64f299f5a0bb7fea39075dbdd268414d8416ca"  # 🔴 请在此处填入您的 Luzhishen Key
-LUZHISHEN_WS_BASE_URL = "wss://api.luzhishen.chat:8001/ws_chat/"
-LUZHISHEN_PUBKEY_N = 0x00d6fe5e8ce5cb85f19a0c38e0dd3fbf16a4bb74b3c7bcd55c4fd8c87e0d0a5dbee83e4f8a18b5a0f6c9ab0876e9a4d8c9d5f3c7e4c9b6e8f5e9c1b3e6f8d3c5e2a1e4c8f5e9b3e6d1c4e7f9b2e5d1c3e8f6a4e7b1c9e5f3d2a6e8c4f5e9b1e6d3c7e4f8a2e5c9d1b6e3f7c8e4a5f9d2e6b1c3e7f5a8e4d1c6b9e2f3c7e5a8d1e9b4c6f2e7d3a5c8e1b9f4e6d2c5a7e9b1f3e8c4d6a2e5b7c9f1e3d8a4e6c2f5b9e7d1c3a8e5f2b6d4c9e1a7f3e8b5d2c6e4a9f1b7e3c5d8f6a2e4c1b9e7d3f5a6c8e2b4f9d1e7c3a5e6b8f2d4c9a1e7b3f6d5c8e2a4f1b9e7c6d3a8e5f2b1c4e9d7a6f3e8b5c2d1e4f9a7b6c3e8d5f1a2e6b9c7d4f3e1a8b5c6d9f2e4a7c1b3e8f5d6a9c2e7b4f1d3c8e5a6f9b2d7c4e1a3f8b6e9c5d2a7f4e1b8c6d3a9e5f2b7c1d4e8a6f3b9c5d7e2a4f1b6c8e3d9a5f7b2
+
 
 # 每块≤25000字：2份=50k, 3份=75k, 4份=100k, 5份=125k, 6份=150k, 7份=175k, 8份=200k
 THRESHOLD_2_PARTS = 25000
@@ -47,28 +44,6 @@ OUTPUT_DIR = "Result_Output"
 # ==========================================
 # === 🤖 可用模型配置 ===
 # ==========================================
-# Luzhishen 模型 (Gemini) - 通过 WebSocket
-LUZHISHEN_MODELS = {
-    "Gemini 2.5 Flash": {
-        "id": "gemini-2.5-flash",
-        "description": "Gemini 2.5 Flash - 快速版本",
-        "max_output": 65536,
-        "provider": "luzhishen"
-    },
-    "Gemini 2.5 Pro": {
-        "id": "gemini-2.5-pro",
-        "description": "Gemini 2.5 Pro - 高级版本",
-        "max_output": 65536,
-        "provider": "luzhishen"
-    },
-    "Gemini 3 Pro Preview": {
-        "id": "gemini-3-pro-preview",
-        "description": "Gemini 3 Pro Preview - 最新预览版",
-        "max_output": 65536,
-        "provider": "luzhishen"
-    },
-}
-
 # OpenRouter 模型
 OPENROUTER_MODELS = {
     "Google Gemini 2.5 Flash": {
@@ -96,77 +71,6 @@ AVAILABLE_MODELS = OPENROUTER_MODELS.copy()
 DEFAULT_MODEL = "Google Gemini 2.5 Flash"
 DEFAULT_PROVIDER = "openrouter"  # 路智深已屏蔽，默认使用 OpenRouter
 
-
-def clean_luzhishen_response(response_text):
-    """清理 Luzhishen 返回的用量统计信息"""
-    if not response_text:
-        return response_text
-
-    # 匹配末尾的 JSON 用量统计信息
-    # 格式如: {'prompt_created': '...', 'prompt_tokens': ..., 'total_money': ...}
-    import re
-    # 匹配类似 {'prompt_created': ... } 的 JSON 格式
-    pattern = r"\{['\"]prompt_created['\"]:\s*['\"][^'\"]+['\"],\s*['\"]prompt_tokens['\"]:\s*\d+.*?\}"
-    cleaned = re.sub(pattern, '', response_text)
-
-    # 也处理可能附加在最后一行内容后面的情况
-    # 查找最后一个包含 ||| 的行之后的用量信息
-    lines = cleaned.strip().split('\n')
-    result_lines = []
-    for line in lines:
-        # 如果行包含 prompt_created 等用量关键字，跳过
-        if "'prompt_created'" in line or '"prompt_created"' in line:
-            # 尝试只保留 ||| 之前的部分
-            if '|||' in line:
-                idx = line.rfind('|||')
-                # 检查 ||| 之后是否有用量信息
-                after_sep = line[idx + 3:]
-                if "'prompt_created'" in after_sep or '"prompt_created"' in after_sep:
-                    # 找到用量信息的开始位置
-                    json_start = after_sep.find("{")
-                    if json_start != -1:
-                        line = line[:idx + 3] + after_sep[:json_start].strip()
-            else:
-                continue  # 跳过纯用量信息行
-        result_lines.append(line)
-
-    return '\n'.join(result_lines).strip()
-
-
-# Luzhishen RSA 公钥（从 PEM 文件或内置）
-LUZHISHEN_RSA_N = 0x00d4a0c64eb8c5d7b2d53d39a4b1e6f7c8a9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1
-LUZHISHEN_RSA_E = 65537
-
-
-def get_luzhishen_pubkey():
-    """获取 Luzhishen RSA 公钥"""
-    try:
-        # 尝试从文件加载
-        import os
-        pubkey_paths = [
-            os.path.join(os.path.dirname(__file__), 'utils', 'keys', 'public.pem'),
-            r'E:\PythonTools\utils\keys\public.pem',
-            r'E:\Luzhishen\utils\keys\public.pem',
-        ]
-        for path in pubkey_paths:
-            if os.path.exists(path):
-                with open(path, 'rb') as f:
-                    return rsa.PublicKey.load_pkcs1(f.read())
-
-        # 如果没有文件，尝试从内置的 N 和 E 构造
-        return rsa.PublicKey(LUZHISHEN_RSA_N, LUZHISHEN_RSA_E)
-    except Exception as e:
-        log_manager.log_exception(f"无法加载 Luzhishen 公钥: {e}")
-        return None
-
-
-def generate_luzhishen_api_key(api_key, pubkey):
-    """生成带时间戳的加密 API Key"""
-    timestamp = int(time.time())
-    message = f"{api_key}|{timestamp}".encode('utf8')
-    encrypted_message = rsa.encrypt(message, pubkey)
-    api_key_base64_urlsafe = base64.urlsafe_b64encode(encrypted_message).decode('utf-8')
-    return api_key_base64_urlsafe
 
 
 CHAPTER_PATTERNS = [
@@ -1764,129 +1668,6 @@ def call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_toke
         return None
 
 
-async def call_luzhishen_stream_async(system_prompt, user_prompt, model_id, filename=""):
-    """Luzhishen WebSocket API 流式调用（异步）"""
-    try:
-        # 获取公钥并生成加密的 API Key
-        pubkey = get_luzhishen_pubkey()
-        if pubkey is None:
-            log_manager.log_exception("无法获取 Luzhishen 公钥")
-            return None
-
-        api_key_rsa = generate_luzhishen_api_key(LUZHISHEN_API_KEY, pubkey)
-        uri = f"{LUZHISHEN_WS_BASE_URL}?apikey={api_key_rsa}&model={model_id}"
-
-        log_manager.log(f"请求 Luzhishen WebSocket API...")
-        log_manager.log(f"模型: {model_id}")
-
-        data = {
-            "model": model_id,
-            "data": {
-                "system_prompt": system_prompt,
-                "messages": [
-                    {"role": "user", "content": user_prompt}
-                ],
-                "seed": 12345
-            }
-        }
-
-        full_response_text = ""
-        log_manager.log_stream("\n" + "=" * 50 + f" {filename} " + "=" * 50 + "\n")
-
-        async with websockets.connect(uri, ping_interval=30, ping_timeout=60) as websocket:
-            # 接收验证 API Key 和余额的响应
-            response = await asyncio.wait_for(websocket.recv(), timeout=30)
-            log_manager.log("WebSocket 连接已建立，发送请求...")
-
-            # 发送请求数据
-            await websocket.send(json.dumps(data))
-            log_manager.log("接收数据流...")
-
-            while True:
-                try:
-                    response = await asyncio.wait_for(websocket.recv(), timeout=300)
-                    response_data = json.loads(response)
-
-                    # 处理错误
-                    code = response_data.get("code")
-                    if code == 408 or code == 500:
-                        error_msg = response_data.get("message", "未知错误")
-                        log_manager.log_exception(f"Luzhishen API 错误 (code={code})", error_msg)
-                        return None
-
-                    # 处理流式响应片段 (code == 200)
-                    if code == 200:
-                        message_fragment = response_data.get("message", "")
-                        # 确保 message_fragment 是字符串类型
-                        if isinstance(message_fragment, dict):
-                            message_fragment = str(message_fragment)
-                        elif message_fragment is None:
-                            message_fragment = ""
-                        else:
-                            message_fragment = str(message_fragment)
-                        full_response_text += message_fragment
-                        log_manager.log_stream(message_fragment)
-
-                    # 处理完成响应 (code == 205)
-                    if code == 205:
-                        summary_response = response_data.get("message", "")
-                        if isinstance(summary_response, dict):
-                            summary_response = str(summary_response)
-                        elif summary_response is None:
-                            summary_response = ""
-                        else:
-                            summary_response = str(summary_response)
-                        if summary_response:
-                            full_response_text += summary_response
-                            log_manager.log_stream(summary_response)
-                        break
-
-                except asyncio.TimeoutError:
-                    log_manager.log_exception("WebSocket 接收超时")
-                    break
-
-        log_manager.log_stream("\n" + "=" * 50 + " 输出结束 " + "=" * 50 + "\n")
-
-        # 清理用量统计信息
-        cleaned_response = clean_luzhishen_response(full_response_text)
-        return cleaned_response
-
-    except websockets.exceptions.ConnectionClosed as e:
-        log_manager.log_exception(f"WebSocket 连接关闭", str(e))
-        return None
-    except Exception as e:
-        log_manager.log_exception(f"Luzhishen WebSocket API调用失败", str(e))
-        import traceback
-        log_manager.log_exception("详细堆栈", traceback.format_exc())
-        return None
-
-
-def call_luzhishen_stream(system_prompt, user_prompt, model_id, filename=""):
-    """Luzhishen WebSocket API 流式调用（同步包装）"""
-    try:
-        # 检查是否已有事件循环
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None:
-            # 如果已有运行中的事件循环，创建新线程运行
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    asyncio.run,
-                    call_luzhishen_stream_async(system_prompt, user_prompt, model_id, filename)
-                )
-                return future.result(timeout=600)
-        else:
-            # 如果没有事件循环，直接运行
-            return asyncio.run(call_luzhishen_stream_async(system_prompt, user_prompt, model_id, filename))
-    except Exception as e:
-        log_manager.log_exception(f"Luzhishen 调用失败", str(e))
-        import traceback
-        log_manager.log_exception("详细堆栈", traceback.format_exc())
-        return None
 
 
 def call_llm_stream(system_prompt, user_prompt, model_id, filename=""):
@@ -1903,10 +1684,7 @@ def call_llm_stream(system_prompt, user_prompt, model_id, filename=""):
 
     log_manager.log(f"使用提供商: {provider}")
 
-    if provider == "luzhishen":
-        return call_luzhishen_stream(system_prompt, user_prompt, model_id, filename)
-    else:
-        return call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename)
+    return call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename)
 
 
 def parse_alignment_response(response_text):
@@ -2414,7 +2192,7 @@ def needs_sentence_split(orig_text, trans_text, source_lang="中文"):
 
 
 def split_row_with_ai(orig_text, trans_text, model_id, row_num, source_lang="中文"):
-    """使用 AI 对单行进行分句对齐 - 支持 OpenRouter 和 Luzhishen"""
+    """使用 AI 对单行进行分句对齐"""
     log_manager.log_stream(f"\n{'=' * 50}\n")
     log_manager.log_stream(f"📍 第 {row_num} 行\n")
     log_manager.log_stream(f"[原文] {orig_text[:100]}{'...' if len(orig_text) > 100 else ''}\n")
@@ -3232,11 +3010,6 @@ class DocumentAlignerGUI:
                                                                                                 padx=(0, 10))
 
         self.provider_var = tk.StringVar(value=DEFAULT_PROVIDER)
-        # 路智深 API 已屏蔽，不再显示该选项
-        # self.luzhishen_radio = ttk.Radiobutton(provider_frame, text="🚀 路智深",
-        #                                        variable=self.provider_var, value="luzhishen",
-        #                                        command=self.on_provider_changed)
-        # self.luzhishen_radio.pack(side=tk.LEFT, padx=5)
 
         self.openrouter_radio = ttk.Radiobutton(provider_frame, text="🌐 OpenRouter",
                                                 variable=self.provider_var, value="openrouter",
@@ -3398,10 +3171,6 @@ class DocumentAlignerGUI:
         """切换 API 提供商"""
         global AVAILABLE_MODELS
         provider = self.provider_var.get()
-        # 路智深已屏蔽，若为旧配置则强制使用 OpenRouter
-        if provider == "luzhishen":
-            provider = "openrouter"
-            self.provider_var.set("openrouter")
 
         AVAILABLE_MODELS = OPENROUTER_MODELS.copy()
         default_model = "Google Gemini 2.5 Flash"
