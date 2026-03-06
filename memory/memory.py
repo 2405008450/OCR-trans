@@ -18,15 +18,18 @@ import websockets
 import asyncio
 import time
 import json
-import rsa
-import base64
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env 统一配置
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_project_root, ".env"))
 
 # ==========================================
 # === ⚙️ 全局配置 ===
 # ==========================================
 ROW_BUCKET = 20_000
-API_KEY = "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"  # 🔴 请在此处填入您的 Key
-BASE_URL = "https://openrouter.ai/api/v1"
+API_KEY = os.getenv("OPENROUTER_API_KEY", "")  # 从项目根 .env 统一管理
+BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
 
 

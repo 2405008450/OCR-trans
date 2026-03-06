@@ -28,8 +28,8 @@ from app.core.config import settings
 
 # ── 全局配置 ──────────────────────────────────────────────
 ROW_BUCKET = 20_000
-API_KEY = "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"
-BASE_URL = "https://openrouter.ai/api/v1"
+API_KEY = settings.OPENROUTER_API_KEY
+BASE_URL = settings.OPENROUTER_BASE_URL
 
 THRESHOLD_MAP = {
     2: 25_000, 3: 50_000, 4: 75_000, 5: 100_000,

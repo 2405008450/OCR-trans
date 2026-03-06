@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "sk-f2a71209abd64087a69147ab6a0bb2ec")
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     
+    # OpenRouter API配置（翻译记忆对齐 / 专检等业务使用）
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    
     # 服务器配置（部署到局域网 192.168.31.125 时，本机运行后可通过 http://192.168.31.125:8001 访问）
     HOST: str = os.getenv("HOST", "0.0.0.0")  # 0.0.0.0 监听所有网卡，局域网可访问
     PORT: int = int(os.getenv("PORT", "8001"))  # 端口号

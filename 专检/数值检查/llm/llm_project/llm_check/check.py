@@ -7,11 +7,11 @@ from llm.llm_project.parsers.body_extractor import extract_body_text
 from llm.llm_project.parsers.footer_extractor import extract_footers
 from llm.llm_project.parsers.header_extractor import extract_headers
 
-# 加载API密钥（使用当前文件所在目录的 .env，确保从任何 CWD 启动都能找到）
-_env_path = Path(__file__).resolve().parent / ".env"
-load_dotenv(_env_path)
-api_key=os.getenv("API_KEY")
-base_url=os.getenv("BASE_URL")
+# 加载项目根目录的 .env 统一配置
+_project_root = Path(__file__).resolve().parents[5]  # 从 专检/数值检查/llm/llm_project/llm_check/ 向上5级到项目根
+load_dotenv(_project_root / ".env")
+api_key = os.getenv("OPENROUTER_API_KEY", "")
+base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 client = OpenAI(
     api_key=api_key,
     base_url=base_url,

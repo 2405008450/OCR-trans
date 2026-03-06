@@ -12,6 +12,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 # 获取脚本所在目录（项目根目录）
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -20,11 +21,15 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+# 加载项目根目录的 .env 统一配置
+_project_root = SCRIPT_DIR.parent  # businesslicence 的上级即项目根
+load_dotenv(_project_root / ".env")
+
 # ==================== 配置区域 ====================
 # 在这里修改你的配置
 
-# API 密钥
-DEEPSEEK_API_KEY = "sk-a681d5bc9d3f4278b084ad4606251298"
+# API 密钥（从项目根 .env 统一管理）
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 # 输入图片路径（使用绝对路径，无论从哪里运行都能找到文件）
 INPUT_IMAGE = str(SCRIPT_DIR / r"C:\Users\Administrator\Desktop\picture\zhuhai.jpg")

@@ -1,23 +1,24 @@
 # ============================================================
-# 基础镜像：PaddlePaddle GPU 版（含 CUDA 11.8 + cuDNN 8）
-# 如果云服务器没有GPU，改用：paddlepaddle/paddle:3.0.0 (CPU版)
+# 基础镜像：Python 3.11 slim
+# 云服务器 CPU 版，如有 GPU 可改用 nvidia/cuda 基础镜像
 # ============================================================
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
 
-# 设置环境变量
+# 环境变量
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    # PaddleOCR 模型缓存目录
     PADDLEOCR_HOME=/app/.paddleocr \
-    # 避免 OpenCV 的 GUI 依赖问题
-    OPENCV_IO_MAX_IMAGE_PIXELS=1099511627776
+    OPENCV_IO_MAX_IMAGE_PIXELS=1099511627776 \
+    # 让 pip 跳过 SSL 验证（代理环境下避免 SSL EOF 错误）
+    PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org download.pytorch.org pypi.tuna.tsinghua.edu.cn www.paddlepaddle.org.cn"
 
-# 安装系统依赖（OpenCV、字体支持等）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 安装系统依赖（绕过代理直连 apt 源）
+RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; \
+    apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgl1 \
     libgomp1 \
@@ -30,31 +31,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tk-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 先复制依赖文件（利用 Docker 层缓存）
-COPY requirements_docker.txt .
+# ── 第一层：升级 pip，写入全局 pip 配置（代理 TUN 模式下禁用 SSL 验证）──
+RUN pip install --upgrade pip && \
+    mkdir -p /root/.config/pip && \
+    printf '[global]\ntrusted-host = pypi.org\n    files.pythonhosted.org\n    download.pytorch.org\n    www.paddlepaddle.org.cn\n' \
+    > /root/.config/pip/pip.conf
 
-# 安装 Python 依赖（优先用清华源加速）
-RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install -r requirements_docker.txt \
-        -i https://pypi.tuna.tsinghua.edu.cn/simple \
-        --extra-index-url https://pypi.org/simple
+# ── 第二层：安装 PyTorch（CPU 版，体积大，单独缓存）──
+RUN pip install torch==2.10.0 torchvision==0.25.0 \
+        --index-url https://download.pytorch.org/whl/cpu
 
-# 复制项目代码
+# ── 第三层：安装 PaddlePaddle（CPU 版）──
+RUN pip install paddlepaddle==3.2.2 \
+    -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+
+# ── 第四层：安装应用依赖 ──
+COPY requirements.txt .
+# zai-sdk 的 pyjwt 依赖声明与 zhipuai 冲突，单独用 --no-deps 安装（实际运行兼容 2.8.0）
+RUN pip install -r requirements.txt \
+    && pip install zai-sdk==0.2.2 --no-deps
+
+# ── 复制项目代码 ──
 COPY app/ ./app/
 COPY static/ ./static/
 COPY businesslicence/ ./businesslicence/
-# memory.py 被 alignment_service.py 动态加载，必须复制
 COPY memory/ ./memory/
-# 专检目录含 llm 子模块，需一并复制
 COPY 专检/ ./专检/
 
-# 创建必要的目录
+# 创建运行时目录
 RUN mkdir -p uploads outputs temp_images \
     businesslicence/uploads businesslicence/outputs \
     memory/Result_Output
-
-# 复制环境变量模板（实际运行时通过 -e 或 .env 文件注入）
-COPY env.example .env
 
 # 暴露端口
 EXPOSE 8001
