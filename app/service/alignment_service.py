@@ -44,7 +44,7 @@ AVAILABLE_MODELS = {
         "description": "建议先检查文章是否有目录，先将目录删除再处理",
         "max_output": 65536,
     },
-        "Google gemini-3-flash-preview": {
+    "Google gemini-3-flash-preview": {
         "id": "google/gemini-3-flash-preview",
         "description": "建议先检查文章是否有目录，先将目录删除再处理",
         "max_output": 65536,
@@ -65,7 +65,7 @@ AVAILABLE_MODELS = {
         "max_output": 65536,
     },
 }
-DEFAULT_MODEL = "Google Gemini 2.5 Flash"
+DEFAULT_MODEL = "Google gemini-3-flash-preview"
 
 CHAPTER_PATTERNS = [
     r'^第[一二三四五六七八九十百千\d]+[章节篇部]', r'^Chapter\s*\d+', r'^CHAPTER\s*\d+',
@@ -88,11 +88,13 @@ SUPPORTED_LANGUAGES = {
     "德语": {"code": "de", "english_name": "German", "char_pattern": r'\b[a-zA-ZäöüßÄÖÜ]+\b', "word_based": True, "description": "Deutsch"},
 }
 
-# ── 进度追踪 ──────────────────────────────────────────────
+# ── 进度追踪（线程安全）────────────────────────────────────
 _task_progress: dict = {}
+_progress_lock = threading.Lock()
 _memory_module = None
 # 当前执行任务的 task_id，用于将 memory 的 log_stream 写入该任务的 stream_log
 _stream_task_id = threading.local()
+_log_patch_installed = False
 
 
 def _get_memory_module():
@@ -110,6 +112,59 @@ def _get_memory_module():
     return _memory_module
 
 
+def _install_log_patches():
+    """一次性安装日志补丁，通过 threading.local 路由到正确的任务（线程安全）"""
+    global _log_patch_installed
+    if _log_patch_installed:
+        return
+
+    memory_module = _get_memory_module()
+    _orig_log_stream = memory_module.log_manager.log_stream
+    _orig_log = memory_module.log_manager.log
+    _orig_log_exception = memory_module.log_manager.log_exception
+
+    def _safe_log_stream(content):
+        _orig_log_stream(content)
+        tid = getattr(_stream_task_id, "task_id", None)
+        if tid:
+            with _progress_lock:
+                if tid in _task_progress:
+                    cur = _task_progress[tid].get("stream_log", "")
+                    _task_progress[tid]["stream_log"] = cur + (content if isinstance(content, str) else str(content))
+
+    def _safe_log(message, level="INFO"):
+        _orig_log(message, level)
+        print(f"[memory-log] {message}")
+        tid = getattr(_stream_task_id, "task_id", None)
+        if tid:
+            with _progress_lock:
+                if tid in _task_progress:
+                    ts = datetime.now().strftime("%H:%M:%S")
+                    line = f"[{ts}] {message}\n"
+                    cur = _task_progress[tid].get("stream_log", "")
+                    _task_progress[tid]["stream_log"] = cur + line
+
+    def _safe_log_exception(message, data=None):
+        _orig_log_exception(message, data)
+        print(f"[memory-ERR] {message}" + (f" | {str(data)[:300]}" if data else ""))
+        tid = getattr(_stream_task_id, "task_id", None)
+        if tid:
+            with _progress_lock:
+                if tid in _task_progress:
+                    ts = datetime.now().strftime("%H:%M:%S")
+                    line = f"[{ts}] ⚠️ {message}"
+                    if data:
+                        line += f" | {str(data)[:200]}"
+                    cur = _task_progress[tid].get("stream_log", "")
+                    _task_progress[tid]["stream_log"] = cur + line + "\n"
+
+    memory_module.log_manager.log_stream = _safe_log_stream
+    memory_module.log_manager.log = _safe_log
+    memory_module.log_manager.log_exception = _safe_log_exception
+    _log_patch_installed = True
+    print("[alignment] ✅ 日志补丁已永久安装（线程安全模式）")
+
+
 def _update_progress(task_id: str, progress: int, message: str, **extra):
     data = {
         "status": "processing",
@@ -117,29 +172,33 @@ def _update_progress(task_id: str, progress: int, message: str, **extra):
         "message": message,
         **extra,
     }
-    # 保留已有 stream_log，避免被覆盖
-    if task_id in _task_progress and "stream_log" in _task_progress[task_id]:
-        data.setdefault("stream_log", _task_progress[task_id]["stream_log"])
-    _task_progress[task_id] = data
+    with _progress_lock:
+        # 保留已有 stream_log，避免被覆盖
+        if task_id in _task_progress and "stream_log" in _task_progress[task_id]:
+            data.setdefault("stream_log", _task_progress[task_id]["stream_log"])
+        _task_progress[task_id] = data
 
 
 def _complete_task(task_id: str, *, result: dict = None, error: str = None):
-    if error:
-        stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
-        _task_progress[task_id] = {
-            "status": "failed", "progress": 100, "message": "处理失败", "error": error,
-            "stream_log": stream_log,
-        }
-    else:
-        stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
-        if result is not None:
-            result = dict(result)
-            result["stream_log"] = stream_log
-        _task_progress[task_id] = {"status": "done", "progress": 100, "message": "处理完成", "result": result}
+    with _progress_lock:
+        if error:
+            stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
+            _task_progress[task_id] = {
+                "status": "failed", "progress": 100, "message": "处理失败", "error": error,
+                "stream_log": stream_log,
+            }
+        else:
+            stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
+            if result is not None:
+                result = dict(result)
+                result["stream_log"] = stream_log
+            _task_progress[task_id] = {"status": "done", "progress": 100, "message": "处理完成", "result": result}
 
 
 def get_alignment_progress(task_id: str) -> Optional[dict]:
-    return _task_progress.get(task_id)
+    with _progress_lock:
+        data = _task_progress.get(task_id)
+        return dict(data) if data else None
 
 
 # ── Prompt 生成 ───────────────────────────────────────────
@@ -1511,57 +1570,16 @@ def _run_alignment_sync(
     threshold_8: int = 175000,
     buffer_chars: int = 2000,
 ):
-    """同步执行对齐任务 - 直接调用 memory.py 原生函数，零 monkey-patch"""
-    memory_module = None
-    original_log_stream = None
-    original_log = None
-    original_log_exception = None
+    """同步执行对齐任务 - 线程安全版，支持多任务并发"""
     try:
         _update_progress(task_id, 5, "正在加载处理引擎...", stream_log="")
 
         memory_module = _get_memory_module()
+        _install_log_patches()
 
-        # 仅 patch log_stream 用于前端展示（不改任何处理逻辑）
+        # 设置当前线程的 task_id，永久日志补丁通过 threading.local 自动路由
         _stream_task_id.task_id = task_id
-        original_log_stream = memory_module.log_manager.log_stream
-
-        def _patched_log_stream(content):
-            original_log_stream(content)
-            tid = getattr(_stream_task_id, "task_id", None)
-            if tid and tid in _task_progress:
-                cur = _task_progress[tid].get("stream_log", "")
-                _task_progress[tid]["stream_log"] = cur + (content if isinstance(content, str) else str(content))
-
-        memory_module.log_manager.log_stream = _patched_log_stream
-
-        # 也捕获 log 和 exception 到 stream_log
-        original_log = memory_module.log_manager.log
-        original_log_exception = memory_module.log_manager.log_exception
-
-        def _patched_log(message, level="INFO"):
-            original_log(message, level)
-            print(f"[memory-log] {message}")
-            tid = getattr(_stream_task_id, "task_id", None)
-            if tid and tid in _task_progress:
-                ts = datetime.now().strftime("%H:%M:%S")
-                line = f"[{ts}] {message}\n"
-                cur = _task_progress[tid].get("stream_log", "")
-                _task_progress[tid]["stream_log"] = cur + line
-
-        def _patched_log_exception(message, data=None):
-            original_log_exception(message, data)
-            print(f"[memory-ERR] {message}" + (f" | {str(data)[:300]}" if data else ""))
-            tid = getattr(_stream_task_id, "task_id", None)
-            if tid and tid in _task_progress:
-                ts = datetime.now().strftime("%H:%M:%S")
-                line = f"[{ts}] ⚠️ {message}"
-                if data:
-                    line += f" | {str(data)[:200]}"
-                cur = _task_progress[tid].get("stream_log", "")
-                _task_progress[tid]["stream_log"] = cur + line + "\n"
-
-        memory_module.log_manager.log = _patched_log
-        memory_module.log_manager.log_exception = _patched_log_exception
+        _log = memory_module.log_manager.log
 
         # 绝对路径
         original_path = os.path.abspath(original_path)
@@ -1584,10 +1602,10 @@ def _run_alignment_sync(
         print(f"[alignment] translated={translated_path}, exists={os.path.exists(translated_path)}, size={os.path.getsize(translated_path) if os.path.exists(translated_path) else 'N/A'}")
         print(f"[alignment] file_type={file_type}, model={model_name} ({model_id})")
         print(f"[alignment] lang: {source_lang} → {target_lang}")
-        _patched_log(f"语言对: {source_lang} → {target_lang}")
-        _patched_log(f"后处理分句: {'启用' if enable_post_split else '禁用'}")
-        _patched_log(f"模型: {model_name} ({model_id})")
-        _patched_log(f"文件类型: {file_type.upper()}")
+        _log(f"语言对: {source_lang} → {target_lang}")
+        _log(f"后处理分句: {'启用' if enable_post_split else '禁用'}")
+        _log(f"模型: {model_name} ({model_id})")
+        _log(f"文件类型: {file_type.upper()}")
 
         _update_progress(task_id, 8, "正在分析文档...")
 
@@ -1634,14 +1652,14 @@ def _run_alignment_sync(
         t_unit = "字" if not t_info.get('word_based', True) else "词"
 
         print(f"[alignment] 原文: {count_a:,} {s_unit}, 译文: {count_b:,} {t_unit}")
-        _patched_log(f"原文: {count_a:,} {s_unit}")
-        _patched_log(f"译文: {count_b:,} {t_unit}")
+        _log(f"原文: {count_a:,} {s_unit}")
+        _log(f"译文: {count_b:,} {t_unit}")
         _update_progress(task_id, 15, f"原文 {count_a:,} {s_unit}，译文 {count_b:,} {t_unit}")
 
         # 分割策略（与 GUI run_processing 1:1）
         if file_type == 'pptx':
             split_parts = 1
-            _patched_log("PPT文件：不进行分割")
+            _log("PPT文件：不进行分割")
         else:
             max_count = max(count_a, count_b)
             split_parts = 1
@@ -1659,7 +1677,7 @@ def _run_alignment_sync(
                 split_parts = 3
             elif max_count > threshold_2:
                 split_parts = 2
-            _patched_log(f"分割策略: {split_parts} 份")
+            _log(f"分割策略: {split_parts} 份")
 
         _update_progress(task_id, 20, f"分割策略: {split_parts} 份")
 
@@ -1668,10 +1686,10 @@ def _run_alignment_sync(
 
         if split_parts > 1 and file_type == 'docx':
             _update_progress(task_id, 25, f"正在分割文档（{split_parts} 份，缓冲区 {buffer_chars} 字）...")
-            _patched_log(f"分割原文（主文档，自主计算分割点）...")
+            _log(f"分割原文（主文档，自主计算分割点）...")
             files_a, part_info_a, split_ratios = memory_module.smart_split_with_buffer(
                 original_path, split_parts, temp_dir, source_lang, buffer_chars)
-            _patched_log(f"分割译文（从文档，使用原文的分割比例）...")
+            _log(f"分割译文（从文档，使用原文的分割比例）...")
             files_b, part_info_b, _ = memory_module.smart_split_with_buffer(
                 translated_path, split_parts, temp_dir, target_lang, buffer_chars,
                 split_element_ratios=split_ratios)
@@ -1696,7 +1714,7 @@ def _run_alignment_sync(
 
         # ── AI 对齐 ──
         _update_progress(task_id, 30, f"AI 对齐中（共 {len(tasks_queue)} 个任务）...")
-        _patched_log(f"待处理任务数: {len(tasks_queue)}")
+        _log(f"待处理任务数: {len(tasks_queue)}")
         progress_per_task = 50 / len(tasks_queue) if tasks_queue else 50
 
         for idx, task in enumerate(tasks_queue):
@@ -1704,7 +1722,7 @@ def _run_alignment_sync(
             _update_progress(task_id, progress,
                              f"AI 对齐中 ({idx + 1}/{len(tasks_queue)})...")
 
-            _patched_log(f"处理任务 {idx + 1}/{len(tasks_queue)}: {os.path.basename(task['output'])}")
+            _log(f"处理任务 {idx + 1}/{len(tasks_queue)}: {os.path.basename(task['output'])}")
             print(f"[alignment] 处理任务 {idx + 1}/{len(tasks_queue)}")
             print(f"[alignment]   original: {task['original']}")
             print(f"[alignment]   trans: {task['trans']}")
@@ -1738,9 +1756,9 @@ def _run_alignment_sync(
 
             print(f"[alignment] 任务 {idx + 1} 结果: success={success}, output_exists={os.path.exists(task['output'])}")
             if success and os.path.exists(task['output']):
-                _patched_log(f"任务 {idx + 1} 成功: {os.path.basename(task['output'])}")
+                _log(f"任务 {idx + 1} 成功: {os.path.basename(task['output'])}")
             else:
-                _patched_log(f"任务 {idx + 1} 失败: {os.path.basename(task['output'])}")
+                _log(f"任务 {idx + 1} 失败: {os.path.basename(task['output'])}")
                 if task['output'] in generated_excel_paths:
                     generated_excel_paths.remove(task['output'])
 
@@ -1763,7 +1781,7 @@ def _run_alignment_sync(
             row_count = len(pd.read_excel(final_path))
             issues = _quality_check(pd.read_excel(final_path), source_lang, target_lang)
             print(f"[alignment] 完成! {row_count} 行")
-            _patched_log(f"处理完成！{row_count} 行, 路径: {rel}")
+            _log(f"处理完成！{row_count} 行, 路径: {rel}")
             _complete_task(task_id, result={
                 "output_excel": rel,
                 "row_count": row_count,
@@ -1781,13 +1799,7 @@ def _run_alignment_sync(
         print(f"[alignment] 异常:\n{tb}")
         _complete_task(task_id, error=str(e))
     finally:
-        if memory_module is not None:
-            if original_log_stream is not None:
-                memory_module.log_manager.log_stream = original_log_stream
-            if original_log is not None:
-                memory_module.log_manager.log = original_log
-            if original_log_exception is not None:
-                memory_module.log_manager.log_exception = original_log_exception
+        # 仅清理线程局部变量，永久补丁无需恢复
         if hasattr(_stream_task_id, "task_id"):
             del _stream_task_id.task_id
 

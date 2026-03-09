@@ -207,7 +207,7 @@ async def run_alignment(
     translated_file: UploadFile = File(..., description="译文文件 (docx/doc/pptx/xlsx/xls)"),
     source_lang: str = Query("中文", description="原文语言"),
     target_lang: str = Query("英语", description="译文语言"),
-    model_name: str = Query("Google Gemini 2.5 Flash", description="模型名称"),
+    model_name: str = Query("Google gemini-3-flash-preview", description="模型名称"),
     enable_post_split: bool = Query(True, description="启用后处理细粒度分句"),
     threshold_2: int = Query(25000, description="分割阈值 2 份"),
     threshold_3: int = Query(50000, description="分割阈值 3 份"),

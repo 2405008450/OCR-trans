@@ -49,8 +49,8 @@ OUTPUT_DIR = "Result_Output"
 # ==========================================
 # OpenRouter 模型
 OPENROUTER_MODELS = {
-    "Google Gemini 2.5 Flash": {
-        "id": "google/gemini-2.5-flash",
+    "Google gemini-3-flash-preview": {
+        "id": "google/gemini-3-flash-preview",
         "description": "建议先检查文章是否有目录，先将目录删除再处理",
         "max_output": 65536,
         "provider": "openrouter"
@@ -71,7 +71,7 @@ OPENROUTER_MODELS = {
 
 # 当前可用模型（根据提供商切换）
 AVAILABLE_MODELS = OPENROUTER_MODELS.copy()
-DEFAULT_MODEL = "Google Gemini 2.5 Flash"
+DEFAULT_MODEL = "Google gemini-3-flash-preview"
 DEFAULT_PROVIDER = "openrouter"  # 路智深已屏蔽，默认使用 OpenRouter
 
 

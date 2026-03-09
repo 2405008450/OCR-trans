@@ -91,7 +91,7 @@ function populateDefaults() {
     targetLangSelect.value = '英语';
 
     modelSelect.innerHTML = '';
-    modelSelect.add(new Option('Google Gemini 2.5 Flash', 'Google Gemini 2.5 Flash'));
+    modelSelect.add(new Option('Google gemini-3-flash-preview', 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option('Google Gemini 2.5 Pro', 'Google Gemini 2.5 Pro'));
 }
 
@@ -182,7 +182,7 @@ async function startAlignment() {
             try {
                 const err = await resp.json();
                 msg = err?.detail || msg;
-            } catch (_) {}
+            } catch (_) { }
             throw new Error(msg);
         }
 
