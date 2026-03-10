@@ -1243,7 +1243,10 @@ def _get_watermark_font_cjk():
     paths = [
         "C:/Windows/Fonts/simhei.ttf",
         "C:/Windows/Fonts/msyh.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         "/System/Library/Fonts/PingFang.ttc",
     ]
@@ -1288,7 +1291,14 @@ def add_watermark(img_path: str, output_path: str = None) -> Optional[str]:
                 sz = draw_obj.textsize(line, font=font)
                 return sz[0], sz[1]
             except Exception:
-                return 50, 20
+                est_w = max(50, int(len(line) * WATERMARK_FONT_SIZE * 0.65))
+                est_h = max(20, int(WATERMARK_FONT_SIZE * 1.2))
+                return est_w, est_h
+        except Exception:
+            # 字体不支持文本（如 UnicodeEncodeError）时回退估算，避免主流程失败
+            est_w = max(50, int(len(line) * WATERMARK_FONT_SIZE * 0.65))
+            est_h = max(20, int(WATERMARK_FONT_SIZE * 1.2))
+            return est_w, est_h
 
     # 按行选字体，计算每行宽高
     line_heights = []
@@ -1310,8 +1320,9 @@ def add_watermark(img_path: str, output_path: str = None) -> Optional[str]:
         y = y_start + (sum(line_heights[:i]) + 4 * i)
         try:
             draw.text((x, y), line, font=font, fill=color)
-        except Exception:
-            draw.text((x, y), line, fill=color)
+        except Exception as e:
+            print(f"⚠️ 水印绘制失败（已跳过该行）: {line} | {e}")
+            continue
 
     out = Image.alpha_composite(img, overlay)
     out_rgb = out.convert("RGB")
@@ -1445,9 +1456,12 @@ def process_image(
         output_path=os.path.join(output_dir, f"{base_name}_translated.jpg")
     )
 
-    # 步骤8: 添加水印
+    # 步骤8: 添加水印（尽力而为，失败不影响主任务结果）
     if output_img:
-        add_watermark(output_img)
+        try:
+            add_watermark(output_img)
+        except Exception as e:
+            print(f"⚠️ 水印步骤失败，已忽略: {e}")
 
     print("\n" + "=" * 60)
     print("✅ 全部完成！")
@@ -1462,4 +1476,3 @@ def process_image(
         "final_output": output_img,
         "items_count": len(items)
     }
-
