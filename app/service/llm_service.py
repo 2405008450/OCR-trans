@@ -249,18 +249,15 @@ async def submit_ocr_task(
         import asyncio as _asyncio
 
         async def _async_task():
-            image_paths = convert_input_to_images(input_path, settings.TEMP_IMAGES_DIR)
+            from fastapi.concurrency import run_in_threadpool
+            # convert_input_to_images 是同步 IO，必须放到 threadpool 避免阻塞事件循环
+            image_paths = await run_in_threadpool(convert_input_to_images, input_path, settings.TEMP_IMAGES_DIR)
             if not image_paths:
                 raise ValueError(f"不支持的文件格式: {file_ext}")
 
             results = []
             for idx, img_path in enumerate(image_paths):
                 print(f"\n[后台任务 {task_id}] 处理第 {idx + 1}/{len(image_paths)} 张图片...")
-
-                # 首张图片开始前，将状态从 queued 更新为 processing
-                if idx == 0:
-                    with _ocr_tasks_lock:
-                        _ocr_tasks[task_id]["status"] = "processing"
 
                 if doc_type == 'marriage_cert':
                     template = (marriage_page_template or 'page2').lower().strip()
@@ -284,7 +281,10 @@ async def submit_ocr_task(
                         _rsx, _rsy = 36, -12
 
                     async with ai_process_lock:
-                        from fastapi.concurrency import run_in_threadpool
+                        # 获得锁后（真正开始处理时）才将状态更新为 processing
+                        if idx == 0:
+                            with _ocr_tasks_lock:
+                                _ocr_tasks[task_id]["status"] = "processing"
                         result = await run_in_threadpool(
                             process_marriage_cert_image,
                             input_path=img_path,
@@ -308,7 +308,10 @@ async def submit_ocr_task(
                         )
                 else:
                     async with ai_process_lock:
-                        from fastapi.concurrency import run_in_threadpool
+                        # 获得锁后（真正开始处理时）才将状态更新为 processing
+                        if idx == 0:
+                            with _ocr_tasks_lock:
+                                _ocr_tasks[task_id]["status"] = "processing"
                         result = await run_in_threadpool(
                             process_image,
                             input_path=img_path,

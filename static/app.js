@@ -278,12 +278,14 @@ async function processFile() {
         const submitData = await submitResp.json();
         const taskId = submitData.task_id;
 
-        // 轮询任务状态，每 2 秒一次，最多 150 次（5 分钟）
+        // 轮询任务状态，每 2 秒一次，最多 150 次（5 分钟），第一次立即执行
         const queueOverlay = document.getElementById('queueOverlay');
         const MAX_POLLS = 150;
         let polls = 0;
         const result = await new Promise((resolve, reject) => {
-            const pollInterval = setInterval(async () => {
+            let pollInterval = null;
+
+            const doPoll = async () => {
                 polls++;
                 if (polls > MAX_POLLS) {
                     clearInterval(pollInterval);
@@ -320,7 +322,10 @@ async function processFile() {
                     if (queueOverlay) queueOverlay.style.display = 'none';
                     reject(e);
                 }
-            }, 2000);
+            };
+
+            doPoll(); // 立即执行第一次，不等待 2 秒
+            pollInterval = setInterval(doPoll, 2000);
         });
 
         // 完成进度
