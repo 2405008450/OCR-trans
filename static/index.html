@@ -191,6 +191,15 @@
                 </div>
             </section>
 
+            <!-- 排队等待弹窗覆盖层 -->
+            <div id="queueOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; align-items:center; justify-content:center;">
+                <div style="background:#fff; border-radius:16px; padding:36px 44px; text-align:center; max-width:340px; box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+                    <div class="spinner" style="margin:0 auto 18px;"></div>
+                    <h3 style="margin:0 0 10px; font-size:18px; color:#333;">排队等待中</h3>
+                    <p style="color:#888; margin:0; font-size:14px; line-height:1.6;">当前有其他任务正在处理<br>您的任务将在完成后自动开始</p>
+                </div>
+            </div>
+
             <!-- 结果展示 -->
             <section class="result-section" id="resultSection" style="display: none;">
                 <div class="result-header">

@@ -1,14 +1,28 @@
 import os
 import uuid
+import asyncio
+import threading
 from fastapi import UploadFile
 from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.service.image_processor import process_image, convert_input_to_images
 from app.service.marriage_cert_processor import process_marriage_cert_image
 
+# 在文件顶部创建一个全局锁，限制同时只能执行1个耗时的 AI 处理任务
+ai_process_lock = asyncio.Lock()
+
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
 os.makedirs(settings.TEMP_IMAGES_DIR, exist_ok=True)
+
+# OCR 任务状态字典：task_id -> {"status": "processing"|"done"|"error", "result": ..., "error": ...}
+_ocr_tasks: Dict[str, Dict[str, Any]] = {}
+_ocr_tasks_lock = threading.Lock()
+
+
+def get_ocr_task_status(task_id: str) -> Optional[Dict[str, Any]]:
+    with _ocr_tasks_lock:
+        return _ocr_tasks.get(task_id)
 
 async def run_llm_task(
     file: UploadFile,
@@ -115,37 +129,44 @@ async def run_llm_task(
                 f"colon_fix={enable_colon_fix}, confidence={confidence_threshold}"
             )
 
-            result = process_marriage_cert_image(
-                input_path=img_path,
-                output_dir=settings.OUTPUT_DIR,
-                from_lang=from_lang,
-                to_lang=to_lang,
-                enable_correction=enable_correction,
-                enable_visualization=enable_visualization,
-                enable_merge=enable_merge,
-                enable_overlap_fix=enable_overlap_fix,
-                enable_colon_fix=enable_colon_fix,
-                font_size=font_size if font_size else 18,
-                confidence_threshold=confidence_threshold,
-                page_template=template,
-                registrar_signature_text=registrar_signature_text,
-                registered_by_text=registered_by_text,
-                registered_by_offset_x=registered_by_offset_x,
-                registered_by_offset_y=registered_by_offset_y,
-                registrar_signature_offset_x=registrar_signature_offset_x,
-                registrar_signature_offset_y=registrar_signature_offset_y,
-            )
+            # 使用全局锁进行排队（防止双并发耗尽物理内存），且放到线程池执行（避免阻塞主事件循环导致服务假死）
+            async with ai_process_lock:
+                from fastapi.concurrency import run_in_threadpool
+                result = await run_in_threadpool(
+                    process_marriage_cert_image,
+                    input_path=img_path,
+                    output_dir=settings.OUTPUT_DIR,
+                    from_lang=from_lang,
+                    to_lang=to_lang,
+                    enable_correction=enable_correction,
+                    enable_visualization=enable_visualization,
+                    enable_merge=enable_merge,
+                    enable_overlap_fix=enable_overlap_fix,
+                    enable_colon_fix=enable_colon_fix,
+                    font_size=font_size if font_size else 18,
+                    confidence_threshold=confidence_threshold,
+                    page_template=template,
+                    registrar_signature_text=registrar_signature_text,
+                    registered_by_text=registered_by_text,
+                    registered_by_offset_x=registered_by_offset_x,
+                    registered_by_offset_y=registered_by_offset_y,
+                    registrar_signature_offset_x=registrar_signature_offset_x,
+                    registrar_signature_offset_y=registrar_signature_offset_y,
+                )
         else:
             # 默认：身份证处理
-            result = process_image(
-                input_path=img_path,
-                output_dir=settings.OUTPUT_DIR,
-                from_lang=from_lang,
-                to_lang=to_lang,
-                enable_correction=enable_correction,
-                enable_visualization=enable_visualization,
-                card_side=card_side
-            )
+            async with ai_process_lock:
+                from fastapi.concurrency import run_in_threadpool
+                result = await run_in_threadpool(
+                    process_image,
+                    input_path=img_path,
+                    output_dir=settings.OUTPUT_DIR,
+                    from_lang=from_lang,
+                    to_lang=to_lang,
+                    enable_correction=enable_correction,
+                    enable_visualization=enable_visualization,
+                    card_side=card_side
+                )
         
         # 转换字段名称以匹配前端期望，并标准化路径格式
         def normalize_path(path):
@@ -179,3 +200,160 @@ async def run_llm_task(
         "results": results,
         "total_images": len(image_paths)
     }
+
+
+async def submit_ocr_task(
+    file: UploadFile,
+    from_lang: str = 'zh',
+    to_lang: str = 'en',
+    enable_correction: bool = False,
+    enable_visualization: bool = True,
+    card_side: str = 'front',
+    doc_type: str = 'id_card',
+    marriage_page_template: str = 'page2',
+    registrar_signature_text: Optional[str] = None,
+    registered_by_text: Optional[str] = None,
+    registered_by_offset_x: int = 0,
+    registered_by_offset_y: int = 0,
+    registrar_signature_offset_x: int = 36,
+    registrar_signature_offset_y: int = -12,
+    enable_merge: bool = True,
+    enable_overlap_fix: bool = True,
+    enable_colon_fix: bool = False,
+    font_size: Optional[int] = None,
+) -> str:
+    """
+    异步提交 OCR 任务，立即返回 task_id，任务在后台执行。
+    通过 get_ocr_task_status(task_id) 查询结果。
+    """
+    task_id = str(uuid.uuid4())
+
+    # 先在当前协程中读取文件内容（UploadFile 只能在事件循环中读取）
+    file_ext = os.path.splitext(file.filename)[1].lower() or ".jpg"
+    safe_filename = f"{task_id}{file_ext}"
+    input_path = os.path.join(settings.UPLOAD_DIR, safe_filename)
+    content = await file.read()
+    original_filename = file.filename
+
+    with open(input_path, "wb") as f:
+        f.write(content)
+
+    # 记录任务为排队中（等待 ai_process_lock）
+    with _ocr_tasks_lock:
+        _ocr_tasks[task_id] = {"status": "queued", "result": None, "error": None}
+
+    # 获取当前事件循环，供后台线程回写结果
+    loop = asyncio.get_event_loop()
+
+    def _run_in_thread():
+        import asyncio as _asyncio
+
+        async def _async_task():
+            image_paths = convert_input_to_images(input_path, settings.TEMP_IMAGES_DIR)
+            if not image_paths:
+                raise ValueError(f"不支持的文件格式: {file_ext}")
+
+            results = []
+            for idx, img_path in enumerate(image_paths):
+                print(f"\n[后台任务 {task_id}] 处理第 {idx + 1}/{len(image_paths)} 张图片...")
+
+                # 首张图片开始前，将状态从 queued 更新为 processing
+                if idx == 0:
+                    with _ocr_tasks_lock:
+                        _ocr_tasks[task_id]["status"] = "processing"
+
+                if doc_type == 'marriage_cert':
+                    template = (marriage_page_template or 'page2').lower().strip()
+                    confidence_threshold = 0.5
+                    _em, _eo, _ec = enable_merge, enable_overlap_fix, enable_colon_fix
+                    _rs, _rb = registrar_signature_text, registered_by_text
+                    _rbx, _rby = registered_by_offset_x, registered_by_offset_y
+                    _rsx, _rsy = registrar_signature_offset_x, registrar_signature_offset_y
+
+                    if template == 'page1':
+                        _em, _eo, _ec = True, True, False
+                        confidence_threshold = 0.8
+                    elif template == 'page2':
+                        _em, _eo, _ec = False, True, True
+                    elif template == 'page3':
+                        _em, _eo, _ec = True, True, False
+
+                    if template != 'page1':
+                        _rs = _rb = None
+                        _rbx = _rby = 0
+                        _rsx, _rsy = 36, -12
+
+                    async with ai_process_lock:
+                        from fastapi.concurrency import run_in_threadpool
+                        result = await run_in_threadpool(
+                            process_marriage_cert_image,
+                            input_path=img_path,
+                            output_dir=settings.OUTPUT_DIR,
+                            from_lang=from_lang,
+                            to_lang=to_lang,
+                            enable_correction=enable_correction,
+                            enable_visualization=enable_visualization,
+                            enable_merge=_em,
+                            enable_overlap_fix=_eo,
+                            enable_colon_fix=_ec,
+                            font_size=font_size if font_size else 18,
+                            confidence_threshold=confidence_threshold,
+                            page_template=template,
+                            registrar_signature_text=_rs,
+                            registered_by_text=_rb,
+                            registered_by_offset_x=_rbx,
+                            registered_by_offset_y=_rby,
+                            registrar_signature_offset_x=_rsx,
+                            registrar_signature_offset_y=_rsy,
+                        )
+                else:
+                    async with ai_process_lock:
+                        from fastapi.concurrency import run_in_threadpool
+                        result = await run_in_threadpool(
+                            process_image,
+                            input_path=img_path,
+                            output_dir=settings.OUTPUT_DIR,
+                            from_lang=from_lang,
+                            to_lang=to_lang,
+                            enable_correction=enable_correction,
+                            enable_visualization=enable_visualization,
+                            card_side=card_side,
+                        )
+
+                def normalize_path(path):
+                    return path.replace("\\", "/") if path else None
+
+                formatted_result = {
+                    "corrected_image": None,
+                    "visualization_image": normalize_path(result.get("visualization")),
+                    "translated_image": normalize_path(result.get("final_output")),
+                    "ocr_json": normalize_path(result.get("raw_ocr_json")),
+                    "translated_json": normalize_path(result.get("translated_json")),
+                }
+                print(f"[后台任务 {task_id}] 翻译图片: {formatted_result['translated_image']}")
+                results.append(formatted_result)
+
+            return {
+                "task_id": task_id,
+                "filename": original_filename,
+                "results": results,
+                "total_images": len(image_paths),
+            }
+
+        try:
+            # 在主事件循环上运行异步任务（与 ai_process_lock 共享同一循环）
+            future = _asyncio.run_coroutine_threadsafe(_async_task(), loop)
+            result_data = future.result()
+            with _ocr_tasks_lock:
+                _ocr_tasks[task_id] = {"status": "done", "result": result_data, "error": None}
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[后台任务 {task_id}] 失败:\n{tb}")
+            with _ocr_tasks_lock:
+                _ocr_tasks[task_id] = {"status": "error", "result": None, "error": str(e)}
+
+    thread = threading.Thread(target=_run_in_thread, daemon=True)
+    thread.start()
+
+    return task_id

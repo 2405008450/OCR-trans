@@ -3,7 +3,7 @@ import traceback
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from app.service.llm_service import run_llm_task
+from app.service.llm_service import run_llm_task, submit_ocr_task, get_ocr_task_status
 from app.service.number_check_service import run_number_check_task, _get_task_progress
 from app.service.alignment_service import (
     run_alignment_task, get_alignment_progress, _complete_task as _alignment_complete_task,
@@ -51,7 +51,7 @@ async def run_task(
     - 可视化结果（可选）
     """
     try:
-        result = await run_llm_task(
+        task_id = await submit_ocr_task(
             file=file,
             from_lang=from_lang,
             to_lang=to_lang,
@@ -72,16 +72,14 @@ async def run_task(
             font_size=font_size,
         )
         return {
-            "status": "DONE",
-            "task_id": result["task_id"],
-            "filename": result["filename"],
-            "total_images": result["total_images"],
-            "results": result["results"]
+            "status": "ACCEPTED",
+            "task_id": task_id,
+            "message": "任务已提交，正在后台处理"
         }
     except Exception as e:
         tb = traceback.format_exc()
         print("=" * 60)
-        print("任务执行失败:")
+        print("任务提交失败:")
         print(tb)
         print("=" * 60)
         raise HTTPException(
@@ -89,9 +87,21 @@ async def run_task(
             detail={
                 "error": str(e),
                 "type": type(e).__name__,
-                "traceback": tb.split("\n")[-10:] if tb else []  # 最后10行便于排查
+                "traceback": tb.split("\n")[-10:] if tb else []
             }
         )
+
+
+@router.get("/run/status/{task_id}")
+async def get_run_task_status(task_id: str):
+    """
+    查询 OCR 翻译任务状态
+    返回: {"status": "processing"|"done"|"error", "result": {...}|null, "error": "..."|null}
+    """
+    task = get_ocr_task_status(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    return task
 
 
 @router.post("/number-check")

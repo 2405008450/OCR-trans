@@ -196,11 +196,11 @@ function clearFile() {
 // ========== 处理文件 ==========
 async function processFile() {
     if (!selectedFile) return;
-    
+
     // 切换到处理界面
     uploadSection.style.display = 'none';
     processingSection.style.display = 'block';
-    
+
     // 模拟进度
     let progress = 0;
     const progressInterval = setInterval(() => {
@@ -208,12 +208,12 @@ async function processFile() {
         if (progress > 90) progress = 90;
         updateProgress(progress);
     }, 500);
-    
+
     try {
         // 构建表单数据
         const formData = new FormData();
         formData.append('file', selectedFile);
-        
+
         // 构建URL参数（通用参数）
         const params = new URLSearchParams({
             from_lang: valueOrDefault(fromLang, 'zh'),
@@ -221,7 +221,7 @@ async function processFile() {
             enable_visualization: checkedOrDefault(enableVisualization, true),
             doc_type: valueOrDefault(docType, 'id_card'),
         });
-        
+
         // 根据证件类型添加特定参数
         if (valueOrDefault(docType, 'id_card') === 'id_card') {
             params.append('card_side', valueOrDefault(cardSide, 'front'));
@@ -264,28 +264,74 @@ async function processFile() {
                 params.append('font_size', fs);
             }
         }
-        
-        // 发送请求
-        const response = await fetch(`/task/run?${params}`, {
+
+        // 提交任务（立即返回 task_id）
+        const submitResp = await fetch(`/task/run?${params}`, {
             method: 'POST',
             body: formData
         });
-        
-        if (!response.ok) {
-            throw new Error(`请求失败: ${response.status}`);
+
+        if (!submitResp.ok) {
+            throw new Error(`提交失败: ${submitResp.status}`);
         }
-        
-        const result = await response.json();
-        
+
+        const submitData = await submitResp.json();
+        const taskId = submitData.task_id;
+
+        // 轮询任务状态，每 2 秒一次，最多 150 次（5 分钟）
+        const queueOverlay = document.getElementById('queueOverlay');
+        const MAX_POLLS = 150;
+        let polls = 0;
+        const result = await new Promise((resolve, reject) => {
+            const pollInterval = setInterval(async () => {
+                polls++;
+                if (polls > MAX_POLLS) {
+                    clearInterval(pollInterval);
+                    if (queueOverlay) queueOverlay.style.display = 'none';
+                    reject(new Error('处理超时，请重试'));
+                    return;
+                }
+                try {
+                    const statusResp = await fetch(`/task/run/status/${taskId}`);
+                    if (!statusResp.ok) {
+                        clearInterval(pollInterval);
+                        if (queueOverlay) queueOverlay.style.display = 'none';
+                        reject(new Error(`状态查询失败: ${statusResp.status}`));
+                        return;
+                    }
+                    const statusData = await statusResp.json();
+                    if (statusData.status === 'queued') {
+                        // 后台正在排队等待锁，显示排队弹窗
+                        if (queueOverlay) queueOverlay.style.display = 'flex';
+                    } else if (statusData.status === 'processing') {
+                        // 已获得锁开始处理，关闭排队弹窗
+                        if (queueOverlay) queueOverlay.style.display = 'none';
+                    } else if (statusData.status === 'done') {
+                        clearInterval(pollInterval);
+                        if (queueOverlay) queueOverlay.style.display = 'none';
+                        resolve(statusData.result);
+                    } else if (statusData.status === 'error') {
+                        clearInterval(pollInterval);
+                        if (queueOverlay) queueOverlay.style.display = 'none';
+                        reject(new Error(statusData.error || '处理失败'));
+                    }
+                } catch (e) {
+                    clearInterval(pollInterval);
+                    if (queueOverlay) queueOverlay.style.display = 'none';
+                    reject(e);
+                }
+            }, 2000);
+        });
+
         // 完成进度
         clearInterval(progressInterval);
         updateProgress(100);
-        
+
         // 延迟显示结果
         setTimeout(() => {
             displayResult(result);
         }, 500);
-        
+
     } catch (error) {
         clearInterval(progressInterval);
         console.error('处理失败:', error);
@@ -398,4 +444,6 @@ function resetApp() {
     resultSection.style.display = 'none';
     progressFill.style.width = '0%';
     progressText.textContent = '0%';
+    const queueOverlay = document.getElementById('queueOverlay');
+    if (queueOverlay) queueOverlay.style.display = 'none';
 }
