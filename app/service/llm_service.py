@@ -1,7 +1,6 @@
 import os
 import uuid
 import asyncio
-import threading
 from fastapi import UploadFile
 from typing import Dict, Any, Optional
 from app.core.config import settings
@@ -15,14 +14,13 @@ os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
 os.makedirs(settings.TEMP_IMAGES_DIR, exist_ok=True)
 
-# OCR 任务状态字典：task_id -> {"status": "processing"|"done"|"error", "result": ..., "error": ...}
+# OCR 任务状态字典：task_id -> {"status": "queued"|"processing"|"done"|"error", "result": ..., "error": ...}
+# 所有读写均在事件循环内完成，无需额外加锁
 _ocr_tasks: Dict[str, Dict[str, Any]] = {}
-_ocr_tasks_lock = threading.Lock()
 
 
 def get_ocr_task_status(task_id: str) -> Optional[Dict[str, Any]]:
-    with _ocr_tasks_lock:
-        return _ocr_tasks.get(task_id)
+    return _ocr_tasks.get(task_id)
 
 async def run_llm_task(
     file: UploadFile,
@@ -223,7 +221,7 @@ async def submit_ocr_task(
     font_size: Optional[int] = None,
 ) -> str:
     """
-    异步提交 OCR 任务，立即返回 task_id，任务在后台执行。
+    异步提交 OCR 任务，立即返回 task_id，任务作为后台协程执行。
     通过 get_ocr_task_status(task_id) 查询结果。
     """
     task_id = str(uuid.uuid4())
@@ -239,19 +237,17 @@ async def submit_ocr_task(
         f.write(content)
 
     # 记录任务为排队中（等待 ai_process_lock）
-    with _ocr_tasks_lock:
-        _ocr_tasks[task_id] = {"status": "queued", "result": None, "error": None}
+    _ocr_tasks[task_id] = {"status": "queued", "result": None, "error": None}
 
-    # 获取当前事件循环，供后台线程回写结果
-    loop = asyncio.get_event_loop()
+    async def _bg_task():
+        loop = asyncio.get_event_loop()
 
-    def _run_in_thread():
-        import asyncio as _asyncio
+        def normalize_path(path):
+            return path.replace("\\", "/") if path else None
 
-        async def _async_task():
-            from fastapi.concurrency import run_in_threadpool
-            # convert_input_to_images 是同步 IO，必须放到 threadpool 避免阻塞事件循环
-            image_paths = await run_in_threadpool(convert_input_to_images, input_path, settings.TEMP_IMAGES_DIR)
+        try:
+            # convert_input_to_images 是同步 IO，放到 executor 避免阻塞事件循环
+            image_paths = await loop.run_in_executor(None, convert_input_to_images, input_path, settings.TEMP_IMAGES_DIR)
             if not image_paths:
                 raise ValueError(f"不支持的文件格式: {file_ext}")
 
@@ -281,50 +277,49 @@ async def submit_ocr_task(
                         _rsx, _rsy = 36, -12
 
                     async with ai_process_lock:
-                        # 获得锁后（真正开始处理时）才将状态更新为 processing
+                        # 获得锁后才将状态更新为 processing（真正开始 AI 处理）
                         if idx == 0:
-                            with _ocr_tasks_lock:
-                                _ocr_tasks[task_id]["status"] = "processing"
-                        result = await run_in_threadpool(
-                            process_marriage_cert_image,
-                            input_path=img_path,
-                            output_dir=settings.OUTPUT_DIR,
-                            from_lang=from_lang,
-                            to_lang=to_lang,
-                            enable_correction=enable_correction,
-                            enable_visualization=enable_visualization,
-                            enable_merge=_em,
-                            enable_overlap_fix=_eo,
-                            enable_colon_fix=_ec,
-                            font_size=font_size if font_size else 18,
-                            confidence_threshold=confidence_threshold,
-                            page_template=template,
-                            registrar_signature_text=_rs,
-                            registered_by_text=_rb,
-                            registered_by_offset_x=_rbx,
-                            registered_by_offset_y=_rby,
-                            registrar_signature_offset_x=_rsx,
-                            registrar_signature_offset_y=_rsy,
+                            _ocr_tasks[task_id]["status"] = "processing"
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda: process_marriage_cert_image(
+                                input_path=img_path,
+                                output_dir=settings.OUTPUT_DIR,
+                                from_lang=from_lang,
+                                to_lang=to_lang,
+                                enable_correction=enable_correction,
+                                enable_visualization=enable_visualization,
+                                enable_merge=_em,
+                                enable_overlap_fix=_eo,
+                                enable_colon_fix=_ec,
+                                font_size=font_size if font_size else 18,
+                                confidence_threshold=confidence_threshold,
+                                page_template=template,
+                                registrar_signature_text=_rs,
+                                registered_by_text=_rb,
+                                registered_by_offset_x=_rbx,
+                                registered_by_offset_y=_rby,
+                                registrar_signature_offset_x=_rsx,
+                                registrar_signature_offset_y=_rsy,
+                            )
                         )
                 else:
                     async with ai_process_lock:
-                        # 获得锁后（真正开始处理时）才将状态更新为 processing
+                        # 获得锁后才将状态更新为 processing（真正开始 AI 处理）
                         if idx == 0:
-                            with _ocr_tasks_lock:
-                                _ocr_tasks[task_id]["status"] = "processing"
-                        result = await run_in_threadpool(
-                            process_image,
-                            input_path=img_path,
-                            output_dir=settings.OUTPUT_DIR,
-                            from_lang=from_lang,
-                            to_lang=to_lang,
-                            enable_correction=enable_correction,
-                            enable_visualization=enable_visualization,
-                            card_side=card_side,
+                            _ocr_tasks[task_id]["status"] = "processing"
+                        result = await loop.run_in_executor(
+                            None,
+                            lambda: process_image(
+                                input_path=img_path,
+                                output_dir=settings.OUTPUT_DIR,
+                                from_lang=from_lang,
+                                to_lang=to_lang,
+                                enable_correction=enable_correction,
+                                enable_visualization=enable_visualization,
+                                card_side=card_side,
+                            )
                         )
-
-                def normalize_path(path):
-                    return path.replace("\\", "/") if path else None
 
                 formatted_result = {
                     "corrected_image": None,
@@ -336,27 +331,23 @@ async def submit_ocr_task(
                 print(f"[后台任务 {task_id}] 翻译图片: {formatted_result['translated_image']}")
                 results.append(formatted_result)
 
-            return {
-                "task_id": task_id,
-                "filename": original_filename,
-                "results": results,
-                "total_images": len(image_paths),
+            _ocr_tasks[task_id] = {
+                "status": "done",
+                "result": {
+                    "task_id": task_id,
+                    "filename": original_filename,
+                    "results": results,
+                    "total_images": len(image_paths),
+                },
+                "error": None,
             }
-
-        try:
-            # 在主事件循环上运行异步任务（与 ai_process_lock 共享同一循环）
-            future = _asyncio.run_coroutine_threadsafe(_async_task(), loop)
-            result_data = future.result()
-            with _ocr_tasks_lock:
-                _ocr_tasks[task_id] = {"status": "done", "result": result_data, "error": None}
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             print(f"[后台任务 {task_id}] 失败:\n{tb}")
-            with _ocr_tasks_lock:
-                _ocr_tasks[task_id] = {"status": "error", "result": None, "error": str(e)}
+            _ocr_tasks[task_id] = {"status": "error", "result": None, "error": str(e)}
 
-    thread = threading.Thread(target=_run_in_thread, daemon=True)
-    thread.start()
+    # 用 asyncio.create_task 在当前事件循环中创建后台任务，立即返回
+    asyncio.create_task(_bg_task())
 
     return task_id
