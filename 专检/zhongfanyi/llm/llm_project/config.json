@@ -1,0 +1,9 @@
+{
+  "api_key": "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",
+  "base_url": "https://openrouter.ai/api/v1",
+  "model": "google/gemini-3-pro-preview",
+  "output_dir": "C:/Users/Administrator/Desktop/project/llm/llm_project",
+  "report_name": "",
+  "fixed_name": "",
+  "log_name": ""
+}

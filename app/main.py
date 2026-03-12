@@ -104,6 +104,16 @@ async def business_licence_page():
             return f.read()
     return f"<h1>错误：找不到 business_licence.html</h1><p>路径: {page_file}</p>"
 
+
+@app.get("/zhongfanyi", response_class=HTMLResponse)
+async def zhongfanyi_page():
+    page_file = STATIC_DIR / "zhongfanyi.html"
+    if page_file.exists():
+        with open(page_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return f"<h1>错误：找不到 zhongfanyi.html</h1><p>路径: {page_file}</p>"
+
+
 # 启动（一条命令，局域网访问 http://192.168.31.125:8001）：
 #   python -m app.main
 if __name__ == "__main__":

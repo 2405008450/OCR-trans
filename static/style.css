@@ -63,6 +63,29 @@ body {
     opacity: 0.9;
 }
 
+/* 头部导航：使用 Element Plus 绿色按钮风格 */
+.header-nav {
+    margin-top: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+}
+/* 用 <a> 模拟 el-button--success，保证无下划线、对齐图标、绿色按钮效果 */
+.header-nav a.el-button {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #fff;
+    cursor: pointer;
+}
+.header-nav a.el-button:hover,
+.header-nav a.el-button:focus {
+    color: #fff;
+}
+
 /* ========== 卡片样式 ========== */
 .upload-card,
 .processing-card,

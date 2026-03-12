@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>数字专检 - 文档数值校对</title>
+    <title>中翻译专检 - 原文译文对比与自动修复</title>
     <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -12,10 +12,10 @@
     <div class="container">
         <header class="header">
             <div class="logo">
-                <i class="fas fa-check-double"></i>
-                <h1>数字专检</h1>
+                <i class="fas fa-language"></i>
+                <h1>中翻译专检</h1>
             </div>
-            <p class="subtitle">上传原文与译文 DOCX，自动对比并批注修复</p>
+            <p class="subtitle">上传原文与译文（DOCX/PDF），可选规则文件，自动对比并批注修复</p>
             <nav class="header-nav">
                 <a href="/" class="el-button el-button--success"><i class="fas fa-home"></i> 返回首页</a>
             </nav>
@@ -25,20 +25,33 @@
             <section class="upload-section" id="uploadSection">
                 <div class="upload-card">
                     <h2>上传待专检文档</h2>
-                    <p class="upload-desc">仅支持 .docx；需同时上传原文和译文</p>
+                    <p class="upload-desc">原文、译文支持 .docx / .doc / .pdf；可选上传规则文件并勾选「使用 AI 规则」</p>
 
                     <div class="options-panel">
                         <div class="option-group" style="grid-column: 1 / -1;">
                             <label style="width: 100%;">
-                                <i class="fas fa-file-word"></i> 原文文件:
-                                <input type="file" id="originalFile" accept=".docx" style="margin-left: 8px;">
+                                <i class="fas fa-file-alt"></i> 原文文件:
+                                <input type="file" id="originalFile" accept=".docx,.doc,.pdf" style="margin-left: 8px;">
                             </label>
                         </div>
                         <div class="option-group" style="grid-column: 1 / -1;">
                             <label style="width: 100%;">
-                                <i class="fas fa-file-word"></i> 译文文件:
-                                <input type="file" id="translatedFile" accept=".docx" style="margin-left: 8px;">
+                                <i class="fas fa-file-alt"></i> 译文文件:
+                                <input type="file" id="translatedFile" accept=".docx,.doc,.pdf" style="margin-left: 8px;">
                             </label>
+                        </div>
+                        <div class="option-group" style="grid-column: 1 / -1;">
+                            <label class="checkbox-inline">
+                                <input type="checkbox" id="useAiRule" name="use_ai_rule">
+                                使用 AI 生成规则（需上传规则文件）
+                            </label>
+                        </div>
+                        <div class="option-group" style="grid-column: 1 / -1;">
+                            <label style="width: 100%;">
+                                <i class="fas fa-file-pdf"></i> 规则文件（可选，pdf/docx/txt）:
+                                <input type="file" id="ruleFile" accept=".pdf,.docx,.doc,.txt" style="margin-left: 8px;">
+                            </label>
+                            <span class="model-desc">勾选「使用 AI 规则」时上传，供 AI 总结生成对比规则</span>
                         </div>
                     </div>
 
@@ -46,8 +59,8 @@
                         <button class="btn-secondary" onclick="window.location.href='/'">
                             <i class="fas fa-home"></i> 返回首页
                         </button>
-                        <button class="btn-primary" id="btnRunCheck" style="max-width: 360px;">
-                            <i class="fas fa-play"></i> 开始数字专检
+                        <button class="btn-primary" id="btnRun" style="max-width: 360px;">
+                            <i class="fas fa-play"></i> 开始中翻译专检
                         </button>
                     </div>
                 </div>
@@ -56,10 +69,8 @@
             <section class="processing-section" id="processingSection" style="display: none;">
                 <div class="processing-card">
                     <div class="spinner"></div>
-                    <h2 id="processingTitle">数字专检处理中...</h2>
+                    <h2 id="processingTitle">中翻译专检处理中...</h2>
                     <p id="processingText">正在提取文本并调用对比引擎</p>
-
-                    <!-- 进度条区域 -->
                     <div class="progress-container" style="margin-top: 24px;">
                         <div class="progress-bar-wrapper">
                             <div class="progress-bar" id="progressBar">
@@ -85,6 +96,6 @@
             </section>
         </main>
     </div>
-    <script src="/static/number_check.js"></script>
+    <script src="/static/zhongfanyi.js"></script>
 </body>
 </html>

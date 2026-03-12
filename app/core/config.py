@@ -1,5 +1,10 @@
 import os
+from pathlib import Path
 from typing import Optional
+
+# 项目根目录（fastapi-llm-demo），.env 统一放此处
+_ROOT_DIR = Path(__file__).resolve().parents[2]
+_ENV_FILE = _ROOT_DIR / ".env"
 
 try:
     from pydantic_settings import BaseSettings
@@ -40,7 +45,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "*")  # 允许的源，用逗号分隔
     
     class Config:
-        env_file = ".env"
+        env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
         case_sensitive = True
 
 settings = Settings()

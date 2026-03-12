@@ -1219,6 +1219,7 @@ WATERMARK_ALPHA = 255  # 0-255，越小越透明
 WATERMARK_FONT_SIZE = 24
 WATERMARK_RIGHT_PADDING = 28   # 距右边距（像素）
 WATERMARK_BOTTOM_PADDING = 28  # 距下边距（像素），水印整体靠右下角
+WATERMARK_TOP_PADDING = 28     # 距上边距（像素），水印整体靠右上角时使用
 
 
 def _get_watermark_font_italic():
@@ -1259,9 +1260,10 @@ def _get_watermark_font_cjk():
     return ImageFont.load_default()
 
 
-def add_watermark(img_path: str, output_path: str = None) -> Optional[str]:
+def add_watermark(img_path: str, output_path: str = None, position: str = "bottom_right") -> Optional[str]:
     """
-    在图片右下角添加半透明文字水印，支持中英文。直接覆盖原图或保存到 output_path。
+    在图片上添加半透明文字水印，支持中英文。直接覆盖原图或保存到 output_path。
+    position: "bottom_right" 右下角（默认），"top_right" 右上角。
     """
     if output_path is None:
         output_path = img_path
@@ -1309,8 +1311,11 @@ def add_watermark(img_path: str, output_path: str = None) -> Optional[str]:
         line_widths.append(lw)
         line_heights.append(lh)
     total_height = sum(line_heights) + 4
-    # 靠右下角：右对齐、底对齐
-    y_start = h - total_height - WATERMARK_BOTTOM_PADDING
+    # 按 position 决定垂直位置：右上角或右下角，均为右对齐
+    if position == "top_right":
+        y_start = WATERMARK_TOP_PADDING
+    else:
+        y_start = h - total_height - WATERMARK_BOTTOM_PADDING
     y_start = max(10, y_start)
 
     color = (255, 0, 0, WATERMARK_ALPHA)  # 红色半透明

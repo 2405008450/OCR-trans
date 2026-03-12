@@ -106,6 +106,20 @@
           </div>
         </el-card>
       </el-col>
+
+      <el-col :xs="24" :md="6">
+        <el-card class="card">
+          <template #header>
+            <strong>中翻译专检</strong>
+          </template>
+          <div class="desc">
+            上传原文与译文（DOCX/PDF），可选规则文件与 AI 规则，自动对比并批注修复。
+          </div>
+          <div class="actions">
+            <el-button type="primary" plain @click="go('/zhongfanyi')">进入中翻译专检</el-button>
+          </div>
+        </el-card>
+      </el-col>
     </el-row>
   </div>
 

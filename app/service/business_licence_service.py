@@ -243,8 +243,8 @@ def _run_pipeline_in_thread(task_id: str, input_path: str, output_path: str,
         log("添加水印...")
         try:
             from app.service.image_processor import add_watermark
-            add_watermark(output_path)
-            log("水印已添加")
+            add_watermark(output_path, position="top_right")
+            log("水印已添加（右上角）")
         except Exception as wm_err:
             log(f"⚠️ 水印添加失败（已跳过）: {wm_err}")
 

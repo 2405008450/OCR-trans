@@ -1,6 +1,7 @@
 import os
 import traceback
 import asyncio
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from app.service.llm_service import run_llm_task, submit_ocr_task, get_ocr_task_status
@@ -10,8 +11,11 @@ from app.service.alignment_service import (
     AVAILABLE_MODELS as ALIGNMENT_MODELS, SUPPORTED_LANGUAGES, THRESHOLD_MAP, BUFFER_CHARS,
 )
 from app.service import business_licence_service as bl_service
+from app.service import zhongfanyi_service as zf_service
+from app.core.config import settings
 from typing import Optional
 from pydantic import BaseModel
+import asyncio
 
 router = APIRouter(prefix="/task", tags=["Task"])
 
@@ -187,6 +191,98 @@ async def get_number_check_status(task_id: str):
     if not progress:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
 
+    return progress
+
+
+# ── 中翻译专检（专检/zhongfanyi）──────────────────────────────────────
+
+@router.post("/zhongfanyi")
+async def run_zhongfanyi(
+    background_tasks: BackgroundTasks,
+    original_file: UploadFile = File(..., description="原文文档 (docx/pdf)"),
+    translated_file: UploadFile = File(..., description="译文文档 (docx/pdf)"),
+    use_ai_rule: bool = Query(False, description="是否使用 AI 生成规则"),
+    rule_file: Optional[UploadFile] = File(None, description="可选：规则文件 (pdf/docx/txt)，供 AI 总结生成规则"),
+):
+    """
+    中翻译专检：上传原文、译文，可选规则文件与是否使用 AI 规则，执行对比与自动修复，返回任务 ID 用于轮询。
+    """
+    import uuid
+    ext_orig = os.path.splitext(original_file.filename or "")[1].lower()
+    ext_tran = os.path.splitext(translated_file.filename or "")[1].lower()
+    allowed = {".docx", ".doc", ".pdf"}
+    if ext_orig not in allowed:
+        raise HTTPException(status_code=400, detail=f"不支持的原文格式: {ext_orig}，仅支持 docx/doc/pdf")
+    if ext_tran not in allowed:
+        raise HTTPException(status_code=400, detail=f"不支持的译文格式: {ext_tran}，仅支持 docx/doc/pdf")
+
+    task_id = str(uuid.uuid4())
+    upload_dir = Path(settings.UPLOAD_DIR) / "zhongfanyi" / task_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    original_path = upload_dir / f"original{ext_orig}"
+    translated_path = upload_dir / f"translated{ext_tran}"
+
+    orig_content = await original_file.read()
+    tran_content = await translated_file.read()
+    if not orig_content:
+        raise HTTPException(status_code=400, detail="原文文件内容为空，请重新选择文件后上传")
+    if not tran_content:
+        raise HTTPException(status_code=400, detail="译文文件内容为空，请重新选择文件后上传")
+    with open(original_path, "wb") as f:
+        f.write(orig_content)
+    with open(translated_path, "wb") as f:
+        f.write(tran_content)
+    print(f"[zhongfanyi] 文件已保存 - 原文: {len(orig_content)} bytes, 译文: {len(tran_content)} bytes")
+
+    ai_rule_file_path = None
+    if rule_file and use_ai_rule:
+        ext_rule = os.path.splitext(rule_file.filename or "")[1].lower()
+        if ext_rule not in {".pdf", ".docx", ".doc", ".txt"}:
+            raise HTTPException(status_code=400, detail="规则文件仅支持 pdf/docx/doc/txt")
+        ai_rule_path = upload_dir / f"rule{ext_rule}"
+        with open(ai_rule_path, "wb") as f:
+            f.write(await rule_file.read())
+        ai_rule_file_path = str(ai_rule_path)
+
+    zf_service._init_task(task_id)
+
+    abs_original = str(Path(original_path).resolve())
+    abs_translated = str(Path(translated_path).resolve())
+    abs_ai_rule = str(Path(ai_rule_file_path).resolve()) if ai_rule_file_path is not None else None
+
+    def run_sync():
+        zf_service.run_zhongfanyi_task(
+            abs_original,
+            abs_translated,
+            task_id,
+            use_ai_rule=use_ai_rule,
+            ai_rule_file_path=abs_ai_rule,
+        )
+
+    async def run_in_background():
+        try:
+            await asyncio.to_thread(run_sync)
+        except Exception as e:
+            tb = traceback.format_exc()
+            print("中翻译专检后台任务失败:\n", tb)
+            zf_service._complete_task(task_id, error=str(e))
+
+    background_tasks.add_task(run_in_background)
+
+    return {
+        "status": "ACCEPTED",
+        "task_id": task_id,
+        "message": "中翻译专检任务已提交，正在后台处理",
+    }
+
+
+@router.get("/zhongfanyi/status/{task_id}")
+async def get_zhongfanyi_status(task_id: str):
+    """查询中翻译专检任务状态与结果"""
+    progress = zf_service.get_task_progress(task_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return progress
 
 
