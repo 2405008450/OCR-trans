@@ -85,6 +85,7 @@ def run_zhongfanyi_task(
     task_id: str,
     use_ai_rule: bool = False,
     ai_rule_file_path: Optional[str] = None,
+    session_rule_text: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     在指定输出目录下执行中翻译专检完整流程（对比 + 修复），结果复制到 output_dir 供下载。
@@ -109,6 +110,7 @@ def run_zhongfanyi_task(
         output_base,
         use_ai_rule=use_ai_rule,
         ai_rule_file_path=ai_rule_file_path or None,
+        session_rule_text=session_rule_text,
     )
 
     if result_docx_path is None:

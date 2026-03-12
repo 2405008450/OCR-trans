@@ -1,191 +1,241 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>图片OCR翻译系统 - AI驱动</title>
-    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
-    <link rel="stylesheet" href="/static/style.css">
+    <title>证件 OCR 翻译工作台</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
+
 <body>
     <div class="container">
-        <!-- 头部 -->
         <header class="header">
+
             <div class="logo">
-                <i class="fas fa-language"></i>
-                <h1>信实证件OCR翻译系统</h1>
+                <div class="logo-mark"><i class="fas fa-language"></i></div>
+                <div>
+                    <h1>证件 OCR 翻译工作台</h1>
+                    <p class="subtitle">证件图片 OCR 识别与多语种翻译</p>
+                </div>
             </div>
-            <p class="subtitle">AI驱动的智能文档识别与翻译</p>
             <nav class="header-nav">
-                <a href="/" class="el-button el-button--success"><i class="fas fa-home"></i> 返回首页</a>
-                <a href="/number-check" class="el-button el-button--success"><i class="fas fa-check-double"></i> 数字专检</a>
-                <a href="/alignment" class="el-button el-button--success"><i class="fas fa-language"></i> 对照记忆</a>
-                <a href="/business-licence" class="el-button el-button--success"><i class="fas fa-building"></i> 营业执照</a>
+                <a href="/number-check"><i class="fas fa-check-double"></i> 数字专检</a>
+                <a href="/alignment"><i class="fas fa-object-group"></i> 对照记忆</a>
+                <a href="/business-licence"><i class="fas fa-building"></i> 营业执照</a>
             </nav>
         </header>
 
-        <!-- 主内容区 -->
+        <section class="hero-banner">
+            <div>
+                <h2>上传证件图片，自动完成识别与翻译</h2>
+                <p>支持身份证、结婚证等常见证件，上传后选择参数即可开始处理，翻译结果可直接下载。</p>
+            </div>
+        </section>
+
         <main class="main-content">
-            <!-- 上传区域 -->
-            <section class="upload-section" id="uploadSection">
-                <div class="upload-card">
-                    <div class="upload-icon">
-                        <i class="fas fa-cloud-upload-alt"></i>
-                    </div>
-                    <h2>上传图片文件</h2>
-                    <p class="upload-desc">支持 JPG、PNG、BMP、TIF 等图片格式，最大 50MB</p>
-                    
-                    <div class="upload-area" id="uploadArea">
-                        <input type="file" id="fileInput" accept="image/*" hidden>
-                        <div class="upload-placeholder" id="uploadPlaceholder">
-                            <i class="fas fa-file-upload"></i>
-                            <p>拖拽文件到这里，或点击选择文件</p>
-                        </div>
-                        <div class="file-preview" id="filePreview" style="display: none;">
-                            <img id="previewImage" src="" alt="预览">
-                            <div class="file-info">
-                                <p id="fileName"></p>
-                                <button class="btn-remove" id="btnRemove">
-                                    <i class="fas fa-times"></i> 移除
-                                </button>
+            <section class="workspace-grid">
+                <section class="upload-section" id="uploadSection">
+                    <div class="upload-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Step 1</span>
+                                <h2>上传并配置任务</h2>
                             </div>
+                            <div class="section-chip">最大 50MB</div>
                         </div>
-                    </div>
+                        <p class="upload-desc">支持 JPG、PNG、BMP、TIF 等图片格式。拖拽上传后即可配置证件类型、语言和模板参数。</p>
 
-                    <!-- 选项设置 -->
-                    <div class="options-panel">
-                        <!-- 证件类型 -->
-                        <div class="option-group">
-                            <label>
-                                <i class="fas fa-file-alt"></i> 证件类型:
-                                <select id="docType">
-                                    <option value="id_card">身份证</option>
-                                    <option value="marriage_cert">结婚证</option>
-                                </select>
-                            </label>
-                        </div>
-                        <!-- 语言选项 -->
-                        <div class="option-group">
-                            <label>
-                                <i class="fas fa-language"></i> 源语言:
-                                <select id="fromLang">
-                                    <option value="zh">中文</option>
-                                    <option value="en">英文</option>
-                                    <option value="ja">日文</option>
-                                    <option value="ko">韩文</option>
-                                </select>
-                            </label>
-                        </div>
-                        <div class="option-group">
-                            <label>
-                                <i class="fas fa-globe"></i> 目标语言:
-                                <select id="toLang">
-                                    <option value="en">英文</option>
-                                    <option value="zh">中文</option>
-                                    <option value="ja">日文</option>
-                                    <option value="ko">韩文</option>
-                                </select>
-                            </label>
-                        </div>
-                        <!-- 身份证专用选项 -->
-                        <div class="option-group" id="idCardOptions">
-                            <label>
-                                <i class="fas fa-id-card"></i> 证件面:
-                                <select id="cardSide">
-                                    <option value="front">正面（头像面）</option>
-                                    <option value="back">背面（国徽面）</option>
-                                </select>
-                            </label>
-                        </div>
-                        <!-- 结婚证专用选项 -->
-                        <div class="option-group mc-options-group" id="marriageCertOptions" style="display: none;">
-                            <div class="mc-options-title">
-                                <i class="fas fa-cogs"></i> 结婚证处理选项
+                        <div class="upload-area" id="uploadArea">
+                            <input type="file" id="fileInput" accept="image/*" hidden>
+                            <div class="upload-placeholder" id="uploadPlaceholder">
+                                <i class="fas fa-cloud-arrow-up"></i>
+                                <p>拖拽文件到这里，或点击选择图片</p>
+                                <span>建议先确认图片方向和清晰度</span>
                             </div>
-                            <div class="mc-options-grid">
-                                <label class="mc-number">
-                                    <span><i class="fas fa-copy"></i> 模板页:</span>
-                                    <select id="marriagePageTemplate">
-                                        <option value="page1">第一页（封面）</option>
-                                        <option value="page2">第二页</option>
-                                        <option value="page3">第三页</option>
+                            <div class="file-preview" id="filePreview" style="display: none;">
+                                <img id="previewImage" src="" alt="预览">
+                                <div class="file-info">
+                                    <p id="fileName"></p>
+                                    <span class="file-status">文件已就绪，可直接开始处理</span>
+                                    <button class="btn-remove" id="btnRemove">
+                                        <i class="fas fa-times"></i> 移除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="options-panel">
+                            <div class="option-group option-card">
+                                <label for="docType">证件类型</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-file-alt"></i>
+                                    <select id="docType">
+                                        <option value="id_card">身份证</option>
+                                        <option value="marriage_cert">结婚证</option>
                                     </select>
-                                    <small>按模板自动设置合并/重叠/冒号参数</small>
+                                </div>
+                            </div>
+                            <div class="option-group option-card">
+                                <label for="fromLang">源语言</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-language"></i>
+                                    <select id="fromLang">
+                                        <option value="zh">中文</option>
+                                        <option value="en">英文</option>
+                                        <option value="ja">日文</option>
+                                        <option value="ko">韩文</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="option-group option-card">
+                                <label for="toLang">目标语言</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-globe"></i>
+                                    <select id="toLang">
+                                        <option value="en">英文</option>
+                                        <option value="zh">中文</option>
+                                        <option value="ja">日文</option>
+                                        <option value="ko">韩文</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="option-group option-card" id="idCardOptions">
+                                <label for="cardSide">证件面</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-id-card"></i>
+                                    <select id="cardSide">
+                                        <option value="front">正面（头像面）</option>
+                                        <option value="back">背面（国徽面）</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="option-group checkbox-card">
+                                <label class="toggle-row">
+                                    <input type="checkbox" id="enableVisualization" checked>
+                                    <span>生成 OCR 可视化图</span>
                                 </label>
-                                <label class="mc-checkbox">
-                                    <input type="checkbox" id="enableMerge" checked disabled>
-                                    <span><i class="fas fa-link"></i> 框体合并</span>
-                                    <small>连续文本框合并翻译</small>
-                                </label>
-                                <label class="mc-checkbox">
-                                    <input type="checkbox" id="enableOverlapFix" checked disabled>
-                                    <span><i class="fas fa-arrows-alt-h"></i> 重叠修正</span>
-                                    <small>自动检测并右移重叠框</small>
-                                </label>
-                                <label class="mc-checkbox">
-                                    <input type="checkbox" id="enableColonFix" disabled>
-                                    <span><i class="fas fa-text-width"></i> 冒号修正</span>
-                                    <small>为字段名自动添加冒号</small>
-                                </label>
-                                <label class="mc-number">
-                                    <span><i class="fas fa-text-height"></i> 字体大小:</span>
-                                    <input type="number" id="fontSize" value="18" min="8" max="30" step="1">
-                                    <small>像素(px)，建议 8-30</small>
-                                </label>
-                                <label class="mc-number" id="page1ManualSignatureGroup" style="grid-column: 1 / -1;">
-                                    <span><i class="fas fa-signature"></i> 婚姻登记员手写签名(手动输入):</span>
-                                    <input type="text" id="registrarSignatureText" placeholder="例如：李四 / Li Si" style="width: 320px; text-align: left;">
-                                    <small>将通过LLM翻译/转写后，填充到“婚姻登记员”右侧位置</small>
-                                </label>
-                                <label class="mc-number" id="page1RegisteredByGroup" style="grid-column: 1 / -1;">
-                                    <span><i class="fas fa-user-check"></i> Registered by 文本(手动输入):</span>
-                                    <input type="text" id="registeredByText" placeholder="例如：张三 / Zhang San" style="width: 320px; text-align: left;">
-                                    <small>将调用LLM翻译/转写，按“Registered by: (xxx)”格式填充在签名上方，其中(xxx)为红色斜体</small>
-                                </label>
-                                <label class="mc-number" id="page1RegisteredByOffsetXGroup">
-                                    <span><i class="fas fa-arrows-alt-h"></i> Registered by 右移偏移:</span>
-                                    <input type="number" id="registeredByOffsetX" value="20" min="-300" max="300" step="2">
-                                    <small>单位px，负数左移，正数右移</small>
-                                </label>
-                                <label class="mc-number" id="page1RegisteredByOffsetYGroup">
-                                    <span><i class="fas fa-arrows-alt-v"></i> Registered by 纵向偏移:</span>
-                                    <input type="number" id="registeredByOffsetY" value="-80" min="-300" max="300" step="2">
-                                    <small>单位px，负数上移，正数下移</small>
-                                </label>
-                                <label class="mc-number" id="page1SignatureOffsetXGroup">
-                                    <span><i class="fas fa-arrows-alt-h"></i> 签名右移偏移:</span>
-                                    <input type="number" id="registrarSignatureOffsetX" value="52" min="0" max="400" step="2">
-                                    <small>单位px，值越大越靠右</small>
-                                </label>
-                                <label class="mc-number" id="page1SignatureOffsetYGroup">
-                                    <span><i class="fas fa-arrows-alt-v"></i> 签名纵向偏移:</span>
-                                    <input type="number" id="registrarSignatureOffsetY" value="-12" min="-200" max="200" step="2">
-                                    <small>单位px，负数上移，正数下移</small>
-                                </label>
+                                <small>用于核对识别区域和文本位置。</small>
+                            </div>
+
+                            <div class="option-group mc-options-group" id="marriageCertOptions" style="display: none;">
+                                <div class="mc-options-title">
+                                    <i class="fas fa-cogs"></i> 结婚证专项参数
+                                </div>
+                                <div class="mc-options-grid">
+                                    <label class="mc-number">
+                                        <span><i class="fas fa-copy"></i> 模板页</span>
+                                        <select id="marriagePageTemplate">
+                                            <option value="page1">第一页（封面）</option>
+                                            <option value="page2">第二页</option>
+                                            <option value="page3">第三页</option>
+                                        </select>
+                                        <small>按模板自动设置合并、重叠与冒号修正参数。</small>
+                                    </label>
+                                    <label class="mc-checkbox">
+                                        <input type="checkbox" id="enableMerge" checked disabled>
+                                        <span><i class="fas fa-link"></i> 文本框合并</span>
+                                        <small>连续文本区域将作为一组翻译。</small>
+                                    </label>
+                                    <label class="mc-checkbox">
+                                        <input type="checkbox" id="enableOverlapFix" checked disabled>
+                                        <span><i class="fas fa-arrows-left-right"></i> 重叠修正</span>
+                                        <small>自动检测并调整可能的文字重叠。</small>
+                                    </label>
+                                    <label class="mc-checkbox">
+                                        <input type="checkbox" id="enableColonFix" disabled>
+                                        <span><i class="fas fa-text-width"></i> 冒号修正</span>
+                                        <small>针对字段名场景自动补全冒号。</small>
+                                    </label>
+                                    <label class="mc-number">
+                                        <span><i class="fas fa-text-height"></i> 字体大小</span>
+                                        <input type="number" id="fontSize" value="18" min="8" max="30" step="1">
+                                        <small>单位 px，建议 18 到 30。</small>
+                                    </label>
+                                    <label class="mc-number" id="page1ManualSignatureGroup"
+                                        style="grid-column: 1 / -1;">
+                                        <span><i class="fas fa-signature"></i> 婚姻登记员签名</span>
+                                        <input type="text" id="registrarSignatureText" placeholder="例如：李四 / Li Si"
+                                            style="width: 320px; text-align: left;">
+                                        <small>仅第一页需要，系统会结合翻译结果填入指定区域。</small>
+                                    </label>
+                                    <label class="mc-number" id="page1RegisteredByGroup" style="grid-column: 1 / -1;">
+                                        <span><i class="fas fa-user-check"></i> Registered by 文本</span>
+                                        <input type="text" id="registeredByText" placeholder="例如：张三 / Zhang San"
+                                            style="width: 320px; text-align: left;">
+                                        <small>会按照 Registered by: (xxx) 的结构写入页面。</small>
+                                    </label>
+                                    <label class="mc-number" id="page1RegisteredByOffsetXGroup">
+                                        <span><i class="fas fa-left-right"></i> Registered by 水平偏移</span>
+                                        <input type="number" id="registeredByOffsetX" value="20" min="-300" max="300"
+                                            step="2">
+                                        <small>负数左移，正数右移。</small>
+                                    </label>
+                                    <label class="mc-number" id="page1RegisteredByOffsetYGroup">
+                                        <span><i class="fas fa-up-down"></i> Registered by 垂直偏移</span>
+                                        <input type="number" id="registeredByOffsetY" value="-80" min="-300" max="300"
+                                            step="2">
+                                        <small>负数上移，正数下移。</small>
+                                    </label>
+                                    <label class="mc-number" id="page1SignatureOffsetXGroup">
+                                        <span><i class="fas fa-left-right"></i> 签名水平偏移</span>
+                                        <input type="number" id="registrarSignatureOffsetX" value="52" min="0" max="400"
+                                            step="2">
+                                        <small>数值越大越靠右。</small>
+                                    </label>
+                                    <label class="mc-number" id="page1SignatureOffsetYGroup">
+                                        <span><i class="fas fa-up-down"></i> 签名垂直偏移</span>
+                                        <input type="number" id="registrarSignatureOffsetY" value="-12" min="-200"
+                                            max="200" step="2">
+                                        <small>负数上移，正数下移。</small>
+                                    </label>
+                                </div>
                             </div>
                         </div>
-                        <!-- 通用选项 -->
-                        <div class="option-group checkbox-group">
-                            <label>
-                                <input type="checkbox" id="enableVisualization" checked>
-                                <i class="fas fa-eye"></i> 生成可视化图片
-                            </label>
+
+                        <button class="btn-primary" id="btnProcess" disabled>
+                            <i class="fas fa-wand-magic-sparkles"></i> 开始处理
+                        </button>
+                    </div>
+                </section>
+
+                <aside class="info-rail">
+                    <div class="info-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Guide</span>
+                                <h3>推荐操作方式</h3>
+                            </div>
+                        </div>
+                        <ul class="info-list">
+                            <li>身份证先确认正反面，避免参数错选。</li>
+                            <li>结婚证使用模板页时，优先按真实页码匹配。</li>
+                            <li>图片边缘尽量完整，避免裁切掉印章和字段标题。</li>
+                        </ul>
+                    </div>
+                    <div class="info-card emphasis">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Output</span>
+                                <h3>你将得到什么</h3>
+                            </div>
+                        </div>
+                        <div class="stacked-stats">
+                            <div><strong>翻译结果图</strong><span>可直接下载交付</span></div>
+                            <div><strong>OCR 数据</strong><span>用于校验识别内容</span></div>
+                            <div><strong>可视化图</strong><span>快速复核识别区域</span></div>
                         </div>
                     </div>
 
-                    <button class="btn-primary" id="btnProcess" disabled>
-                        <i class="fas fa-magic"></i> 开始处理
-                    </button>
-                </div>
+                </aside>
             </section>
 
-            <!-- 处理中状态 -->
             <section class="processing-section" id="processingSection" style="display: none;">
                 <div class="processing-card">
                     <div class="spinner"></div>
-                    <h2>正在处理中...</h2>
-                    <p id="processingStatus">AI正在识别和翻译文档</p>
+                    <h2>处理中</h2>
+                    <p id="processingStatus">正在识别和翻译文本…</p>
                     <div class="progress-bar">
                         <div class="progress-fill" id="progressFill"></div>
                     </div>
@@ -193,36 +243,32 @@
                 </div>
             </section>
 
-            <!-- 排队等待弹窗覆盖层 -->
-            <div id="queueOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; align-items:center; justify-content:center;">
-                <div style="background:#fff; border-radius:16px; padding:36px 44px; text-align:center; max-width:340px; box-shadow:0 8px 32px rgba(0,0,0,0.18);">
-                    <div class="spinner" style="margin:0 auto 18px;"></div>
-                    <h3 style="margin:0 0 10px; font-size:18px; color:#333;">排队等待中</h3>
-                    <p style="color:#888; margin:0; font-size:14px; line-height:1.6;">当前有其他任务正在处理<br>您的任务将在完成后自动开始</p>
+            <div id="queueOverlay" class="queue-overlay" style="display:none;">
+                <div class="queue-modal">
+                    <div class="spinner"></div>
+                    <h3>任务排队中</h3>
+                    <p>当前有其他任务正在处理。你的任务会在前序任务完成后自动开始。</p>
                 </div>
             </div>
 
-            <!-- 结果展示 -->
             <section class="result-section" id="resultSection" style="display: none;">
                 <div class="result-header">
                     <h2><i class="fas fa-check-circle"></i> 处理完成</h2>
                     <button class="btn-secondary" id="btnNewTask">
-                        <i class="fas fa-plus"></i> 处理新文件
+                        <i class="fas fa-plus"></i> 新建任务
                     </button>
                 </div>
-
                 <div class="result-stats" id="resultStats"></div>
-
                 <div class="result-grid" id="resultGrid"></div>
             </section>
         </main>
 
-        <!-- 页脚 -->
         <footer class="footer">
-            <p>Powered by FastAPI + PaddleOCR + DeepSeek AI</p>
+            <p>证件 OCR 翻译工作台</p>
         </footer>
     </div>
 
     <script src="/static/app.js"></script>
 </body>
+
 </html>

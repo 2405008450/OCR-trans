@@ -90,7 +90,7 @@ def _zhongfanyi_rule_dir():
     return Path(__file__).resolve().parent / "llm" / "llm_project" / "rule"
 
 
-def run_comparison(original_path, translated_path, use_ai_rule=False, output_base_dir=None, ai_rule_file_path=None):
+def run_comparison(original_path, translated_path, use_ai_rule=False, output_base_dir=None, ai_rule_file_path=None, session_rule_text=None):
     """
     第一阶段：提取文本并调用 AI/Matcher 进行对比，生成 JSON 报告
 
@@ -100,6 +100,7 @@ def run_comparison(original_path, translated_path, use_ai_rule=False, output_bas
         use_ai_rule: 是否使用 AI 生成规则（默认 False，使用自定义或默认规则）
         output_base_dir: 可选，JSON 报告输出根目录；为 None 时使用项目内默认路径
         ai_rule_file_path: 可选，使用 AI 规则时从此文件加载规则（支持 pdf/docx/txt）
+        session_rule_text: 可选，本次会话编辑的规则文本，仅本任务使用，不写入磁盘
     """
     print("\n--- 阶段 1: 文本提取与 AI 对比 ---")
     # 1. 自动识别格式并提取 (支持 PDF 和 Word)
@@ -150,8 +151,12 @@ def run_comparison(original_path, translated_path, use_ai_rule=False, output_bas
     if not Path(default_path).exists():
         default_path = os.path.join(os.path.dirname(__file__), "llm", "llm_project", "rule", "默认规则.txt")
 
+    # 本次会话规则优先：若调用方传入 session_rule_text，仅本任务使用，不读磁盘不写磁盘
+    if session_rule_text and session_rule_text.strip():
+        rule_text = session_rule_text.strip()
+        print("\nℹ️  使用本次会话编辑的规则（未修改磁盘文件）")
     # 根据用户选择决定是否使用 AI 生成规则
-    if use_ai_rule:
+    elif use_ai_rule:
         # print("\n" + "=" * 60)
         # print("🤖 用户选择使用 AI 生成规则")
         # print("=" * 60)
@@ -185,7 +190,7 @@ def run_comparison(original_path, translated_path, use_ai_rule=False, output_bas
             print("⚠️  将尝试使用自定义规则或默认规则...")
             rule_text = parse_txt(custom_path) or parse_txt(default_path)
     else:
-        # 不使用 AI，直接读取现有规则
+        # 不使用 AI，直接读取现有规则（磁盘文件）
         print("\nℹ️  用户选择使用现有规则（不调用 AI）")
         rule_text = parse_txt(custom_path) or parse_txt(default_path)
 
@@ -199,7 +204,9 @@ def run_comparison(original_path, translated_path, use_ai_rule=False, output_bas
         return None, None
     else:
         # 判断实际使用的规则类型
-        if use_ai_rule:
+        if session_rule_text and session_rule_text.strip():
+            used_type = "本次会话编辑的规则"
+        elif use_ai_rule:
             used_type = "AI 生成规则"
         else:
             used_type = "自定义规则" if parse_txt(custom_path) else "默认规则"
@@ -330,7 +337,7 @@ def run_fix_phase(translated_path, report_paths):
     return backup_copy_path, stats
 
 
-def run_full_pipeline(original_path, translated_path, output_base_dir, use_ai_rule=False, ai_rule_file_path=None):
+def run_full_pipeline(original_path, translated_path, output_base_dir, use_ai_rule=False, ai_rule_file_path=None, session_rule_text=None):
     """
     完整流程：对比 + 修复。供 Web 或脚本调用。
 
@@ -340,6 +347,7 @@ def run_full_pipeline(original_path, translated_path, output_base_dir, use_ai_ru
         output_base_dir: 输出根目录（JSON 报告与最终 docx 均在此下）
         use_ai_rule: 是否使用 AI 生成规则
         ai_rule_file_path: 使用 AI 规则时的规则文件路径（可选，支持 pdf/docx/txt）
+        session_rule_text: 本次会话编辑的规则文本，仅本任务使用，不写入磁盘
 
     Returns:
         (result_docx_path, report_paths, stats_dict)，任一步失败时 result_docx_path 为 None
@@ -349,6 +357,7 @@ def run_full_pipeline(original_path, translated_path, output_base_dir, use_ai_ru
         use_ai_rule=use_ai_rule,
         output_base_dir=output_base_dir,
         ai_rule_file_path=ai_rule_file_path,
+        session_rule_text=session_rule_text,
     )
     if report_paths is None:
         return None, None, None

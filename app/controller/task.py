@@ -2,7 +2,7 @@ import os
 import traceback
 import asyncio
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Query, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, Query, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from app.service.llm_service import run_llm_task, submit_ocr_task, get_ocr_task_status
 from app.service.number_check_service import run_number_check_task, _get_task_progress
@@ -203,6 +203,7 @@ async def run_zhongfanyi(
     translated_file: UploadFile = File(..., description="译文文档 (docx/pdf)"),
     use_ai_rule: bool = Query(False, description="是否使用 AI 生成规则"),
     rule_file: Optional[UploadFile] = File(None, description="可选：规则文件 (pdf/docx/txt)，供 AI 总结生成规则"),
+    session_rule_content: Optional[str] = Form(None, description="可选：本次会话编辑的规则文本，仅本任务使用，不写入磁盘"),
 ):
     """
     中翻译专检：上传原文、译文，可选规则文件与是否使用 AI 规则，执行对比与自动修复，返回任务 ID 用于轮询。
@@ -250,6 +251,7 @@ async def run_zhongfanyi(
     abs_original = str(Path(original_path).resolve())
     abs_translated = str(Path(translated_path).resolve())
     abs_ai_rule = str(Path(ai_rule_file_path).resolve()) if ai_rule_file_path is not None else None
+    session_rule = (session_rule_content.strip() or None) if session_rule_content else None
 
     def run_sync():
         zf_service.run_zhongfanyi_task(
@@ -258,6 +260,7 @@ async def run_zhongfanyi(
             task_id,
             use_ai_rule=use_ai_rule,
             ai_rule_file_path=abs_ai_rule,
+            session_rule_text=session_rule,
         )
 
     async def run_in_background():
@@ -284,6 +287,44 @@ async def get_zhongfanyi_status(task_id: str):
     if not progress:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
     return progress
+
+
+class RuleUpdateBody(BaseModel):
+    rule_type: str
+    content: str
+
+
+def get_rule_file_path(rule_type: str) -> Path:
+    base_path = Path(__file__).resolve().parents[2] / "专检" / "zhongfanyi" / "llm" / "llm_project" / "rule"
+    if rule_type == "custom":
+        return base_path / "自定义规则.txt"
+    elif rule_type == "default":
+        return base_path / "默认规则.txt"
+    else:
+        raise HTTPException(status_code=400, detail="未知的规则类型")
+
+
+@router.get("/zhongfanyi/rule")
+async def get_zhongfanyi_rule(rule_type: str = Query(..., description="规则类型: custom 或 default")):
+    """获取规则文件内容"""
+    file_path = get_rule_file_path(rule_type)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="规则文件不存在")
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return {"status": "ok", "content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
+
+
+@router.post("/zhongfanyi/rule")
+async def update_zhongfanyi_rule(body: RuleUpdateBody):
+    """仅用于本次会话的规则编辑，不会写入磁盘上的规则文件。前端保存时仅存到本地，提交专检时通过表单传入 rule_content 即可。"""
+    raise HTTPException(
+        status_code=400,
+        detail="规则编辑仅在本会话生效，请在前端点击保存后，直接运行专检即可使用本次编辑的规则，不会修改磁盘文件。"
+    )
 
 
 # ── 多语对照记忆 ──────────────────────────────────────────

@@ -1,139 +1,559 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>业务导航</title>
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <title>文件处理工作台</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <style>
+    :root {
+      --bg: #07111f;
+      --bg-soft: rgba(12, 27, 47, 0.84);
+      --line: rgba(255, 255, 255, 0.12);
+      --text: #f5f7fb;
+      --muted: rgba(245, 247, 251, 0.72);
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: var(--text);
+      font-family: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.28), transparent 28%),
+        radial-gradient(circle at 80% 20%, rgba(34, 197, 94, 0.18), transparent 24%),
+        linear-gradient(140deg, #040812 0%, #091829 46%, #0d2138 100%);
     }
-    .wrap {
-      max-width: 1200px;
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent 88%);
+    }
+
+    .page {
+      width: min(1220px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 48px 16px;
+      padding: 32px 0 48px;
+      position: relative;
+      z-index: 1;
     }
-    .title {
-      color: #fff;
-      text-align: center;
-      margin-bottom: 24px;
-      font-size: 32px;
-      font-weight: 700;
-    }
-    .subtitle {
-      color: rgba(255, 255, 255, 0.9);
-      text-align: center;
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
       margin-bottom: 28px;
     }
-    .card {
-      border-radius: 12px;
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
     }
-    .actions {
+
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, rgba(125, 211, 252, 0.24), rgba(56, 189, 248, 0.58));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    }
+
+    .topbar-note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: linear-gradient(145deg, rgba(9, 22, 38, 0.92), rgba(15, 35, 58, 0.86));
+      box-shadow: var(--shadow);
+      padding: 40px;
+      margin-bottom: 28px;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      right: -80px;
+      top: -120px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(125, 211, 252, 0.24), transparent 65%);
+    }
+
+    .hero-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.9fr);
+      gap: 24px;
+      align-items: end;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      color: #d7f3ff;
+      background: rgba(125, 211, 252, 0.12);
+      border: 1px solid rgba(125, 211, 252, 0.22);
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 10ch;
+      font-size: clamp(38px, 7vw, 64px);
+      line-height: 1.04;
+      letter-spacing: -0.04em;
+    }
+
+    .hero-copy p {
+      margin: 18px 0 0;
+      max-width: 620px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.8;
+    }
+
+    .hero-actions {
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
+      margin-top: 28px;
     }
-    .desc {
-      color: #64748b;
-      margin-bottom: 14px;
-      line-height: 1.65;
+
+    .action-btn {
+      min-height: 46px;
+      padding: 0 18px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+    }
+
+    .action-btn:hover {
+      transform: translateY(-2px);
+    }
+
+    .action-btn.primary {
+      color: #082032;
+      background: linear-gradient(135deg, #9be7ff, #38bdf8);
+      box-shadow: 0 16px 36px rgba(56, 189, 248, 0.28);
+    }
+
+    .action-btn.secondary {
+      color: var(--text);
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(12px);
+    }
+
+    .hero-panel {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 22px;
+      background: rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(14px);
+    }
+
+    .hero-panel h2 {
+      margin: 0 0 14px;
+      font-size: 17px;
+    }
+
+    .signal-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .signal-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .signal-item strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .signal-item span,
+    .signal-item small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    .section-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+    }
+
+    .module-card {
+      grid-column: span 4;
+      position: relative;
+      overflow: hidden;
+      min-height: 280px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 24px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.045));
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.2);
+      transition: transform 0.26s ease, border-color 0.26s ease, background 0.26s ease;
+    }
+
+    .module-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(125, 211, 252, 0.3);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.055));
+    }
+
+    .module-card.featured {
+      grid-column: span 6;
+    }
+
+    .module-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .module-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      color: #fff;
+    }
+
+    .theme-cyan {
+      background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+    }
+
+    .theme-green {
+      background: linear-gradient(135deg, #16a34a, #4ade80);
+    }
+
+    .theme-amber {
+      background: linear-gradient(135deg, #d97706, #fbbf24);
+    }
+
+    .theme-rose {
+      background: linear-gradient(135deg, #e11d48, #fb7185);
+    }
+
+    .theme-indigo {
+      background: linear-gradient(135deg, #4f46e5, #818cf8);
+    }
+
+    .tag {
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: rgba(255, 255, 255, 0.82);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .module-card h3 {
+      margin: 0 0 10px;
+      font-size: 22px;
+    }
+
+    .module-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.8;
+      min-height: 88px;
+    }
+
+    .module-meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 18px 0 22px;
+    }
+
+    .meta-pill {
+      padding: 8px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.78);
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .module-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .module-link i {
+      transition: transform 0.22s ease;
+    }
+
+    .module-link:hover i {
+      transform: translateX(3px);
+    }
+
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .insight-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 22px;
+      background: var(--bg-soft);
+    }
+
+    .insight-card strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    .insight-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    @media (max-width: 980px) {
+      .hero {
+        padding: 28px;
+      }
+
+      .hero-grid,
+      .insight-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .module-card,
+      .module-card.featured {
+        grid-column: span 12;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        width: min(100% - 20px, 1220px);
+        padding-top: 18px;
+      }
+
+      .topbar {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .hero,
+      .module-card,
+      .insight-card {
+        border-radius: 20px;
+      }
+
+      h1 {
+        max-width: none;
+      }
     }
   </style>
 </head>
+
 <body>
-  <div id="app" class="wrap">
-    <div class="title">业务导航中心</div>
-    <div class="subtitle">选择要进入的处理模块</div>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"><i class="fas fa-wave-square"></i></div>
+        <div>文件处理工作台</div>
+      </div>
 
-    <el-row :gutter="16">
-      <el-col :xs="24" :md="6">
-        <el-card class="card">
-          <template #header>
-            <strong>证件 OCR 翻译</strong>
-          </template>
-          <div class="desc">
-            身份证、结婚证图片识别与翻译模块，支持模板页、人工补填等能力。
-          </div>
-          <div class="actions">
-            <el-button type="primary" @click="go('/ocr')">进入 OCR 页面</el-button>
-          </div>
-        </el-card>
-      </el-col>
+    </header>
 
-      <el-col :xs="24" :md="6">
-        <el-card class="card">
-          <template #header>
-            <strong>数字专检</strong>
-          </template>
-          <div class="desc">
-            上传原文与译文 DOCX，执行数值对比、自动修复与批注，输出修复文档和报告。
-          </div>
-          <div class="actions">
-            <el-button type="success" @click="go('/number-check')">进入数字专检</el-button>
-          </div>
-        </el-card>
-      </el-col>
+    <section class="hero">
+      <div class="hero-grid">
+        <div class="hero-copy">
 
-      <el-col :xs="24" :md="6">
-        <el-card class="card">
-          <template #header>
-            <strong>多语对照记忆</strong>
-          </template>
-          <div class="desc">
-            上传原文与译文文档（DOCX/PPTX/Excel），AI 自动句级对齐，输出双语对照 Excel。
+          <h1>多语对照记忆</h1>
+          <p>将原文和译文自动对齐成可复用语料，适合术语整理、项目复盘和后续翻译记忆库沉淀。</p>
+          <div class="hero-actions">
+            <a class="action-btn primary" href="/alignment"><i class="fas fa-object-group"></i> 打开多语对照</a>
+            <a class="action-btn secondary" href="/ocr"><i class="fas fa-language"></i> 打开 OCR 翻译</a>
           </div>
-          <div class="actions">
-            <el-button type="warning" @click="go('/alignment')">进入对照记忆</el-button>
-          </div>
-        </el-card>
-      </el-col>
+        </div>
 
-      <el-col :xs="24" :md="6">
-        <el-card class="card">
-          <template #header>
-            <strong>营业执照翻译</strong>
-          </template>
-          <div class="desc">
-            上传营业执照图片，自动 OCR 识别并将中文翻译为英文，支持印章区域交互验证。
+        <aside class="hero-panel">
+          <h2>当前工作区能力</h2>
+          <div class="signal-list">
+            <div class="signal-item">
+              <div>
+                <strong>证件图片翻译</strong>
+                <small>身份证 / 结婚证 / 营业执照</small>
+              </div>
+              <span>OCR</span>
+            </div>
+            <div class="signal-item">
+              <div>
+                <strong>文档数字核查</strong>
+                <small>原文译文比对、修复与报告</small>
+              </div>
+              <span>DOCX</span>
+            </div>
+            <div class="signal-item">
+              <div>
+                <strong>多语对照记忆</strong>
+                <small>段落对齐、输出 Excel 对照表</small>
+              </div>
+              <span>LLM</span>
+            </div>
           </div>
-          <div class="actions">
-            <el-button type="danger" @click="go('/business-licence')">进入营业执照翻译</el-button>
-          </div>
-        </el-card>
-      </el-col>
+        </aside>
+      </div>
+    </section>
 
-      <el-col :xs="24" :md="6">
-        <el-card class="card">
-          <template #header>
-            <strong>中翻译专检</strong>
-          </template>
-          <div class="desc">
-            上传原文与译文（DOCX/PDF），可选规则文件与 AI 规则，自动对比并批注修复。
+    <section>
+      <div class="section-head">
+        <div>
+          <h2>处理模块</h2>
+        </div>
+      </div>
+
+      <div class="module-grid">
+        <article class="module-card featured">
+          <div class="module-top">
+            <div class="module-icon theme-amber"><i class="fas fa-object-group"></i></div>
+            <div class="tag">核心功能</div>
           </div>
-          <div class="actions">
-            <el-button type="primary" plain @click="go('/zhongfanyi')">进入中翻译专检</el-button>
+          <h3>多语对照记忆</h3>
+          <p>将原文和译文自动对齐成可复用语料，适合术语整理、项目复盘和后续翻译记忆库沉淀。</p>
+          <div class="module-meta">
+            <span class="meta-pill">段落对齐</span>
+            <span class="meta-pill">Excel 输出</span>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+          <a class="module-link" href="/alignment">进入模块 <i class="fas fa-arrow-right"></i></a>
+        </article>
+
+        <article class="module-card featured">
+          <div class="module-top">
+            <div class="module-icon theme-cyan"><i class="fas fa-language"></i></div>
+            <div class="tag">主流程</div>
+          </div>
+          <h3>证件 OCR 翻译</h3>
+          <p>上传身份证或结婚证图片，自动完成识别、翻译和结果图生成。适合作为最常用入口，放在首页第一屏直接可达。</p>
+          <div class="module-meta">
+            <span class="meta-pill">图片上传</span>
+            <span class="meta-pill">模板参数</span>
+            <span class="meta-pill">可视化输出</span>
+          </div>
+          <a class="module-link" href="/ocr">进入模块 <i class="fas fa-arrow-right"></i></a>
+        </article>
+
+        <article class="module-card">
+          <div class="module-top">
+            <div class="module-icon theme-green"><i class="fas fa-check-double"></i></div>
+            <div class="tag">校验</div>
+          </div>
+          <h3>数字专检</h3>
+          <p>用于原文与译文 DOCX 的数值一致性核查，能输出修复结果和检查报告，适合交付前复核。</p>
+          <div class="module-meta">
+            <span class="meta-pill">原译对比</span>
+            <span class="meta-pill">自动批注</span>
+          </div>
+          <a class="module-link" href="/number-check">进入模块 <i class="fas fa-arrow-right"></i></a>
+        </article>
+
+        <article class="module-card">
+          <div class="module-top">
+            <div class="module-icon theme-indigo"><i class="fas fa-file-signature"></i></div>
+            <div class="tag">审校</div>
+          </div>
+          <h3>中翻译专检</h3>
+          <p>针对原文与译文做规则化比对和 AI 审阅，更偏向后置质检场景，不再和高频入口同级竞争。</p>
+          <div class="module-meta">
+            <span class="meta-pill">规则文件</span>
+            <span class="meta-pill">AI 检查</span>
+          </div>
+          <a class="module-link" href="/zhongfanyi">进入模块 <i class="fas fa-arrow-right"></i></a>
+        </article>
+
+        <article class="module-card">
+          <div class="module-top">
+            <div class="module-icon theme-rose"><i class="fas fa-building"></i></div>
+            <div class="tag">专项</div>
+          </div>
+          <h3>营业执照翻译</h3>
+          <p>专门针对营业执照的识别与翻译流程，保留印章校验和方向配置，减少通用 OCR 页面的复杂度。</p>
+          <div class="module-meta">
+            <span class="meta-pill">章区验证</span>
+            <span class="meta-pill">方向配置</span>
+          </div>
+          <a class="module-link" href="/business-licence">进入模块 <i class="fas fa-arrow-right"></i></a>
+        </article>
+      </div>
+    </section>
+
   </div>
-
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script src="https://unpkg.com/element-plus/dist/index.full.min.js"></script>
-  <script>
-    const { createApp } = Vue;
-    createApp({
-      methods: {
-        go(path) {
-          window.location.href = path;
-        }
-      }
-    }).use(ElementPlus).mount('#app');
-  </script>
 </body>
+
 </html>

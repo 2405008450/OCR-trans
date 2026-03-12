@@ -1,28 +1,46 @@
-const originalFileInput = document.getElementById('originalFile');
-const translatedFileInput = document.getElementById('translatedFile');
-const ruleFileInput = document.getElementById('ruleFile');
-const useAiRuleCheckbox = document.getElementById('useAiRule');
-const btnRun = document.getElementById('btnRun');
-const btnReset = document.getElementById('btnReset');
-
-const uploadSection = document.getElementById('uploadSection');
-const processingSection = document.getElementById('processingSection');
-const resultSection = document.getElementById('resultSection');
-const resultStats = document.getElementById('resultStats');
-const resultGrid = document.getElementById('resultGrid');
-
-const progressBar = document.getElementById('progressBar');
-const progressPercent = document.getElementById('progressPercent');
-const progressDetails = document.getElementById('progressDetails');
-const processingTitle = document.getElementById('processingTitle');
-const processingText = document.getElementById('processingText');
+let originalFileInput, translatedFileInput, ruleFileInput, useAiRuleCheckbox, btnRun, btnReset;
+let uploadSection, processingSection, resultSection, resultStats, resultGrid;
+let progressBar, progressPercent, progressDetails, processingTitle, processingText;
+let ruleEditorModal, ruleContentArea;
 
 const POLL_INTERVAL = 1500;
 let pollingTimer = null;
 let currentTaskId = null;
+// 本次会话编辑的规则内容，仅本任务使用，不写入磁盘
+let sessionRuleContent = null;
 
-btnRun.addEventListener('click', runZhongfanyi);
-btnReset.addEventListener('click', resetPage);
+function initElements() {
+    originalFileInput = document.getElementById('originalFile');
+    translatedFileInput = document.getElementById('translatedFile');
+    ruleFileInput = document.getElementById('ruleFile');
+    useAiRuleCheckbox = document.getElementById('useAiRule');
+    btnRun = document.getElementById('btnRun');
+    btnReset = document.getElementById('btnReset');
+    uploadSection = document.getElementById('uploadSection');
+    processingSection = document.getElementById('processingSection');
+    resultSection = document.getElementById('resultSection');
+    resultStats = document.getElementById('resultStats');
+    resultGrid = document.getElementById('resultGrid');
+    progressBar = document.getElementById('progressBar');
+    progressPercent = document.getElementById('progressPercent');
+    progressDetails = document.getElementById('progressDetails');
+    processingTitle = document.getElementById('processingTitle');
+    processingText = document.getElementById('processingText');
+    ruleEditorModal = document.getElementById('ruleEditorModal');
+    ruleContentArea = document.getElementById('ruleContent');
+
+    if (btnRun) btnRun.addEventListener('click', runZhongfanyi);
+    if (btnReset) btnReset.addEventListener('click', resetPage);
+
+    var btnEditRule = document.getElementById('btnEditRule');
+    if (btnEditRule) btnEditRule.addEventListener('click', openRuleEditor);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initElements);
+} else {
+    initElements();
+}
 
 async function runZhongfanyi() {
     const originalFile = originalFileInput.files[0];
@@ -50,6 +68,9 @@ async function runZhongfanyi() {
         formData.append('translated_file', translatedFile);
         if (ruleFile) {
             formData.append('rule_file', ruleFile);
+        }
+        if (sessionRuleContent && sessionRuleContent.trim()) {
+            formData.append('session_rule_content', sessionRuleContent.trim());
         }
 
         const url = '/task/zhongfanyi?use_ai_rule=' + (useAiRule ? 'true' : 'false');
@@ -162,6 +183,7 @@ function resetPage() {
     translatedFileInput.value = '';
     ruleFileInput.value = '';
     useAiRuleCheckbox.checked = false;
+    sessionRuleContent = null;
     uploadSection.style.display = 'block';
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';
@@ -170,3 +192,50 @@ function resetPage() {
     progressPercent.textContent = '0%';
     progressDetails.innerHTML = '';
 }
+
+// 规则编辑器相关逻辑
+function openRuleEditor() {
+    if (!ruleEditorModal || !ruleContentArea) {
+        alert('页面元素未就绪，请刷新后重试');
+        return;
+    }
+    ruleEditorModal.style.display = 'flex';
+    loadRuleContent();
+}
+
+function closeRuleEditor() {
+    if (ruleEditorModal) ruleEditorModal.style.display = 'none';
+}
+
+async function loadRuleContent() {
+    if (!ruleContentArea) return;
+    var radio = document.querySelector('input[name="ruleType"]:checked');
+    var ruleType = radio ? radio.value : 'custom';
+    ruleContentArea.value = '加载中...';
+    ruleContentArea.disabled = true;
+    try {
+        const resp = await fetch('/task/zhongfanyi/rule?rule_type=' + ruleType);
+        if (!resp.ok) throw new Error('加载失败');
+        const data = await resp.json();
+        ruleContentArea.value = data.content;
+    } catch (err) {
+        ruleContentArea.value = '加载规则文件失败: ' + err.message;
+    } finally {
+        ruleContentArea.disabled = false;
+    }
+}
+
+function saveRuleContent() {
+    if (!ruleContentArea) return;
+    var content = ruleContentArea.value;
+    sessionRuleContent = content;
+    alert('已保存为本次使用，专检时将采用此规则；不会修改磁盘上的规则文件。');
+    closeRuleEditor();
+}
+
+// 点击模态框外部关闭
+document.addEventListener('click', function(event) {
+    if (ruleEditorModal && event.target === ruleEditorModal) {
+        closeRuleEditor();
+    }
+});
