@@ -187,16 +187,22 @@ class ImageProcessor:
         # Set encoding parameters based on format
         encode_params = self._get_encode_params(file_ext, quality)
         
-        # Attempt to save the image
+        # Attempt to save the image.
+        # Use cv2.imencode + Python open() instead of cv2.imwrite() to correctly
+        # handle non-ASCII paths on Windows (cv2.imwrite uses ANSI code page
+        # which corrupts Unicode filenames such as Chinese characters).
         try:
-            success = cv2.imwrite(path, image, encode_params)
+            success, buf = cv2.imencode(file_ext, image, encode_params)
+            if not success or buf is None:
+                error_msg = f"Failed to encode image for path: {path}. cv2.imencode returned False."
+                logger.error(error_msg)
+                raise ImageSaveError(error_msg)
+            with open(path, "wb") as f:
+                f.write(buf.tobytes())
+        except ImageSaveError:
+            raise
         except Exception as e:
             error_msg = f"Failed to write image file: {path}. Error: {str(e)}"
-            logger.error(error_msg)
-            raise ImageSaveError(error_msg)
-        
-        if not success:
-            error_msg = f"Failed to save image: {path}. OpenCV imwrite returned False."
             logger.error(error_msg)
             raise ImageSaveError(error_msg)
         

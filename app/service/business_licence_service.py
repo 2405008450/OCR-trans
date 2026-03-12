@@ -239,6 +239,15 @@ def _run_pipeline_in_thread(task_id: str, input_path: str, output_path: str,
         if not Path(output_path).exists():
             raise RuntimeError("翻译完成但未找到输出文件")
 
+        # 添加右下角水印（尽力而为，失败不影响主流程）
+        log("添加水印...")
+        try:
+            from app.service.image_processor import add_watermark
+            add_watermark(output_path)
+            log("水印已添加")
+        except Exception as wm_err:
+            log(f"⚠️ 水印添加失败（已跳过）: {wm_err}")
+
         log("=" * 60)
         log(f"翻译完成！输出文件: {Path(output_path).name}")
         log("=" * 60)
@@ -296,10 +305,10 @@ async def start_business_licence_task(
     with open(input_path, "wb") as f:
         f.write(file_bytes)
 
-    # 生成输出文件名（与 start.py 相同规则）
-    stem = Path(original_filename).stem
+    # 生成输出文件名：使用 task_id（纯 ASCII UUID）作为文件名主体，
+    # 避免 OpenCV 在 Windows 下无法正确处理非 ASCII 路径的问题。
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    output_filename = f"{stem}_translated_{timestamp}{suffix}"
+    output_filename = f"{task_id}_translated_{timestamp}{suffix}"
     output_path = str(BL_OUTPUTS_DIR / output_filename)
 
     # 获取当前事件循环，传给线程
