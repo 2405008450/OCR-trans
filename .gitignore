@@ -56,3 +56,8 @@ Thumbs.db
 *.onnx
 *.pb
 
+# Runtime data and caches
+data/
+businesslicence/outputs/*
+!businesslicence/outputs/.gitkeep
+*.tar

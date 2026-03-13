@@ -1,4 +1,4 @@
-"""
+﻿"""
 结婚证（Marriage Certificate）OCR翻译处理模块
 
 功能：
@@ -28,8 +28,11 @@ from app.core.config import settings
 
 # 从 image_processor 导入共享资源和工具函数
 from app.service.image_processor import (
-    ocr, deepseek_client, lama_model, LAMA_AVAILABLE,
+    LAMA_AVAILABLE,
+    _get_lama_model,
+    _get_ocr_engine,
     add_watermark,
+    deepseek_client,
 )
 
 # 结婚证专用翻译配置
@@ -1336,10 +1339,11 @@ def process_marriage_cert_image(
 
     # ---- 步骤1: OCR识别 ----
     print("\n步骤1: OCR识别...")
+    ocr_engine = _get_ocr_engine()
     try:
-        result = ocr.predict(img_path)
+        result = ocr_engine.predict(img_path)
     except (AttributeError, NotImplementedError):
-        result = ocr.ocr(img_path)
+        result = ocr_engine.ocr(img_path)
 
     ocr_data = _extract_ocr_data(result)
     print(f"   识别到 {len(ocr_data['rec_texts'])} 个文本块")

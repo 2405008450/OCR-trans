@@ -1,61 +1,43 @@
 import os
 import traceback
-import asyncio
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Form, Query, HTTPException, BackgroundTasks
+from typing import Optional
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from app.service.llm_service import run_llm_task, submit_ocr_task, get_ocr_task_status
-from app.service.number_check_service import run_number_check_task, _get_task_progress
-from app.service.alignment_service import (
-    run_alignment_task, get_alignment_progress, _complete_task as _alignment_complete_task,
-    AVAILABLE_MODELS as ALIGNMENT_MODELS, SUPPORTED_LANGUAGES, THRESHOLD_MAP, BUFFER_CHARS,
-)
+from pydantic import BaseModel
+
 from app.service import business_licence_service as bl_service
 from app.service import zhongfanyi_service as zf_service
-from app.core.config import settings
-from typing import Optional
-from pydantic import BaseModel
-import asyncio
+from app.service.number_check_service import _get_task_progress as get_number_check_progress
+from app.service.task_queue_service import task_queue_service
 
 router = APIRouter(prefix="/task", tags=["Task"])
 
+
 @router.post("/run")
 async def run_task(
-    file: UploadFile = File(..., description="上传的图片文件"),
-    from_lang: str = Query("zh", description="源语言，默认'zh'"),
-    to_lang: str = Query("en", description="目标语言，默认'en'"),
-    enable_correction: bool = Query(False, description="是否启用透视矫正（已停用，仅兼容旧参数）"),
-    enable_visualization: bool = Query(True, description="是否生成可视化图片"),
-    card_side: str = Query("front", description="[身份证] 证件面: 'front'=正面, 'back'=背面"),
-    doc_type: str = Query("id_card", description="证件类型: 'id_card'=身份证, 'marriage_cert'=结婚证"),
-    marriage_page_template: str = Query("page2", description="[结婚证] 模板页: 'page1'=第一页, 'page2'=第二页, 'page3'=第三页"),
-    registrar_signature_text: Optional[str] = Query(None, description="[结婚证] 婚姻登记员手写签名(手动输入)，用于右侧补填"),
-    registered_by_text: Optional[str] = Query(None, description="[结婚证] Registered by中的xxx(手动输入)，用于签名上方补填"),
-    registered_by_offset_x: int = Query(20, description="[结婚证] Registered by右移偏移(px)，负数左移，正数右移"),
-    registered_by_offset_y: int = Query(-80, description="[结婚证] Registered by纵向偏移(px)，负数上移，正数下移"),
-    registrar_signature_offset_x: int = Query(48, description="[结婚证] 婚姻登记员手写签名右移偏移(px)，值越大越靠右"),
-    registrar_signature_offset_y: int = Query(-12, description="[结婚证] 婚姻登记员手写签名纵向偏移(px)，负数上移，正数下移"),
-    enable_merge: bool = Query(True, description="[结婚证] 框体合并: True=连续文本框合并翻译, False=每个框单独翻译"),
-    enable_overlap_fix: bool = Query(True, description="[结婚证] 重叠修正: True=自动检测并右移重叠框, False=保持原位"),
-    enable_colon_fix: bool = Query(True, description="[结婚证] 冒号修正: True=为字段名自动添加冒号, False=保持原样"),
-    font_size: Optional[int] = Query(None, description="[结婚证] 字体大小(px)，默认18，建议范围8-30"),
+    file: UploadFile = File(..., description="image file"),
+    from_lang: str = Query("zh"),
+    to_lang: str = Query("en"),
+    enable_correction: bool = Query(False),
+    enable_visualization: bool = Query(True),
+    card_side: str = Query("front"),
+    doc_type: str = Query("id_card"),
+    marriage_page_template: str = Query("page2"),
+    registrar_signature_text: Optional[str] = Query(None),
+    registered_by_text: Optional[str] = Query(None),
+    registered_by_offset_x: int = Query(20),
+    registered_by_offset_y: int = Query(-80),
+    registrar_signature_offset_x: int = Query(48),
+    registrar_signature_offset_y: int = Query(-12),
+    enable_merge: bool = Query(True),
+    enable_overlap_fix: bool = Query(True),
+    enable_colon_fix: bool = Query(True),
+    font_size: Optional[int] = Query(None),
 ):
-    """
-    处理图片文件，进行OCR识别和翻译
-    
-    支持的证件类型：
-    - 身份证（id_card）：正面/背面处理，智能分割、地址合并、字段映射
-    - 结婚证（marriage_cert）：文本合并、重叠修正、冒号修正、智能翻译
-    
-    通用功能：
-    - OCR文字识别（PaddleOCR）
-    - 多语言翻译（DeepSeek API）
-    - 图像修复（LaMa / OpenCV）
-    - 透视矫正（可选）
-    - 可视化结果（可选）
-    """
     try:
-        task_id = await submit_ocr_task(
+        task_id = await task_queue_service.submit_ocr_task(
             file=file,
             from_lang=from_lang,
             to_lang=to_lang,
@@ -75,218 +57,81 @@ async def run_task(
             enable_colon_fix=enable_colon_fix,
             font_size=font_size,
         )
-        return {
-            "status": "ACCEPTED",
-            "task_id": task_id,
-            "message": "任务已提交，正在后台处理"
-        }
+        return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
     except Exception as e:
         tb = traceback.format_exc()
-        print("=" * 60)
-        print("任务提交失败:")
-        print(tb)
-        print("=" * 60)
         raise HTTPException(
             status_code=500,
-            detail={
-                "error": str(e),
-                "type": type(e).__name__,
-                "traceback": tb.split("\n")[-10:] if tb else []
-            }
+            detail={"error": str(e), "type": type(e).__name__, "traceback": tb.split("\n")[-10:] if tb else []},
         )
 
 
 @router.get("/run/status/{task_id}")
 async def get_run_task_status(task_id: str):
-    """
-    查询 OCR 翻译任务状态
-    返回: {"status": "processing"|"done"|"error", "result": {...}|null, "error": "..."|null}
-    """
-    task = get_ocr_task_status(task_id)
+    task = task_queue_service.get_task_status(task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+        raise HTTPException(status_code=404, detail="任务不存在")
     return task
 
 
 @router.post("/number-check")
 async def run_number_check(
-    background_tasks: BackgroundTasks,
-    original_file: UploadFile = File(..., description="原文 docx"),
-    translated_file: UploadFile = File(..., description="译文 docx"),
+    original_file: UploadFile = File(..., description="original docx"),
+    translated_file: UploadFile = File(..., description="translated docx"),
 ):
-    """
-    数值专检：上传原文/译文 docx，生成修复后的译文与对比报告。
-    任务在后台异步执行，返回 task_id 用于查询进度和结果。
-    """
-    import uuid
-    from pathlib import Path
-    from app.core.config import settings
-
-    task_id = str(uuid.uuid4())
-
-    # 先保存文件
-    upload_dir = Path(settings.UPLOAD_DIR) / "number_check"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    original_path = upload_dir / f"{task_id}_original.docx"
-    translated_path = upload_dir / f"{task_id}_translated.docx"
-
-    # 读取并保存文件内容（需要await）
-    original_content = await original_file.read()
-    translated_content = await translated_file.read()
-
-    with open(original_path, "wb") as f:
-        f.write(original_content)
-    with open(translated_path, "wb") as f:
-        f.write(translated_content)
-
-    # 创建后台任务
-    async def run_task_in_background():
-        try:
-            # 重新读取文件
-            from fastapi import UploadFile
-            with open(original_path, "rb") as f:
-                original_bytes = f.read()
-            with open(translated_path, "rb") as f:
-                translated_bytes = f.read()
-
-            # 创建临时的UploadFile对象
-            import io
-            original_upload = UploadFile(
-                filename=original_file.filename,
-                file=io.BytesIO(original_bytes)
-            )
-            translated_upload = UploadFile(
-                filename=translated_file.filename,
-                file=io.BytesIO(translated_bytes)
-            )
-
-            await run_number_check_task(original_upload, translated_upload, task_id=task_id)
-        except Exception as e:
-            # 标记任务失败
-            from app.service.number_check_service import _complete_task
-            tb = traceback.format_exc()
-            print("=" * 60)
-            print("数字专检后台任务失败:")
-            print(tb)
-            print("=" * 60)
-            _complete_task(task_id, error=str(e))
-
-    background_tasks.add_task(run_task_in_background)
-
-    # 立即返回task_id，让前端开始轮询
-    return {
-        "status": "ACCEPTED",
-        "task_id": task_id,
-        "message": "任务已提交，正在后台处理"
-    }
+    task_id = await task_queue_service.submit_number_check_task(
+        original_file=original_file,
+        translated_file=translated_file,
+    )
+    return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
 
 
 @router.get("/number-check/status/{task_id}")
 async def get_number_check_status(task_id: str):
-    """
-    查询数值专检任务状态和进度
-    """
-    progress = _get_task_progress(task_id)
-    if not progress:
-        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    progress = get_number_check_progress(task_id)
+    if progress and queue_task.get("status") != "queued":
+        return progress
+    return queue_task
 
-    return progress
-
-
-# ── 中翻译专检（专检/zhongfanyi）──────────────────────────────────────
 
 @router.post("/zhongfanyi")
 async def run_zhongfanyi(
-    background_tasks: BackgroundTasks,
-    original_file: UploadFile = File(..., description="原文文档 (docx/pdf)"),
-    translated_file: UploadFile = File(..., description="译文文档 (docx/pdf)"),
-    use_ai_rule: bool = Query(False, description="是否使用 AI 生成规则"),
-    rule_file: Optional[UploadFile] = File(None, description="可选：规则文件 (pdf/docx/txt)，供 AI 总结生成规则"),
-    session_rule_content: Optional[str] = Form(None, description="可选：本次会话编辑的规则文本，仅本任务使用，不写入磁盘"),
+    original_file: UploadFile = File(..., description="original document"),
+    translated_file: UploadFile = File(..., description="translated document"),
+    use_ai_rule: bool = Query(False),
+    rule_file: Optional[UploadFile] = File(None),
+    session_rule_content: Optional[str] = Form(None),
 ):
-    """
-    中翻译专检：上传原文、译文，可选规则文件与是否使用 AI 规则，执行对比与自动修复，返回任务 ID 用于轮询。
-    """
-    import uuid
+    allowed = {".docx", ".doc", ".pdf"}
     ext_orig = os.path.splitext(original_file.filename or "")[1].lower()
     ext_tran = os.path.splitext(translated_file.filename or "")[1].lower()
-    allowed = {".docx", ".doc", ".pdf"}
     if ext_orig not in allowed:
-        raise HTTPException(status_code=400, detail=f"不支持的原文格式: {ext_orig}，仅支持 docx/doc/pdf")
+        raise HTTPException(status_code=400, detail=f"不支持的原文格式: {ext_orig}")
     if ext_tran not in allowed:
-        raise HTTPException(status_code=400, detail=f"不支持的译文格式: {ext_tran}，仅支持 docx/doc/pdf")
+        raise HTTPException(status_code=400, detail=f"不支持的译文格式: {ext_tran}")
 
-    task_id = str(uuid.uuid4())
-    upload_dir = Path(settings.UPLOAD_DIR) / "zhongfanyi" / task_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    original_path = upload_dir / f"original{ext_orig}"
-    translated_path = upload_dir / f"translated{ext_tran}"
-
-    orig_content = await original_file.read()
-    tran_content = await translated_file.read()
-    if not orig_content:
-        raise HTTPException(status_code=400, detail="原文文件内容为空，请重新选择文件后上传")
-    if not tran_content:
-        raise HTTPException(status_code=400, detail="译文文件内容为空，请重新选择文件后上传")
-    with open(original_path, "wb") as f:
-        f.write(orig_content)
-    with open(translated_path, "wb") as f:
-        f.write(tran_content)
-    print(f"[zhongfanyi] 文件已保存 - 原文: {len(orig_content)} bytes, 译文: {len(tran_content)} bytes")
-
-    ai_rule_file_path = None
-    if rule_file and use_ai_rule:
-        ext_rule = os.path.splitext(rule_file.filename or "")[1].lower()
-        if ext_rule not in {".pdf", ".docx", ".doc", ".txt"}:
-            raise HTTPException(status_code=400, detail="规则文件仅支持 pdf/docx/doc/txt")
-        ai_rule_path = upload_dir / f"rule{ext_rule}"
-        with open(ai_rule_path, "wb") as f:
-            f.write(await rule_file.read())
-        ai_rule_file_path = str(ai_rule_path)
-
-    zf_service._init_task(task_id)
-
-    abs_original = str(Path(original_path).resolve())
-    abs_translated = str(Path(translated_path).resolve())
-    abs_ai_rule = str(Path(ai_rule_file_path).resolve()) if ai_rule_file_path is not None else None
-    session_rule = (session_rule_content.strip() or None) if session_rule_content else None
-
-    def run_sync():
-        zf_service.run_zhongfanyi_task(
-            abs_original,
-            abs_translated,
-            task_id,
-            use_ai_rule=use_ai_rule,
-            ai_rule_file_path=abs_ai_rule,
-            session_rule_text=session_rule,
-        )
-
-    async def run_in_background():
-        try:
-            await asyncio.to_thread(run_sync)
-        except Exception as e:
-            tb = traceback.format_exc()
-            print("中翻译专检后台任务失败:\n", tb)
-            zf_service._complete_task(task_id, error=str(e))
-
-    background_tasks.add_task(run_in_background)
-
-    return {
-        "status": "ACCEPTED",
-        "task_id": task_id,
-        "message": "中翻译专检任务已提交，正在后台处理",
-    }
+    task_id = await task_queue_service.submit_zhongfanyi_task(
+        original_file=original_file,
+        translated_file=translated_file,
+        use_ai_rule=use_ai_rule,
+        rule_file=rule_file,
+        session_rule_content=session_rule_content,
+    )
+    return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
 
 
 @router.get("/zhongfanyi/status/{task_id}")
 async def get_zhongfanyi_status(task_id: str):
-    """查询中翻译专检任务状态与结果"""
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="任务不存在")
     progress = zf_service.get_task_progress(task_id)
-    if not progress:
-        raise HTTPException(status_code=404, detail="任务不存在或已过期")
-    return progress
+    if progress and queue_task.get("status") != "queued":
+        return progress
+    return queue_task
 
 
 class RuleUpdateBody(BaseModel):
@@ -298,40 +143,36 @@ def get_rule_file_path(rule_type: str) -> Path:
     base_path = Path(__file__).resolve().parents[2] / "专检" / "zhongfanyi" / "llm" / "llm_project" / "rule"
     if rule_type == "custom":
         return base_path / "自定义规则.txt"
-    elif rule_type == "default":
+    if rule_type == "default":
         return base_path / "默认规则.txt"
-    else:
-        raise HTTPException(status_code=400, detail="未知的规则类型")
+    raise HTTPException(status_code=400, detail="未知的规则类型")
 
 
 @router.get("/zhongfanyi/rule")
-async def get_zhongfanyi_rule(rule_type: str = Query(..., description="规则类型: custom 或 default")):
-    """获取规则文件内容"""
+async def get_zhongfanyi_rule(rule_type: str = Query(..., description="custom or default")):
     file_path = get_rule_file_path(rule_type)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="规则文件不存在")
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return {"status": "ok", "content": content}
+        return {"status": "ok", "content": file_path.read_text(encoding="utf-8")}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"读取规则文件失败: {e}")
 
 
 @router.post("/zhongfanyi/rule")
 async def update_zhongfanyi_rule(body: RuleUpdateBody):
-    """仅用于本次会话的规则编辑，不会写入磁盘上的规则文件。前端保存时仅存到本地，提交专检时通过表单传入 rule_content 即可。"""
-    raise HTTPException(
-        status_code=400,
-        detail="规则编辑仅在本会话生效，请在前端点击保存后，直接运行专检即可使用本次编辑的规则，不会修改磁盘文件。"
-    )
+    raise HTTPException(status_code=400, detail="规则编辑仅在当前会话内生效")
 
-
-# ── 多语对照记忆 ──────────────────────────────────────────
 
 @router.get("/alignment/config")
 async def get_alignment_config():
-    """返回可用模型、语言列表、阈值默认值"""
+    from app.service.alignment_service import (
+        AVAILABLE_MODELS as ALIGNMENT_MODELS,
+        BUFFER_CHARS,
+        SUPPORTED_LANGUAGES,
+        THRESHOLD_MAP,
+    )
+
     return {
         "models": {
             name: {
@@ -349,159 +190,104 @@ async def get_alignment_config():
 
 @router.post("/alignment")
 async def run_alignment(
-    background_tasks: BackgroundTasks,
-    original_file: UploadFile = File(..., description="原文文件 (docx/doc/pptx/xlsx/xls)"),
-    translated_file: UploadFile = File(..., description="译文文件 (docx/doc/pptx/xlsx/xls)"),
-    source_lang: str = Query("中文", description="原文语言"),
-    target_lang: str = Query("英语", description="译文语言"),
-    model_name: str = Query("Google gemini-3-flash-preview", description="模型名称"),
-    enable_post_split: bool = Query(True, description="启用后处理细粒度分句"),
-    threshold_2: int = Query(25000, description="分割阈值 2 份"),
-    threshold_3: int = Query(50000, description="分割阈值 3 份"),
-    threshold_4: int = Query(75000, description="分割阈值 4 份"),
-    threshold_5: int = Query(100000, description="分割阈值 5 份"),
-    threshold_6: int = Query(125000, description="分割阈值 6 份"),
-    threshold_7: int = Query(150000, description="分割阈值 7 份"),
-    threshold_8: int = Query(175000, description="分割阈值 8 份"),
-    buffer_chars: int = Query(2000, description="缓冲区字数"),
+    original_file: UploadFile = File(..., description="original file"),
+    translated_file: UploadFile = File(..., description="translated file"),
+    source_lang: str = Query("中文"),
+    target_lang: str = Query("英语"),
+    model_name: str = Query("Google gemini-3-flash-preview"),
+    enable_post_split: bool = Query(True),
+    threshold_2: int = Query(25000),
+    threshold_3: int = Query(50000),
+    threshold_4: int = Query(75000),
+    threshold_5: int = Query(100000),
+    threshold_6: int = Query(125000),
+    threshold_7: int = Query(150000),
+    threshold_8: int = Query(175000),
+    buffer_chars: int = Query(2000),
 ):
-    """
-    多语对照记忆：上传原文/译文文档，通过 LLM 进行句级对齐，输出 Excel。
-    支持 DOCX / DOC / PPTX / XLSX / XLS 格式。
-    """
-    import uuid
-    from pathlib import Path
-    from app.core.config import settings
-
-    allowed_ext = {'.docx', '.doc', '.pptx', '.xlsx', '.xls'}
+    allowed_ext = {".docx", ".doc", ".pptx", ".xlsx", ".xls"}
     orig_ext = os.path.splitext(original_file.filename or "")[1].lower()
     trans_ext = os.path.splitext(translated_file.filename or "")[1].lower()
-
     if orig_ext not in allowed_ext:
         raise HTTPException(status_code=400, detail=f"不支持的原文文件格式: {orig_ext}")
     if trans_ext not in allowed_ext:
         raise HTTPException(status_code=400, detail=f"不支持的译文文件格式: {trans_ext}")
 
-    task_id = str(uuid.uuid4())
-
-    upload_dir = Path(settings.UPLOAD_DIR) / "alignment"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    original_path = upload_dir / f"{task_id}_original{orig_ext}"
-    translated_path = upload_dir / f"{task_id}_translated{trans_ext}"
-
-    original_content = await original_file.read()
-    translated_content = await translated_file.read()
-
-    with open(original_path, "wb") as f:
-        f.write(original_content)
-    with open(translated_path, "wb") as f:
-        f.write(translated_content)
-
-    async def run_task_in_background():
-        try:
-            await run_alignment_task(
-                original_path=str(original_path),
-                translated_path=str(translated_path),
-                task_id=task_id,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                model_name=model_name,
-                enable_post_split=enable_post_split,
-                threshold_2=threshold_2,
-                threshold_3=threshold_3,
-                threshold_4=threshold_4,
-                threshold_5=threshold_5,
-                threshold_6=threshold_6,
-                threshold_7=threshold_7,
-                threshold_8=threshold_8,
-                buffer_chars=buffer_chars,
-            )
-        except Exception as e:
-            tb = traceback.format_exc()
-            print(f"对齐后台任务失败:\n{tb}")
-            _alignment_complete_task(task_id, error=str(e))
-
-    background_tasks.add_task(run_task_in_background)
-
-    return {
-        "status": "ACCEPTED",
-        "task_id": task_id,
-        "message": "对齐任务已提交，正在后台处理",
-    }
+    task_id = await task_queue_service.submit_alignment_task(
+        original_file=original_file,
+        translated_file=translated_file,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        model_name=model_name,
+        enable_post_split=enable_post_split,
+        threshold_2=threshold_2,
+        threshold_3=threshold_3,
+        threshold_4=threshold_4,
+        threshold_5=threshold_5,
+        threshold_6=threshold_6,
+        threshold_7=threshold_7,
+        threshold_8=threshold_8,
+        buffer_chars=buffer_chars,
+    )
+    return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
 
 
 @router.get("/alignment/status/{task_id}")
 async def get_alignment_status(task_id: str):
-    """查询对齐任务状态和进度"""
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    from app.service.alignment_service import get_alignment_progress
+
     progress = get_alignment_progress(task_id)
-    if not progress:
-        raise HTTPException(status_code=404, detail="任务不存在或已过期")
-    return progress
+    if progress and queue_task.get("status") != "queued":
+        return progress
+    return queue_task
 
-
-# ---------------------------------------------------------------------------
-# 营业执照翻译路由
-# ---------------------------------------------------------------------------
 
 class VerifyBody(BaseModel):
-    action: str          # "confirm" | "correct" | "skip"
+    action: str
     text: Optional[str] = None
 
 
 @router.post("/business-licence")
 async def submit_business_licence(
-    file: UploadFile = File(..., description="营业执照图片"),
-    source_lang: str = Query("zh", description="源语言，默认中文"),
-    target_lang: str = Query("en", description="目标语言，默认英文"),
-    config_file: str = Query("config/auto.yaml", description="配置文件: config/auto.yaml | config/vertical.yaml | config/horizontal.yaml"),
+    file: UploadFile = File(..., description="business licence image"),
+    source_lang: str = Query("zh"),
+    target_lang: str = Query("en"),
+    config_file: str = Query("config/auto.yaml"),
 ):
-    """提交营业执照翻译任务，返回 task_id 和 SSE 流地址"""
     allowed_ext = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
-    import os as _os
-    ext = _os.path.splitext(file.filename or "")[1].lower()
+    ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
 
-    file_bytes = await file.read()
-    task_id = await bl_service.start_business_licence_task(
-        file_bytes=file_bytes,
-        original_filename=file.filename or "image.jpg",
+    task_id = await task_queue_service.submit_business_licence_task(
+        file=file,
         source_lang=source_lang,
         target_lang=target_lang,
         config_file=config_file,
     )
-    return {
-        "status": "ACCEPTED",
-        "task_id": task_id,
-        "stream_url": f"/task/business-licence/stream/{task_id}",
-    }
+    return {"status": "ACCEPTED", "task_id": task_id, "stream_url": f"/task/business-licence/stream/{task_id}"}
 
 
 @router.get("/business-licence/stream/{task_id}")
 async def stream_business_licence(task_id: str):
-    """SSE 流：推送翻译进度、日志、印章验证请求、完成/错误事件"""
     task = bl_service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-
     return StreamingResponse(
         bl_service.stream_task_events(task_id),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
 @router.post("/business-licence/verify/{task_id}")
 async def verify_business_licence_seal(task_id: str, body: VerifyBody):
-    """提交印章验证结果，唤醒流水线继续处理"""
     if body.action not in ("confirm", "correct", "skip"):
-        raise HTTPException(status_code=400, detail="action 必须为 confirm/correct/skip")
-
+        raise HTTPException(status_code=400, detail="action 必须为 confirm、correct 或 skip")
     ok = bl_service.submit_verification(task_id, body.action, body.text)
     if not ok:
-        raise HTTPException(status_code=409, detail="任务不存在或当前不在等待验证状态")
+        raise HTTPException(status_code=409, detail="任务不存在，或当前不处于等待确认状态")
     return {"status": "ok"}

@@ -1,11 +1,25 @@
-"""
+﻿"""
 图片处理服务模块
 包含OCR、翻译、图像修复等功能
 """
 import os
+from pathlib import Path
 # 必须在 import paddle 之前设置，避免 OneDNN/PIR 兼容性导致的 NotImplementedError
 os.environ["FLAGS_use_mkldnn"] = "0"
 os.environ["FLAGS_use_new_executor"] = "0"
+BASE_DIR = Path(__file__).resolve().parents[2]
+CACHE_ROOT = BASE_DIR / "data"
+(CACHE_ROOT / ".cache").mkdir(parents=True, exist_ok=True)
+(CACHE_ROOT / ".paddlex").mkdir(parents=True, exist_ok=True)
+(CACHE_ROOT / ".paddle_home").mkdir(parents=True, exist_ok=True)
+(CACHE_ROOT / ".modelscope").mkdir(parents=True, exist_ok=True)
+(CACHE_ROOT / ".huggingface").mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("XDG_CACHE_HOME", str(CACHE_ROOT / ".cache"))
+os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(CACHE_ROOT / ".paddlex"))
+os.environ.setdefault("PADDLE_HOME", str(CACHE_ROOT / ".paddle_home"))
+os.environ.setdefault("MODELSCOPE_CACHE", str(CACHE_ROOT / ".modelscope"))
+os.environ.setdefault("HF_HOME", str(CACHE_ROOT / ".huggingface"))
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 import json
 import numpy as np
@@ -24,7 +38,7 @@ try:
     LAMA_AVAILABLE = True
 except ImportError:
     LAMA_AVAILABLE = False
-    print("⚠️ simple_lama_inpainting 未安装，将使用OpenCV作为备选方案")
+    print("simple_lama_inpainting not installed; using OpenCV fallback")
 
 # -----------------------------
 # 输入转图片列表
@@ -172,24 +186,38 @@ deepseek_client = OpenAI(
 )
 
 # -----------------------------
-# 初始化 OCR
+# ??? OCR
 # -----------------------------
-ocr = PaddleOCR(
-    use_doc_orientation_classify=False,
-    use_doc_unwarping=False,
-    use_textline_orientation=True,
-    lang="ch"
-)
-
-# 初始化 LaMa 模型（如果可用）
+ocr = None
 lama_model = None
-if LAMA_AVAILABLE:
-    try:
-        print("🤖 正在加载 AI 消除模型 (LaMa)...")
-        lama_model = SimpleLama()
-    except Exception as e:
-        print(f"⚠️ LaMa 模型加载失败: {e}")
+_lama_init_attempted = False
 
+
+def _get_ocr_engine():
+    global ocr
+    if ocr is None:
+        print("Loading PaddleOCR model...")
+        ocr = PaddleOCR(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=True,
+            lang="ch"
+        )
+    return ocr
+
+
+def _get_lama_model():
+    global lama_model, _lama_init_attempted
+    if not LAMA_AVAILABLE:
+        return None
+    if lama_model is None and not _lama_init_attempted:
+        _lama_init_attempted = True
+        try:
+            print("Loading LaMa model...")
+            lama_model = SimpleLama()
+        except Exception as e:
+            print(f"LaMa model load failed, fallback to OpenCV: {e}")
+    return lama_model
 
 # -----------------------------
 # 置信度过滤
@@ -850,9 +878,10 @@ def smart_inpaint(img, items):
     img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     mask_pil = Image.fromarray(mask)
 
-    if LAMA_AVAILABLE and lama_model is not None:
+    lama_engine = _get_lama_model()
+    if lama_engine is not None:
         try:
-            result_pil = lama_model(img_pil, mask_pil)
+            result_pil = lama_engine(img_pil, mask_pil)
             inpainted_img = cv2.cvtColor(np.array(result_pil), cv2.COLOR_RGB2BGR)
             print("   ✅ AI 修复完成，底纹已重建")
             return inpainted_img
@@ -1383,11 +1412,11 @@ def process_image(
 
     # 步骤1: OCR识别
     print("\n📷 步骤1: OCR 识别中...")
+    ocr_engine = _get_ocr_engine()
     try:
-        result = ocr.predict(img_path)  # PaddleOCR 3.x
+        result = ocr_engine.predict(img_path)  # PaddleOCR 3.x
     except (AttributeError, NotImplementedError):
-        result = ocr.ocr(img_path)  # PaddleOCR 2.x 降级兼容
-
+        result = ocr_engine.ocr(img_path)  # PaddleOCR 2.x fallback
     # 步骤1.5: 可视化（仅使用 PaddleOCR 原生 save_to_img）
     vis_path = None
     if enable_visualization:
@@ -1481,3 +1510,6 @@ def process_image(
         "final_output": output_img,
         "items_count": len(items)
     }
+
+
+

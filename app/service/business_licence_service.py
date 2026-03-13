@@ -366,3 +366,65 @@ def submit_verification(task_id: str, action: str, text: Optional[str]) -> bool:
     if task.get("verify_event"):
         task["verify_event"].set()
     return True
+
+
+def get_task_snapshot(task_id: str) -> Optional[dict]:
+    task = _tasks.get(task_id)
+    if not task:
+        return None
+    message = "???"
+    if task.get("status") == "pending":
+        message = "??????????????"
+    elif task.get("status") == "waiting_verify":
+        message = "??????"
+    elif task.get("status") == "done":
+        message = "????"
+    elif task.get("status") == "error":
+        message = task.get("error") or "????"
+    return {
+        "status": task.get("status"),
+        "progress": task.get("progress", 0),
+        "message": message,
+        "output_path": task.get("output_path"),
+        "input_filename": task.get("input_filename"),
+        "error": task.get("error"),
+    }
+
+
+async def prepare_business_licence_task(task_id: str, original_filename: str):
+    if task_id not in _tasks:
+        _make_task(task_id)
+    _tasks[task_id]["sse_queue"] = asyncio.Queue()
+    _tasks[task_id]["input_filename"] = original_filename
+    _tasks[task_id]["status"] = "pending"
+    await _tasks[task_id]["sse_queue"].put({
+        "type": "progress",
+        "progress": 0,
+        "message": "??????????????",
+    })
+
+
+async def start_prepared_business_licence_task(
+    task_id: str,
+    input_path: str,
+    source_lang: str,
+    target_lang: str,
+    config_file: str,
+):
+    task = _tasks.get(task_id)
+    if not task:
+        raise RuntimeError("?????")
+    if task.get("sse_queue") is None:
+        task["sse_queue"] = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+    suffix = Path(input_path).suffix or ".jpg"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    output_filename = f"{task_id}_translated_{timestamp}{suffix}"
+    output_path = str(BL_OUTPUTS_DIR / output_filename)
+    t = threading.Thread(
+        target=_run_pipeline_in_thread,
+        args=(task_id, input_path, output_path, source_lang, target_lang, config_file, loop),
+        daemon=True,
+    )
+    t.start()
+    return task_id
