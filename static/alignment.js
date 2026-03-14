@@ -28,6 +28,7 @@ const streamLogWrap = document.getElementById('streamLogWrap');
 const streamLogEl = document.getElementById('streamLog');
 
 const POLL_INTERVAL = 1500;
+const DEFAULT_MODEL_NAME = 'Google gemini-3-flash-preview';
 let pollingTimer = null;
 let configData = null;
 
@@ -62,6 +63,9 @@ function populateSelects() {
     for (const name of Object.keys(models)) {
         modelSelect.add(new Option(name, name));
     }
+    if (models[DEFAULT_MODEL_NAME]) {
+        modelSelect.value = DEFAULT_MODEL_NAME;
+    }
     updateModelInfo();
     updateLangLabels();
 }
@@ -93,6 +97,8 @@ function populateDefaults() {
     modelSelect.innerHTML = '';
     modelSelect.add(new Option('Google gemini-3-flash-preview', 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option('Google Gemini 2.5 Pro', 'Google Gemini 2.5 Pro'));
+    modelSelect.value = DEFAULT_MODEL_NAME;
+    updateModelInfo();
 }
 
 function updateModelInfo() {
