@@ -21,6 +21,7 @@ services:
       - ALLOWED_ORIGINS=*
     volumes:
       # 持久化上传和输出文件（容器重启不丢失）
+      - ./data:/app/data
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
       - ./temp_images:/app/temp_images
