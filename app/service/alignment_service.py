@@ -11,6 +11,7 @@ import uuid
 import traceback
 import threading
 import importlib.util
+from concurrent.futures import Executor
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -1777,11 +1778,17 @@ def _run_alignment_sync(
         print(f"[alignment] final_path={final_path}, exists={os.path.exists(final_path) if final_path else 'N/A'}")
         print(f"[alignment] generated_excel_paths={generated_excel_paths}")
         if final_path and os.path.exists(final_path):
+            _update_progress(task_id, 90, "正在整理最终结果...")
             rel = os.path.relpath(final_path, ".").replace("\\", "/")
-            row_count = len(pd.read_excel(final_path))
-            issues = _quality_check(pd.read_excel(final_path), source_lang, target_lang)
-            print(f"[alignment] 完成! {row_count} 行")
-            _log(f"处理完成！{row_count} 行, 路径: {rel}")
+            final_df = pd.read_excel(final_path)
+            row_count = len(final_df)
+            if split_parts > 1:
+                issues = []
+            else:
+                _update_progress(task_id, 95, "正在执行最终质量检查...")
+                issues = _quality_check(final_df, source_lang, target_lang)
+            print(f"[alignment] 准备完成任务: row_count={row_count}, split_parts={split_parts}, path={rel}")
+            _log(f"准备写入任务结果，{row_count} 行, 路径: {rel}")
             _complete_task(task_id, result={
                 "output_excel": rel,
                 "row_count": row_count,
@@ -1790,6 +1797,7 @@ def _run_alignment_sync(
                 "issues": issues[:10] if issues else [],
                 "intermediate_files": _list_intermediate_files(temp_dir),
             })
+            print(f"[alignment] task completed: {task_id}")
         else:
             print(f"[alignment] 失败: 无有效输出文件")
             _complete_task(task_id, error="对齐处理失败，未生成结果文件。请查看实时输出了解详情")
@@ -1821,12 +1829,13 @@ async def run_alignment_task(
     threshold_7: int = 150000,
     threshold_8: int = 175000,
     buffer_chars: int = 2000,
+    executor: Optional[Executor] = None,
 ):
     """在后台线程池中执行对齐任务"""
     import functools
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
-        None,
+        executor,
         functools.partial(
             _run_alignment_sync,
             original_path, translated_path, task_id,

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import uuid
+from concurrent.futures import Executor
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from fastapi import UploadFile
@@ -50,11 +51,12 @@ async def execute_ocr_task_from_path(
     enable_colon_fix: bool = False,
     font_size: Optional[int] = None,
     progress_callback: Optional[ProgressCallback] = None,
+    executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
     loop = asyncio.get_running_loop()
 
     await _maybe_report(progress_callback, 5, "文件已入队，准备解析")
-    image_paths = await loop.run_in_executor(None, convert_input_to_images, input_path, settings.TEMP_IMAGES_DIR)
+    image_paths = await loop.run_in_executor(executor, convert_input_to_images, input_path, settings.TEMP_IMAGES_DIR)
     if not image_paths:
         file_ext = os.path.splitext(input_path)[1].lower()
         raise ValueError(f"不支持的文件格式: {file_ext}")
@@ -90,7 +92,7 @@ async def execute_ocr_task_from_path(
             async with ai_process_lock:
                 await _maybe_report(progress_callback, base_progress + 5, "已获得处理槽位，开始执行结婚证任务")
                 result = await loop.run_in_executor(
-                    None,
+                    executor,
                     lambda: process_marriage_cert_image(
                         input_path=img_path,
                         output_dir=settings.OUTPUT_DIR,
@@ -116,7 +118,7 @@ async def execute_ocr_task_from_path(
             async with ai_process_lock:
                 await _maybe_report(progress_callback, base_progress + 5, "已获得处理槽位，开始执行 OCR 任务")
                 result = await loop.run_in_executor(
-                    None,
+                    executor,
                     lambda: process_image(
                         input_path=img_path,
                         output_dir=settings.OUTPUT_DIR,

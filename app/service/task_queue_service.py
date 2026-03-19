@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -15,17 +16,21 @@ from app.service import zhongfanyi_service as zf_service
 from app.service.llm_service import execute_ocr_task_from_path
 from app.service.number_check_service import _get_task_progress as get_number_check_progress
 from app.service.number_check_service import run_number_check_task
+from app.service.pdf2docx_service import execute_pdf2docx_task_from_path
 
 
 class TaskQueueService:
     def __init__(self):
         self._worker_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+        self._task_executor: Optional[ThreadPoolExecutor] = None
 
     async def start(self):
         if self._worker_task and not self._worker_task.done():
             return
         self._stop_event = asyncio.Event()
+        if self._task_executor is None:
+            self._task_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="task-queue")
         self._requeue_interrupted_tasks()
         self._worker_task = asyncio.create_task(self._worker_loop(), name="task-queue-worker")
 
@@ -40,6 +45,9 @@ class TaskQueueService:
             pass
         finally:
             self._worker_task = None
+            if self._task_executor is not None:
+                self._task_executor.shutdown(wait=False, cancel_futures=False)
+                self._task_executor = None
 
     async def submit_ocr_task(self, **kwargs) -> str:
         file: UploadFile = kwargs.pop("file")
@@ -185,6 +193,21 @@ class TaskQueueService:
             input_files={"input_path": input_path, "original_filename": original_filename},
         )
 
+    async def submit_pdf2docx_task(
+        self,
+        *,
+        file: UploadFile,
+        model: str,
+    ) -> str:
+        task_id, input_path, original_filename = await self._save_single_upload(file, "pdf2docx")
+        return self._create_db_task(
+            task_id=task_id,
+            task_type="pdf2docx",
+            filename=original_filename,
+            params={"model": model},
+            input_files={"input_path": input_path, "original_filename": original_filename},
+        )
+
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
             task = task_repo.get_task_by_task_id(db, task_id)
@@ -265,6 +288,7 @@ class TaskQueueService:
                     input_path=input_files["input_path"],
                     original_filename=input_files.get("original_filename") or filename,
                     progress_callback=update,
+                    executor=self._task_executor,
                     **params,
                 )
                 output_path = result.get("results", [{}])[0].get("translated_image") if result.get("results") else None
@@ -280,6 +304,9 @@ class TaskQueueService:
             elif task_type == "business_licence":
                 result = await self._execute_business_licence(task_id, input_files, params, update)
                 output_path = result.get("output_path") if result else None
+            elif task_type == "pdf2docx":
+                result = await self._execute_pdf2docx(task_id, input_files, params, update)
+                output_path = result.get("output_docx") if result else None
             else:
                 raise ValueError(f"不支持的任务类型: {task_type}")
 
@@ -306,15 +333,18 @@ class TaskQueueService:
 
     async def _execute_zhongfanyi(self, task_id: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, "开始执行中翻译专检")
-        job = asyncio.create_task(asyncio.to_thread(
-            zf_service.run_zhongfanyi_task,
-            input_files["original_path"],
-            input_files["translated_path"],
-            task_id,
-            params.get("use_ai_rule", False),
-            params.get("ai_rule_file_path"),
-            params.get("session_rule_text"),
-        ))
+        loop = asyncio.get_running_loop()
+        job = loop.run_in_executor(
+            self._task_executor,
+            lambda: zf_service.run_zhongfanyi_task(
+                input_files["original_path"],
+                input_files["translated_path"],
+                task_id,
+                params.get("use_ai_rule", False),
+                params.get("ai_rule_file_path"),
+                params.get("session_rule_text"),
+            ),
+        )
         await self._mirror_progress(job, lambda: zf_service.get_task_progress(task_id), update)
         return await job
 
@@ -326,6 +356,7 @@ class TaskQueueService:
             original_path=input_files["original_path"],
             translated_path=input_files["translated_path"],
             task_id=task_id,
+            executor=self._task_executor,
             **params,
         ))
         await self._mirror_progress(job, lambda: alignment_service.get_alignment_progress(task_id), update)
@@ -354,6 +385,17 @@ class TaskQueueService:
                 if snapshot.get("status") == "error":
                     raise RuntimeError(snapshot.get("error") or "??????????")
             await asyncio.sleep(1)
+
+    async def _execute_pdf2docx(self, task_id: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        await update(5, "开始执行 PDF 转 Word")
+        return await execute_pdf2docx_task_from_path(
+            task_id=task_id,
+            input_path=input_files["input_path"],
+            original_filename=input_files.get("original_filename") or "input.pdf",
+            model=params.get("model", "google/gemini-3-flash-preview"),
+            progress_callback=update,
+            executor=self._task_executor,
+        )
 
     async def _mirror_progress(self, job: asyncio.Task, getter: Callable[[], Optional[Dict[str, Any]]], update: Callable[[int, str], Any]):
         while not job.done():

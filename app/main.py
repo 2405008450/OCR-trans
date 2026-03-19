@@ -18,9 +18,9 @@ TEMP_IMAGES_DIR = BASE_DIR / "temp_images"
 BL_OUTPUTS_DIR = BASE_DIR / "businesslicence" / "outputs"
 
 app = FastAPI(
-    title="图片OCR翻译系统",
-    description="AI驱动的智能文档识别与翻译",
-    version="1.0.0"
+    title="图片 OCR 翻译系统",
+    description="AI 驱动的文档识别、翻译与处理平台",
+    version="1.0.0",
 )
 
 allowed_origins = settings.ALLOWED_ORIGINS.split(",") if settings.ALLOWED_ORIGINS != "*" else ["*"]
@@ -59,58 +59,46 @@ async def shutdown_event():
     await ocr_task_queue.stop()
 
 
+def _read_page(filename: str) -> str:
+    page_file = STATIC_DIR / filename
+    if page_file.exists():
+        return page_file.read_text(encoding="utf-8")
+    return f"<h1>错误：找不到 {filename}</h1><p>路径: {page_file}</p>"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    nav_file = STATIC_DIR / "nav.html"
-    if nav_file.exists():
-        with open(nav_file, "r", encoding="utf-8") as f:
-            return f.read()
-    return f"<h1>错误：找不到 nav.html</h1><p>路径: {nav_file}</p>"
+    return _read_page("nav.html")
 
 
 @app.get("/ocr", response_class=HTMLResponse)
 async def ocr_page():
-    index_file = STATIC_DIR / "index.html"
-    if index_file.exists():
-        with open(index_file, "r", encoding="utf-8") as f:
-            return f.read()
-    return f"<h1>错误：找不到 index.html</h1><p>路径: {index_file}</p>"
+    return _read_page("index.html")
 
 
 @app.get("/number-check", response_class=HTMLResponse)
 async def number_check_page():
-    page_file = STATIC_DIR / "number_check.html"
-    if page_file.exists():
-        with open(page_file, "r", encoding="utf-8") as f:
-            return f.read()
-    return f"<h1>错误：找不到 number_check.html</h1><p>路径: {page_file}</p>"
+    return _read_page("number_check.html")
 
 
 @app.get("/alignment", response_class=HTMLResponse)
 async def alignment_page():
-    page_file = STATIC_DIR / "alignment.html"
-    if page_file.exists():
-        with open(page_file, "r", encoding="utf-8") as f:
-            return f.read()
-    return f"<h1>错误：找不到 alignment.html</h1><p>路径: {page_file}</p>"
+    return _read_page("alignment.html")
 
 
 @app.get("/business-licence", response_class=HTMLResponse)
 async def business_licence_page():
-    page_file = STATIC_DIR / "business_licence.html"
-    if page_file.exists():
-        with open(page_file, "r", encoding="utf-8") as f:
-            return f.read()
-    return f"<h1>错误：找不到 business_licence.html</h1><p>路径: {page_file}</p>"
+    return _read_page("business_licence.html")
 
 
 @app.get("/zhongfanyi", response_class=HTMLResponse)
 async def zhongfanyi_page():
-    page_file = STATIC_DIR / "zhongfanyi.html"
-    if page_file.exists():
-        with open(page_file, "r", encoding="utf-8") as f:
-            return f.read()
-    return f"<h1>错误：找不到 zhongfanyi.html</h1><p>路径: {page_file}</p>"
+    return _read_page("zhongfanyi.html")
+
+
+@app.get("/pdf2docx", response_class=HTMLResponse)
+async def pdf2docx_page():
+    return _read_page("pdf2docx.html")
 
 
 if __name__ == "__main__":
@@ -120,6 +108,5 @@ if __name__ == "__main__":
         "app.main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=settings.DEBUG,
+        reload=settings.DEBUG_ENABLED,
     )
-

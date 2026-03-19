@@ -4,15 +4,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>文件处理工作台</title>
+  <title>文档处理工作台</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <style>
     :root {
       --bg: #07111f;
-      --bg-soft: rgba(12, 27, 47, 0.84);
-      --line: rgba(255, 255, 255, 0.12);
-      --text: #f5f7fb;
-      --muted: rgba(245, 247, 251, 0.72);
+      --panel: rgba(11, 24, 40, 0.88);
+      --card: rgba(255, 255, 255, 0.07);
+      --line: rgba(255, 255, 255, 0.1);
+      --text: #f6f8fb;
+      --muted: rgba(246, 248, 251, 0.72);
+      --cyan: #38bdf8;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --rose: #fb7185;
       --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
     }
 
@@ -26,29 +31,15 @@
       color: var(--text);
       font-family: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei", sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(56, 189, 248, 0.28), transparent 28%),
-        radial-gradient(circle at 80% 20%, rgba(34, 197, 94, 0.18), transparent 24%),
-        linear-gradient(140deg, #040812 0%, #091829 46%, #0d2138 100%);
-    }
-
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background-image:
-        linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-      background-size: 32px 32px;
-      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent 88%);
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.24), transparent 26%),
+        radial-gradient(circle at 86% 14%, rgba(34, 197, 94, 0.15), transparent 22%),
+        linear-gradient(145deg, #040812 0%, #091829 46%, #0d2138 100%);
     }
 
     .page {
       width: min(1220px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 32px 0 48px;
-      position: relative;
-      z-index: 1;
+      padding: 28px 0 48px;
     }
 
     .topbar {
@@ -56,7 +47,7 @@
       justify-content: space-between;
       align-items: center;
       gap: 16px;
-      margin-bottom: 28px;
+      margin-bottom: 24px;
     }
 
     .brand {
@@ -64,17 +55,15 @@
       align-items: center;
       gap: 14px;
       font-weight: 700;
-      letter-spacing: 0.02em;
     }
 
     .brand-mark {
-      width: 44px;
-      height: 44px;
-      border-radius: 14px;
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
       display: grid;
       place-items: center;
-      background: linear-gradient(135deg, rgba(125, 211, 252, 0.24), rgba(56, 189, 248, 0.58));
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.28), rgba(56, 189, 248, 0.62));
     }
 
     .topbar-note {
@@ -83,32 +72,18 @@
     }
 
     .hero {
-      position: relative;
-      overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 28px;
-      background: linear-gradient(145deg, rgba(9, 22, 38, 0.92), rgba(15, 35, 58, 0.86));
+      padding: 34px;
+      background: linear-gradient(145deg, rgba(9, 22, 38, 0.94), rgba(15, 35, 58, 0.88));
       box-shadow: var(--shadow);
-      padding: 40px;
-      margin-bottom: 28px;
-    }
-
-    .hero::after {
-      content: "";
-      position: absolute;
-      width: 360px;
-      height: 360px;
-      right: -80px;
-      top: -120px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(125, 211, 252, 0.24), transparent 65%);
+      margin-bottom: 24px;
     }
 
     .hero-grid {
-      position: relative;
       display: grid;
-      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.9fr);
-      gap: 24px;
+      grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.9fr);
+      gap: 22px;
       align-items: end;
     }
 
@@ -120,32 +95,31 @@
       border-radius: 999px;
       font-size: 13px;
       color: #d7f3ff;
-      background: rgba(125, 211, 252, 0.12);
-      border: 1px solid rgba(125, 211, 252, 0.22);
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.22);
       margin-bottom: 18px;
     }
 
     h1 {
       margin: 0;
-      max-width: 10ch;
-      font-size: clamp(38px, 7vw, 64px);
+      font-size: clamp(36px, 7vw, 62px);
       line-height: 1.04;
       letter-spacing: -0.04em;
     }
 
     .hero-copy p {
-      margin: 18px 0 0;
-      max-width: 620px;
+      margin: 16px 0 0;
+      max-width: 640px;
       color: var(--muted);
-      font-size: 17px;
       line-height: 1.8;
+      font-size: 17px;
     }
 
     .hero-actions {
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
-      margin-top: 28px;
+      margin-top: 26px;
     }
 
     .action-btn {
@@ -157,32 +131,24 @@
       gap: 10px;
       text-decoration: none;
       font-weight: 600;
-      transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
-    }
-
-    .action-btn:hover {
-      transform: translateY(-2px);
     }
 
     .action-btn.primary {
       color: #082032;
-      background: linear-gradient(135deg, #9be7ff, #38bdf8);
-      box-shadow: 0 16px 36px rgba(56, 189, 248, 0.28);
+      background: linear-gradient(135deg, #9be7ff, var(--cyan));
     }
 
     .action-btn.secondary {
       color: var(--text);
       border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.06);
-      backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, 0.05);
     }
 
     .hero-panel {
       border: 1px solid var(--line);
       border-radius: 22px;
       padding: 22px;
-      background: rgba(255, 255, 255, 0.06);
-      backdrop-filter: blur(14px);
+      background: rgba(255, 255, 255, 0.05);
     }
 
     .hero-panel h2 {
@@ -210,8 +176,8 @@
       font-size: 14px;
     }
 
-    .signal-item span,
-    .signal-item small {
+    .signal-item small,
+    .signal-item span {
       color: var(--muted);
       font-size: 13px;
     }
@@ -219,7 +185,6 @@
     .section-head {
       display: flex;
       justify-content: space-between;
-      gap: 16px;
       align-items: end;
       margin-bottom: 18px;
     }
@@ -243,21 +208,12 @@
 
     .module-card {
       grid-column: span 4;
-      position: relative;
-      overflow: hidden;
-      min-height: 280px;
+      min-height: 260px;
       border: 1px solid var(--line);
       border-radius: 24px;
       padding: 24px;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.045));
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
       box-shadow: 0 18px 44px rgba(0, 0, 0, 0.2);
-      transition: transform 0.26s ease, border-color 0.26s ease, background 0.26s ease;
-    }
-
-    .module-card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(125, 211, 252, 0.3);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.055));
     }
 
     .module-card.featured {
@@ -268,7 +224,6 @@
       display: flex;
       justify-content: space-between;
       align-items: start;
-      gap: 12px;
       margin-bottom: 18px;
     }
 
@@ -282,25 +237,11 @@
       color: #fff;
     }
 
-    .theme-cyan {
-      background: linear-gradient(135deg, #0ea5e9, #38bdf8);
-    }
-
-    .theme-green {
-      background: linear-gradient(135deg, #16a34a, #4ade80);
-    }
-
-    .theme-amber {
-      background: linear-gradient(135deg, #d97706, #fbbf24);
-    }
-
-    .theme-rose {
-      background: linear-gradient(135deg, #e11d48, #fb7185);
-    }
-
-    .theme-indigo {
-      background: linear-gradient(135deg, #4f46e5, #818cf8);
-    }
+    .theme-cyan { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }
+    .theme-green { background: linear-gradient(135deg, #16a34a, #4ade80); }
+    .theme-amber { background: linear-gradient(135deg, #d97706, #fbbf24); }
+    .theme-rose { background: linear-gradient(135deg, #e11d48, #fb7185); }
+    .theme-indigo { background: linear-gradient(135deg, #4f46e5, #818cf8); }
 
     .tag {
       padding: 7px 10px;
@@ -347,47 +288,8 @@
       font-weight: 600;
     }
 
-    .module-link i {
-      transition: transform 0.22s ease;
-    }
-
-    .module-link:hover i {
-      transform: translateX(3px);
-    }
-
-    .insight-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 18px;
-      margin-top: 18px;
-    }
-
-    .insight-card {
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 22px;
-      background: var(--bg-soft);
-    }
-
-    .insight-card strong {
-      display: block;
-      margin-bottom: 10px;
-      font-size: 18px;
-    }
-
-    .insight-card p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.8;
-    }
-
     @media (max-width: 980px) {
-      .hero {
-        padding: 28px;
-      }
-
-      .hero-grid,
-      .insight-grid {
+      .hero-grid {
         grid-template-columns: 1fr;
       }
 
@@ -409,13 +311,8 @@
       }
 
       .hero,
-      .module-card,
-      .insight-card {
+      .module-card {
         border-radius: 20px;
-      }
-
-      h1 {
-        max-width: none;
       }
     }
   </style>
@@ -426,46 +323,53 @@
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark"><i class="fas fa-wave-square"></i></div>
-        <div>文件处理工作台</div>
+        <div>文档处理工作台</div>
       </div>
-
+      <div class="topbar-note">统一入口：OCR、专检、对照记忆、证照翻译、PDF 转 Word</div>
     </header>
 
     <section class="hero">
       <div class="hero-grid">
         <div class="hero-copy">
-
-          <h1>多语对照记忆</h1>
-          <p>将原文和译文自动对齐成可复用语料，适合术语整理、项目复盘和后续翻译记忆库沉淀。</p>
+          <div class="eyebrow"><i class="fas fa-sparkles"></i> AI Document Tools</div>
+          <h1>一套入口，覆盖常用文档处理流程</h1>
+          <p>把 OCR 翻译、数字专检、多语对照记忆、营业执照处理和新的 PDF 转 Word 模块集中到同一个工作台，减少来回切换。</p>
           <div class="hero-actions">
-            <a class="action-btn primary" href="/alignment"><i class="fas fa-object-group"></i> 打开多语对照</a>
+            <a class="action-btn primary" href="/pdf2docx"><i class="fas fa-file-word"></i> 打开 PDF 转 Word</a>
             <a class="action-btn secondary" href="/ocr"><i class="fas fa-language"></i> 打开 OCR 翻译</a>
           </div>
         </div>
 
         <aside class="hero-panel">
-          <h2>当前工作区能力</h2>
+          <h2>当前可用模块</h2>
           <div class="signal-list">
             <div class="signal-item">
               <div>
-                <strong>证件图片翻译</strong>
-                <small>身份证 / 结婚证 / 营业执照</small>
+                <strong>证件 OCR 翻译</strong>
+                <small>身份证 / 结婚证 / 常规证件图像处理</small>
               </div>
               <span>OCR</span>
             </div>
             <div class="signal-item">
               <div>
-                <strong>文档数字核查</strong>
-                <small>原文译文比对、修复与报告</small>
+                <strong>数字专检</strong>
+                <small>原文与译文数字一致性检查与修复</small>
               </div>
               <span>DOCX</span>
             </div>
             <div class="signal-item">
               <div>
                 <strong>多语对照记忆</strong>
-                <small>段落对齐、输出 Excel 对照表</small>
+                <small>段落对齐、Excel 输出、记忆资产沉淀</small>
               </div>
               <span>LLM</span>
+            </div>
+            <div class="signal-item">
+              <div>
+                <strong>PDF 转 Word</strong>
+                <small>PDF / 图片 OCR 后导出 DOCX，可选 Gemini 模型</small>
+              </div>
+              <span>NEW</span>
             </div>
           </div>
         </aside>
@@ -476,31 +380,33 @@
       <div class="section-head">
         <div>
           <h2>处理模块</h2>
+          <p>按你的工作流直接进入对应页面。</p>
         </div>
       </div>
 
       <div class="module-grid">
         <article class="module-card featured">
           <div class="module-top">
-            <div class="module-icon theme-amber"><i class="fas fa-object-group"></i></div>
-            <div class="tag">核心功能</div>
+            <div class="module-icon theme-cyan"><i class="fas fa-file-word"></i></div>
+            <div class="tag">新模块</div>
           </div>
-          <h3>多语对照记忆</h3>
-          <p>将原文和译文自动对齐成可复用语料，适合术语整理、项目复盘和后续翻译记忆库沉淀。</p>
+          <h3>PDF 转 Word</h3>
+          <p>上传 PDF 或图片，调用视觉模型 OCR 提取内容，再生成可下载的 Word 文档，适合扫描件、表格页和复杂版式场景。</p>
           <div class="module-meta">
-            <span class="meta-pill">段落对齐</span>
-            <span class="meta-pill">Excel 输出</span>
+            <span class="meta-pill">PDF / 图片</span>
+            <span class="meta-pill">DOCX 输出</span>
+            <span class="meta-pill">Gemini 模型切换</span>
           </div>
-          <a class="module-link" href="/alignment">进入模块 <i class="fas fa-arrow-right"></i></a>
+          <a class="module-link" href="/pdf2docx">进入模块 <i class="fas fa-arrow-right"></i></a>
         </article>
 
         <article class="module-card featured">
           <div class="module-top">
-            <div class="module-icon theme-cyan"><i class="fas fa-language"></i></div>
-            <div class="tag">主流程</div>
+            <div class="module-icon theme-amber"><i class="fas fa-language"></i></div>
+            <div class="tag">高频入口</div>
           </div>
           <h3>证件 OCR 翻译</h3>
-          <p>上传身份证或结婚证图片，自动完成识别、翻译和结果图生成。适合作为最常用入口，放在首页第一屏直接可达。</p>
+          <p>上传身份证、结婚证等图片，自动完成识别、翻译与结果图生成，适合作为主流程入口。</p>
           <div class="module-meta">
             <span class="meta-pill">图片上传</span>
             <span class="meta-pill">模板参数</span>
@@ -515,7 +421,7 @@
             <div class="tag">校验</div>
           </div>
           <h3>数字专检</h3>
-          <p>用于原文与译文 DOCX 的数值一致性核查，能输出修复结果和检查报告，适合交付前复核。</p>
+          <p>用于原文与译文 DOCX 的数字一致性检查，可输出修复结果与检查报告，适合交付前复核。</p>
           <div class="module-meta">
             <span class="meta-pill">原译对比</span>
             <span class="meta-pill">自动批注</span>
@@ -525,11 +431,25 @@
 
         <article class="module-card">
           <div class="module-top">
-            <div class="module-icon theme-indigo"><i class="fas fa-file-signature"></i></div>
+            <div class="module-icon theme-indigo"><i class="fas fa-object-group"></i></div>
+            <div class="tag">记忆</div>
+          </div>
+          <h3>多语对照记忆</h3>
+          <p>将原文和译文自动对齐成可复用语料，适合术语整理、项目复盘和后续翻译记忆库沉淀。</p>
+          <div class="module-meta">
+            <span class="meta-pill">段落对齐</span>
+            <span class="meta-pill">Excel 输出</span>
+          </div>
+          <a class="module-link" href="/alignment">进入模块 <i class="fas fa-arrow-right"></i></a>
+        </article>
+
+        <article class="module-card">
+          <div class="module-top">
+            <div class="module-icon theme-rose"><i class="fas fa-file-signature"></i></div>
             <div class="tag">审校</div>
           </div>
           <h3>中翻译专检</h3>
-          <p>针对原文与译文做规则化比对和 AI 审阅，更偏向后置质检场景，不再和高频入口同级竞争。</p>
+          <p>针对原文与译文做规则化比对和 AI 审阅，更偏向后置质检场景，适合交付前深度审查。</p>
           <div class="module-meta">
             <span class="meta-pill">规则文件</span>
             <span class="meta-pill">AI 检查</span>
@@ -539,11 +459,11 @@
 
         <article class="module-card">
           <div class="module-top">
-            <div class="module-icon theme-rose"><i class="fas fa-building"></i></div>
+            <div class="module-icon theme-green"><i class="fas fa-building"></i></div>
             <div class="tag">专项</div>
           </div>
           <h3>营业执照翻译</h3>
-          <p>专门针对营业执照的识别与翻译流程，保留印章校验和方向配置，减少通用 OCR 页面的复杂度。</p>
+          <p>面向营业执照的识别与翻译流程，保留盖章校验与方向配置，减少通用 OCR 页面复杂度。</p>
           <div class="module-meta">
             <span class="meta-pill">章区验证</span>
             <span class="meta-pill">方向配置</span>
@@ -552,7 +472,6 @@
         </article>
       </div>
     </section>
-
   </div>
 </body>
 

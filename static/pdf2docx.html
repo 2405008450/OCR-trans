@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>不可编辑文件预处理beta版</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-mark"><i class="fas fa-file-word"></i></div>
+                <div>
+                    <h1>不可编辑文件预处理beta版</h1>
+                    <p class="subtitle">上传 PDF 或图片，调用视觉模型 OCR 后生成可下载的 DOCX 文档。</p>
+                </div>
+            </div>
+            <nav class="header-nav">
+                <a href="/ocr"><i class="fas fa-language"></i> OCR 翻译</a>
+                <a href="/number-check"><i class="fas fa-check-double"></i> 数字专检</a>
+                <a href="/alignment"><i class="fas fa-object-group"></i> 对照记忆</a>
+                <a href="/business-licence"><i class="fas fa-building"></i> 营业执照</a>
+            </nav>
+        </header>
+
+        <section class="hero-banner">
+            <div>
+                <span class="section-kicker">New Module</span>
+                <h2>复杂文档也能直接整理成 Word</h2>
+                <p>支持 PDF、PNG、JPG、BMP、GIF、WEBP。可在不同 Gemini 模型间切换，适合票据、扫描件、表格型页面等场景。</p>
+            </div>
+            <div class="hero-metrics">
+                <div class="metric-card">
+                    <strong>输出内容</strong>
+                    <span>DOCX 文件 + 原始 OCR 文本，方便交付和复核。</span>
+                </div>
+                <div class="metric-card">
+                    <strong>模型可选</strong>
+                    <span>支持 `google/gemini-3-flash-preview` 与 `google/gemini-3.1-pro-preview`。</span>
+                </div>
+            </div>
+        </section>
+
+        <main class="main-content">
+            <section class="workspace-grid">
+                <section class="upload-section" id="uploadSection">
+                    <div class="upload-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Step 1</span>
+                                <h2>上传并选择模型</h2>
+                            </div>
+                            <div class="section-chip">PDF / Image</div>
+                        </div>
+                        <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试 Pro 模型。</p>
+
+                        <div class="upload-area" id="uploadArea">
+                            <input type="file" id="fileInput" accept=".pdf,image/*" hidden>
+                            <div class="upload-placeholder" id="uploadPlaceholder">
+                                <i class="fas fa-cloud-arrow-up"></i>
+                                <p>拖拽文件到这里，或点击选择 PDF / 图片</p>
+                                <span>支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP</span>
+                            </div>
+                            <div class="file-preview" id="filePreview" style="display: none;">
+                                <div class="file-info">
+                                    <p id="fileName"></p>
+                                    <span class="file-status">文件已就绪，可开始转换</span>
+                                    <button class="btn-remove" id="btnRemove">
+                                        <i class="fas fa-times"></i> 移除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="options-panel">
+                            <div class="option-group option-card">
+                                <label for="modelSelect">转换模型</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-robot"></i>
+                                    <select id="modelSelect"></select>
+                                </div>
+                            </div>
+                            <div class="option-group option-card">
+                                <label>模型说明</label>
+                                <div style="line-height: 1.8; color: var(--text-secondary);">
+                                    <div id="modelLabel" style="font-weight: 700; color: var(--text-primary);"></div>
+                                    <div id="modelDesc"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn-primary" id="btnProcess" disabled>
+                            <i class="fas fa-file-export"></i> 开始转换
+                        </button>
+                    </div>
+                </section>
+
+                <aside class="info-rail">
+                    <div class="info-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Guide</span>
+                                <h3>推荐用法</h3>
+                            </div>
+                        </div>
+                        <ul class="info-list">
+                            <li>页数较多时建议耐心等待，系统会串行处理。</li>
+                            <li>扫描件若存在阴影或倾斜，先做预清理会更稳。</li>
+                            <li>复杂表格优先试 `gemini-3.1-pro-preview`。</li>
+                        </ul>
+                    </div>
+                    <div class="info-card emphasis">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Output</span>
+                                <h3>转换结果</h3>
+                            </div>
+                        </div>
+                        <div class="stacked-stats">
+                            <div><strong>Word 文档</strong><span>直接下载交付</span></div>
+                            <div><strong>原始 OCR 文本</strong><span>用于排查识别结果</span></div>
+                            <div><strong>模型记录</strong><span>便于复盘最佳参数</span></div>
+                        </div>
+                    </div>
+                </aside>
+            </section>
+
+            <section class="processing-section" id="processingSection" style="display: none;">
+                <div class="processing-card">
+                    <div class="spinner"></div>
+                    <h2>转换中</h2>
+                    <p id="processingStatus">正在提交任务…</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">0%</p>
+                </div>
+            </section>
+
+            <section class="result-section" id="resultSection" style="display: none;">
+                <div class="result-header">
+                    <h2><i class="fas fa-check-circle"></i> 转换完成</h2>
+                    <button class="btn-secondary" id="btnNewTask">
+                        <i class="fas fa-plus"></i> 新建任务
+                    </button>
+                </div>
+                <div class="result-stats" id="resultStats"></div>
+                <div class="result-grid" id="resultGrid"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/pdf2docx.js"></script>
+</body>
+
+</html>

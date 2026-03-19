@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.service import business_licence_service as bl_service
 from app.service import zhongfanyi_service as zf_service
 from app.service.number_check_service import _get_task_progress as get_number_check_progress
+from app.service.pdf2docx_service import get_pdf2docx_models
 from app.service.task_queue_service import task_queue_service
 
 router = APIRouter(prefix="/task", tags=["Task"])
@@ -58,11 +59,15 @@ async def run_task(
             font_size=font_size,
         )
         return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
-    except Exception as e:
+    except Exception as exc:
         tb = traceback.format_exc()
         raise HTTPException(
             status_code=500,
-            detail={"error": str(e), "type": type(e).__name__, "traceback": tb.split("\n")[-10:] if tb else []},
+            detail={
+                "error": str(exc),
+                "type": type(exc).__name__,
+                "traceback": tb.split("\n")[-10:] if tb else [],
+            },
         )
 
 
@@ -155,8 +160,8 @@ async def get_zhongfanyi_rule(rule_type: str = Query(..., description="custom or
         raise HTTPException(status_code=404, detail="规则文件不存在")
     try:
         return {"status": "ok", "content": file_path.read_text(encoding="utf-8")}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取规则文件失败: {e}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"读取规则文件失败: {exc}")
 
 
 @router.post("/zhongfanyi/rule")
@@ -240,6 +245,12 @@ async def get_alignment_status(task_id: str):
     from app.service.alignment_service import get_alignment_progress
 
     progress = get_alignment_progress(task_id)
+    if queue_task.get("status") in ("done", "failed"):
+        if progress and progress.get("stream_log"):
+            queue_task["stream_log"] = progress.get("stream_log")
+            if queue_task.get("result"):
+                queue_task["result"]["stream_log"] = progress.get("stream_log")
+        return queue_task
     if progress and queue_task.get("status") != "queued":
         return progress
     return queue_task
@@ -291,3 +302,33 @@ async def verify_business_licence_seal(task_id: str, body: VerifyBody):
     if not ok:
         raise HTTPException(status_code=409, detail="任务不存在，或当前不处于等待确认状态")
     return {"status": "ok"}
+
+
+@router.get("/pdf2docx/config")
+async def get_pdf2docx_config():
+    return {
+        "models": get_pdf2docx_models(),
+        "default_model": "google/gemini-3-flash-preview",
+    }
+
+
+@router.post("/pdf2docx")
+async def run_pdf2docx(
+    file: UploadFile = File(..., description="pdf or image file"),
+    model: str = Query("google/gemini-3-flash-preview"),
+):
+    allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
+
+    task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model)
+    return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
+
+
+@router.get("/pdf2docx/status/{task_id}")
+async def get_pdf2docx_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return queue_task

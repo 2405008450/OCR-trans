@@ -43,6 +43,8 @@ THRESHOLD_7_PARTS = 150000
 THRESHOLD_8_PARTS = 175000
 BUFFER_CHARS = 2000
 OUTPUT_DIR = "Result_Output"
+PART_TASK_MAX_RETRIES = 3
+PART_TASK_RETRY_DELAY_SECONDS = 5
 
 # ==========================================
 # === 🤖 可用模型配置 ===
@@ -3512,10 +3514,14 @@ class DocumentAlignerGUI:
                 log_manager.log(f"  任务 {i + 1}: {os.path.basename(task['output'])}")
 
             progress_per_task = 50 / len(tasks_queue) if tasks_queue else 50
+            stop_following_tasks = False
 
             for idx, task in enumerate(tasks_queue):
                 if self.processing_stopped:
                     log_manager.log("处理已停止")
+                    break
+
+                if stop_following_tasks:
                     break
 
                 log_manager.log(f"")
@@ -3524,18 +3530,41 @@ class DocumentAlignerGUI:
                 log_manager.log(f"原文文件: {os.path.basename(task['original'])}")
                 log_manager.log(f"译文文件: {os.path.basename(task['trans'])}")
 
-                success = run_llm_alignment(
-                    task['original'],
-                    task['trans'],
-                    task['output'],
-                    model_id,
-                    anchor_info_orig=task['anchor_orig'],
-                    anchor_info_trans=task['anchor_trans'],
-                    system_prompt_override=task.get('system_prompt_override'),
-                    source_lang=task.get('source_lang', source_lang),
-                    target_lang=task.get('target_lang', target_lang),
-                    enable_post_split=enable_post_split
-                )
+                success = False
+                max_retries = PART_TASK_MAX_RETRIES if split_parts > 1 else 1
+
+                for attempt in range(1, max_retries + 1):
+                    if self.processing_stopped:
+                        break
+
+                    if attempt > 1:
+                        log_manager.log(
+                            f"任务 {idx + 1} 重试 {attempt}/{max_retries}: "
+                            f"{os.path.basename(task['output'])}"
+                        )
+
+                    success = run_llm_alignment(
+                        task['original'],
+                        task['trans'],
+                        task['output'],
+                        model_id,
+                        anchor_info_orig=task['anchor_orig'],
+                        anchor_info_trans=task['anchor_trans'],
+                        system_prompt_override=task.get('system_prompt_override'),
+                        source_lang=task.get('source_lang', source_lang),
+                        target_lang=task.get('target_lang', target_lang),
+                        enable_post_split=enable_post_split
+                    )
+
+                    if success:
+                        break
+
+                    if attempt < max_retries:
+                        log_manager.log_exception(
+                            f"任务 {idx + 1} 失败，{PART_TASK_RETRY_DELAY_SECONDS} 秒后重试",
+                            os.path.basename(task['output'])
+                        )
+                        time.sleep(PART_TASK_RETRY_DELAY_SECONDS)
 
                 # 检查处理结果
                 output_file = task['output']
@@ -3551,6 +3580,14 @@ class DocumentAlignerGUI:
                     if output_file in generated_excel_paths:
                         generated_excel_paths.remove(output_file)
 
+                    if split_parts > 1:
+                        stop_following_tasks = True
+                        next_part_num = idx + 2
+                        log_manager.log_exception(
+                            f"已中止后续分片任务：Part{idx + 1} 多次失败，不再继续 Part{next_part_num}",
+                            "当前分片必须先成功，避免前面的内容被忽略"
+                        )
+
                 self.progress_var.set(30 + (idx + 1) * progress_per_task)
 
             # 显示成功生成的文件列表
@@ -3560,7 +3597,7 @@ class DocumentAlignerGUI:
                 log_manager.log(f"  - {os.path.basename(path)}")
 
             final_path = None
-            if not self.processing_stopped:
+            if not self.processing_stopped and not stop_following_tasks:
                 if split_parts > 1 and len(generated_excel_paths) > 0:
                     log_manager.log("")
                     log_manager.log("「阶段四」合并与去重")
@@ -3568,11 +3605,19 @@ class DocumentAlignerGUI:
                     merge_and_deduplicate_excels(generated_excel_paths, final_path, source_lang, target_lang)
                 else:
                     final_path = generated_excel_paths[0] if generated_excel_paths else None
+            elif stop_following_tasks:
+                log_manager.log_exception("分片任务未全部完成，已跳过最终合并")
 
             self.progress_var.set(100)
 
             if self.processing_stopped:
                 self.root.after(0, lambda: self.status_label.config(text="已停止"))
+            elif stop_following_tasks:
+                self.root.after(0, lambda: self.status_label.config(text="分片失败"))
+                self.root.after(0, lambda: messagebox.showwarning(
+                    "分片失败",
+                    "某个分片在重试后仍失败，后续分片已停止执行，请稍后重试当前任务。"
+                ))
             else:
                 log_manager.log("🎉 处理完成！")
                 if final_path and os.path.exists(final_path):

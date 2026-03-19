@@ -23,7 +23,7 @@ start_server.bat
 .venv\Scripts\activate
 
 # 启动服务（绑定到所有网络接口）
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 #### Linux/Mac 系统
