@@ -237,11 +237,25 @@
       color: #fff;
     }
 
-    .theme-cyan { background: linear-gradient(135deg, #0ea5e9, #38bdf8); }
-    .theme-green { background: linear-gradient(135deg, #16a34a, #4ade80); }
-    .theme-amber { background: linear-gradient(135deg, #d97706, #fbbf24); }
-    .theme-rose { background: linear-gradient(135deg, #e11d48, #fb7185); }
-    .theme-indigo { background: linear-gradient(135deg, #4f46e5, #818cf8); }
+    .theme-cyan {
+      background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+    }
+
+    .theme-green {
+      background: linear-gradient(135deg, #16a34a, #4ade80);
+    }
+
+    .theme-amber {
+      background: linear-gradient(135deg, #d97706, #fbbf24);
+    }
+
+    .theme-rose {
+      background: linear-gradient(135deg, #e11d48, #fb7185);
+    }
+
+    .theme-indigo {
+      background: linear-gradient(135deg, #4f46e5, #818cf8);
+    }
 
     .tag {
       padding: 7px 10px;
@@ -325,7 +339,7 @@
         <div class="brand-mark"><i class="fas fa-wave-square"></i></div>
         <div>文档处理工作台</div>
       </div>
-      <div class="topbar-note">统一入口：OCR、专检、对照记忆、证照翻译、PDF 转 Word</div>
+      <div class="topbar-note">统一入口：OCR、专检、对照记忆、文档翻译、PDF 转 Word</div>
     </header>
 
     <section class="hero">
@@ -333,7 +347,7 @@
         <div class="hero-copy">
           <div class="eyebrow"><i class="fas fa-sparkles"></i> AI Document Tools</div>
           <h1>一套入口，覆盖常用文档处理流程</h1>
-          <p>把 OCR 翻译、数字专检、多语对照记忆、营业执照处理和新的 PDF 转 Word 模块集中到同一个工作台，减少来回切换。</p>
+          <p>把 OCR 翻译、数字专检、多语对照记忆、文档翻译和新的 PDF 转 Word 模块集中到同一个工作台，减少来回切换。</p>
           <div class="hero-actions">
             <a class="action-btn primary" href="/pdf2docx"><i class="fas fa-file-word"></i> 打开 PDF 转 Word</a>
             <a class="action-btn secondary" href="/ocr"><i class="fas fa-language"></i> 打开 OCR 翻译</a>
@@ -459,16 +473,17 @@
 
         <article class="module-card">
           <div class="module-top">
-            <div class="module-icon theme-green"><i class="fas fa-building"></i></div>
-            <div class="tag">专项</div>
+            <div class="module-icon theme-green"><i class="fas fa-language"></i></div>
+            <div class="tag">翻译</div>
           </div>
-          <h3>营业执照翻译</h3>
-          <p>面向营业执照的识别与翻译流程，保留盖章校验与方向配置，减少通用 OCR 页面复杂度。</p>
+          <h3>文档翻译</h3>
+          <p>上传 PDF 或图片，OCR 提取内容后通过 DeepSeek AI 翻译为多种目标语言，导出 Word 文档。支持一对多翻译。</p>
           <div class="module-meta">
-            <span class="meta-pill">章区验证</span>
-            <span class="meta-pill">方向配置</span>
+            <span class="meta-pill">PDF / 图片</span>
+            <span class="meta-pill">多语种</span>
+            <span class="meta-pill">Word 输出</span>
           </div>
-          <a class="module-link" href="/business-licence">进入模块 <i class="fas fa-arrow-right"></i></a>
+          <a class="module-link" href="/doc-translate">进入模块 <i class="fas fa-arrow-right"></i></a>
         </article>
       </div>
     </section>

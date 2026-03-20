@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文档翻译</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* 多语种选择区 */
+        .lang-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .lang-checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .lang-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 999px;
+            border: 1.5px solid var(--border-color);
+            background: var(--card-bg);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+
+        .lang-chip:hover {
+            border-color: var(--primary-color);
+            color: var(--text-primary);
+        }
+
+        .lang-chip input[type="checkbox"] {
+            display: none;
+        }
+
+        .lang-chip.active {
+            border-color: var(--primary-color);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.15));
+            color: var(--primary-color);
+            font-weight: 600;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
+        }
+
+        .lang-chip .chip-check {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            border: 1.5px solid var(--border-color);
+            display: grid;
+            place-items: center;
+            font-size: 10px;
+            color: transparent;
+            transition: all 0.15s ease;
+        }
+
+        .lang-chip.active .chip-check {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+            color: #fff;
+        }
+
+        .lang-selector h4 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .lang-selector .selector-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* 结果区域覆盖 */
+        .translation-results {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .translation-result-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+        }
+
+        .translation-result-item .lang-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(99, 102, 241, 0.2));
+            color: var(--primary-color);
+        }
+
+        .translation-result-item .download-actions {
+            display: flex;
+            gap: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-mark"><i class="fas fa-language"></i></div>
+                <div>
+                    <h1>文档翻译</h1>
+                    <p class="subtitle">上传 PDF 或图片，OCR 识别后通过 AI 翻译并导出 Word 文档，支持一对多语种。</p>
+                </div>
+            </div>
+            <nav class="header-nav">
+                <a href="/ocr"><i class="fas fa-id-card"></i> OCR 翻译</a>
+                <a href="/number-check"><i class="fas fa-check-double"></i> 数字专检</a>
+                <a href="/alignment"><i class="fas fa-object-group"></i> 对照记忆</a>
+                <a href="/pdf2docx"><i class="fas fa-file-word"></i> PDF 转 Word</a>
+            </nav>
+        </header>
+
+        <section class="hero-banner">
+            <div>
+                <span class="section-kicker">AI Translate</span>
+                <h2>不可编辑文档 → 多语种 Word</h2>
+                <p>支持 PDF、PNG、JPG、BMP 等格式。先用视觉模型 OCR 提取内容，再通过 DeepSeek AI 翻译为目标语言，最后导出 Word 文档。可同时翻译为多种语言。</p>
+            </div>
+            <div class="hero-metrics">
+                <div class="metric-card">
+                    <strong>一对多翻译</strong>
+                    <span>一份文档可同时翻译为多种语言，各生成一份 Word。</span>
+                </div>
+                <div class="metric-card">
+                    <strong>AI 驱动</strong>
+                    <span>OCR 提取 + DeepSeek 大模型翻译，专业术语更准确。</span>
+                </div>
+            </div>
+        </section>
+
+        <main class="main-content">
+            <section class="workspace-grid">
+                <section class="upload-section" id="uploadSection">
+                    <div class="upload-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Step 1</span>
+                                <h2>上传文件并配置翻译</h2>
+                            </div>
+                            <div class="section-chip">PDF / Image</div>
+                        </div>
+                        <p class="upload-desc">支持 PDF 和常见图片格式。上传后选择 OCR 模型和目标翻译语言。</p>
+
+                        <div class="upload-area" id="uploadArea">
+                            <input type="file" id="fileInput" accept=".pdf,image/*" hidden>
+                            <div class="upload-placeholder" id="uploadPlaceholder">
+                                <i class="fas fa-cloud-arrow-up"></i>
+                                <p>拖拽文件到这里，或点击选择 PDF / 图片</p>
+                                <span>支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP、TIF</span>
+                            </div>
+                            <div class="file-preview" id="filePreview" style="display: none;">
+                                <div class="file-info">
+                                    <p id="fileName"></p>
+                                    <span class="file-status">文件已就绪</span>
+                                    <button class="btn-remove" id="btnRemove">
+                                        <i class="fas fa-times"></i> 移除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 配置区 -->
+                        <div class="options-panel">
+                            <!-- OCR 模型选择 -->
+                            <div class="option-group option-card">
+                                <label for="modelSelect">OCR 模型</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-robot"></i>
+                                    <select id="modelSelect"></select>
+                                </div>
+                            </div>
+
+                            <!-- 源语言 -->
+                            <div class="option-group option-card">
+                                <label for="sourceLangSelect">源语言</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-flag"></i>
+                                    <select id="sourceLangSelect"></select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 目标语言多选 -->
+                        <div class="option-group option-card" style="margin-top: 16px;">
+                            <div class="lang-selector">
+                                <h4><i class="fas fa-globe"></i> 选择目标翻译语言（可多选）</h4>
+                                <div class="lang-checkbox-group" id="targetLangGroup">
+                                    <!-- JS 动态填充 -->
+                                </div>
+                                <div class="selector-label">
+                                    <i class="fas fa-info-circle"></i>
+                                    <span>选中的每种语言都会生成一份独立的 Word 文档</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button class="btn-primary" id="btnProcess" disabled>
+                            <i class="fas fa-language"></i> 开始翻译
+                        </button>
+                    </div>
+                </section>
+
+                <aside class="info-rail">
+                    <div class="info-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Guide</span>
+                                <h3>使用说明</h3>
+                            </div>
+                        </div>
+                        <ul class="info-list">
+                            <li>上传 PDF 或图片文件，系统自动 OCR 提取文字。</li>
+                            <li>可同时选择多种目标语言，每种语言各自生成一份 Word。</li>
+                            <li>复杂版面建议使用"增强版V2"模型。</li>
+                            <li>翻译使用 DeepSeek AI 大模型，支持专业术语。</li>
+                        </ul>
+                    </div>
+                    <div class="info-card emphasis">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Output</span>
+                                <h3>输出内容</h3>
+                            </div>
+                        </div>
+                        <div class="stacked-stats">
+                            <div><strong>Word 文档</strong><span>每种目标语言各一份 DOCX</span></div>
+                            <div><strong>原始 OCR 文本</strong><span>可用于排查识别结果</span></div>
+                            <div><strong>翻译文本</strong><span>每种语言的翻译中间文本</span></div>
+                        </div>
+                    </div>
+                </aside>
+            </section>
+
+            <!-- 处理中 -->
+            <section class="processing-section" id="processingSection" style="display: none;">
+                <div class="processing-card">
+                    <div class="spinner"></div>
+                    <h2>处理中</h2>
+                    <p id="processingStatus">正在提交任务…</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">0%</p>
+                </div>
+            </section>
+
+            <!-- 结果 -->
+            <section class="result-section" id="resultSection" style="display: none;">
+                <div class="result-header">
+                    <h2><i class="fas fa-check-circle"></i> 翻译完成</h2>
+                    <button class="btn-secondary" id="btnNewTask">
+                        <i class="fas fa-plus"></i> 新建任务
+                    </button>
+                </div>
+                <div class="result-stats" id="resultStats"></div>
+                <div class="translation-results" id="translationResults"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/doc_translate.js"></script>
+</body>
+
+</html>

@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.file_naming import build_storage_filename
 from app.db.session import SessionLocal
 from app.repository import task_repo
-from app.service import business_licence_service as bl_service
+from app.service.doc_translate_service import execute_doc_translate_task
 from app.service import zhongfanyi_service as zf_service
 from app.service.llm_service import execute_ocr_task_from_path
 from app.service.number_check_service import _get_task_progress as get_number_check_progress
@@ -265,31 +265,26 @@ class TaskQueueService:
             self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_business_licence_task(
+    async def submit_doc_translate_task(
         self,
         *,
         file: UploadFile,
         source_lang: str,
-        target_lang: str,
-        config_file: str,
+        target_langs: str,
+        ocr_model: str,
     ) -> str:
         reserved_task = self._create_db_task(
-            task_type="business_licence",
+            task_type="doc_translate",
             filename=file.filename or "input.bin",
-            params={"source_lang": source_lang, "target_lang": target_lang, "config_file": config_file},
+            params={"source_lang": source_lang, "target_langs": target_langs, "ocr_model": ocr_model},
             input_files={},
         )
         try:
             input_path, original_filename = await self._save_single_upload(
                 file,
-                "business_licence",
+                "doc_translate",
                 reserved_task.display_no,
                 reserved_task.task_id,
-            )
-            await bl_service.prepare_business_licence_task(
-                reserved_task.task_id,
-                original_filename,
-                reserved_task.display_no,
             )
             self._update_task_input_files(
                 reserved_task.task_id,
@@ -432,9 +427,9 @@ class TaskQueueService:
             elif task_type == "alignment":
                 result = await self._execute_alignment(task_id, display_no, input_files, params, update)
                 output_path = result.get("output_excel") if result else None
-            elif task_type == "business_licence":
-                result = await self._execute_business_licence(task_id, display_no, input_files, params, update)
-                output_path = result.get("output_path") if result else None
+            elif task_type == "doc_translate":
+                result = await self._execute_doc_translate(task_id, display_no, input_files, params, update)
+                output_path = result.get("raw_output_txt") if result else None
             elif task_type == "pdf2docx":
                 result = await self._execute_pdf2docx(task_id, display_no, input_files, params, update)
                 output_path = result.get("output_docx") if result else None
@@ -526,7 +521,7 @@ class TaskQueueService:
         status = alignment_service.get_alignment_progress(task_id) or {}
         return status.get("result") or {}
 
-    async def _execute_business_licence(
+    async def _execute_doc_translate(
         self,
         task_id: str,
         display_no: str,
@@ -534,29 +529,20 @@ class TaskQueueService:
         params: Dict[str, Any],
         update: Callable[[int, str], Any],
     ) -> Dict[str, Any]:
-        await update(5, "开始执行营业执照翻译")
-        await bl_service.start_prepared_business_licence_task(
+        await update(5, "开始执行文档翻译")
+        target_langs_str = params.get("target_langs", "en")
+        target_langs = [lang.strip() for lang in target_langs_str.split(",") if lang.strip()]
+        return await execute_doc_translate_task(
             task_id=task_id,
             display_no=display_no,
             input_path=input_files["input_path"],
-            source_lang=params["source_lang"],
-            target_lang=params["target_lang"],
-            config_file=params["config_file"],
+            original_filename=input_files.get("original_filename") or "input.pdf",
+            source_lang=params.get("source_lang", "zh"),
+            target_langs=target_langs,
+            ocr_model=params.get("ocr_model", "google/gemini-3-flash-preview"),
+            progress_callback=update,
+            executor=self._task_executor,
         )
-        while True:
-            snapshot = bl_service.get_task_snapshot(task_id)
-            if snapshot:
-                await update(snapshot.get("progress", 0), snapshot.get("message", "处理中"))
-                if snapshot.get("status") == "done":
-                    return {
-                        "task_id": task_id,
-                        "display_no": display_no,
-                        "output_path": snapshot.get("output_path"),
-                        "input_filename": snapshot.get("input_filename"),
-                    }
-                if snapshot.get("status") == "error":
-                    raise RuntimeError(snapshot.get("error") or "营业执照处理失败")
-            await asyncio.sleep(1)
 
     async def _execute_pdf2docx(
         self,

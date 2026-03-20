@@ -15,7 +15,6 @@ STATIC_DIR = BASE_DIR / "static"
 UPLOADS_DIR = BASE_DIR / "uploads"
 OUTPUTS_DIR = BASE_DIR / "outputs"
 TEMP_IMAGES_DIR = BASE_DIR / "temp_images"
-BL_OUTPUTS_DIR = BASE_DIR / "businesslicence" / "outputs"
 
 app = FastAPI(
     title="图片 OCR 翻译系统",
@@ -41,9 +40,6 @@ if OUTPUTS_DIR.exists():
     app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 if TEMP_IMAGES_DIR.exists():
     app.mount("/temp_images", StaticFiles(directory=str(TEMP_IMAGES_DIR)), name="temp_images")
-
-BL_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/bl-outputs", StaticFiles(directory=str(BL_OUTPUTS_DIR)), name="bl_outputs")
 
 app.include_router(task.router)
 
@@ -86,9 +82,9 @@ async def alignment_page():
     return _read_page("alignment.html")
 
 
-@app.get("/business-licence", response_class=HTMLResponse)
-async def business_licence_page():
-    return _read_page("business_licence.html")
+@app.get("/doc-translate", response_class=HTMLResponse)
+async def doc_translate_page():
+    return _read_page("doc_translate.html")
 
 
 @app.get("/zhongfanyi", response_class=HTMLResponse)

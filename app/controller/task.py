@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.service import business_licence_service as bl_service
+from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
 from app.service import zhongfanyi_service as zf_service
 from app.service.number_check_service import _get_task_progress as get_number_check_progress
 from app.service.pdf2docx_service import get_pdf2docx_models
@@ -256,52 +256,45 @@ async def get_alignment_status(task_id: str):
     return queue_task
 
 
-class VerifyBody(BaseModel):
-    action: str
-    text: Optional[str] = None
+# ── 文档翻译（原营业执照板块，已重构） ──────────────────────────
 
 
-@router.post("/business-licence")
-async def submit_business_licence(
-    file: UploadFile = File(..., description="business licence image"),
+@router.get("/doc-translate/config")
+async def get_doc_translate_config():
+    return {
+        "models": get_doc_translate_models(),
+        "default_model": "google/gemini-3-flash-preview",
+        "languages": get_supported_languages(),
+    }
+
+
+@router.post("/doc-translate")
+async def submit_doc_translate(
+    file: UploadFile = File(..., description="pdf or image file"),
     source_lang: str = Query("zh"),
-    target_lang: str = Query("en"),
-    config_file: str = Query("config/auto.yaml"),
+    target_langs: str = Query("en", description="逗号分隔的目标语言代码，如 en,es,ja"),
+    ocr_model: str = Query("google/gemini-3-flash-preview"),
 ):
-    allowed_ext = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+    allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
 
-    task_id = await task_queue_service.submit_business_licence_task(
+    task_id = await task_queue_service.submit_doc_translate_task(
         file=file,
         source_lang=source_lang,
-        target_lang=target_lang,
-        config_file=config_file,
+        target_langs=target_langs,
+        ocr_model=ocr_model,
     )
-    return {"status": "ACCEPTED", "task_id": task_id, "stream_url": f"/task/business-licence/stream/{task_id}"}
+    return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
 
 
-@router.get("/business-licence/stream/{task_id}")
-async def stream_business_licence(task_id: str):
-    task = bl_service.get_task(task_id)
-    if not task:
+@router.get("/doc-translate/status/{task_id}")
+async def get_doc_translate_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return StreamingResponse(
-        bl_service.stream_task_events(task_id),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.post("/business-licence/verify/{task_id}")
-async def verify_business_licence_seal(task_id: str, body: VerifyBody):
-    if body.action not in ("confirm", "correct", "skip"):
-        raise HTTPException(status_code=400, detail="action 必须为 confirm、correct 或 skip")
-    ok = bl_service.submit_verification(task_id, body.action, body.text)
-    if not ok:
-        raise HTTPException(status_code=409, detail="任务不存在，或当前不处于等待确认状态")
-    return {"status": "ok"}
+    return queue_task
 
 
 @router.get("/pdf2docx/config")

@@ -34,17 +34,69 @@ except ImportError:
 # ============================================================
 # 1. LLM OCR 调用
 # ============================================================
-SYS_PROMPT = """Convert the following document to markdown.
-Return only the markdown with no explanation text. Do not include delimiters like ```markdown or ```html.
+SYS_PROMPT = """Convert the document into simple, Microsoft Word-safe HTML.
 
-RULES:
-  - You must include all information on the page. Do not exclude headers, footers, or subtext.
-  - Return tables in an HTML format.
-  - Charts & infographics must be interpreted to a markdown format. Prefer table format when applicable.
-  - Prefer using ☐ and ☑ for check boxes.
-  - Replace any sequence of 3 or more repeated characters used as visual separators or fill lines (e.g. -----, _____, ....., =====) with a single short placeholder: ___
-  - For blank form fields shown as long lines (e.g. "Name: _____________"), keep only one short underscore placeholder: "Name: ___"
-  - Do NOT reproduce decorative divider lines or page-wide rules; omit them entirely."""
+Return only a complete HTML document. Do not include explanations. Do not use markdown. Do not wrap the output in code fences.
+
+The output must be a full HTML document with:
+- <!DOCTYPE html>
+- <html>
+- <head>
+- <meta charset="utf-8">
+- <title>Document</title>
+- <body>
+
+Important:
+- The HTML will be opened by Microsoft Word, not a browser.
+- Prioritize Word compatibility over visual fidelity.
+- Use simple HTML only.
+
+Rules:
+- Include all visible text content.
+- Preserve reading order.
+- Do not summarize or rewrite.
+- Do not invent missing text.
+- Replace any sequence of 3 or more repeated characters used as visual separators or fill lines (e.g. -----, _____, ....., =====) with a single short placeholder: ___
+- For blank form fields shown as long lines (e.g. "Name: _____________"), keep only one short underscore placeholder: "Name: ___"
+- Do NOT reproduce decorative divider lines or page-wide rules; omit them entirely.
+
+Allowed tags:
+- <html>, <head>, <meta>, <title>, <body>
+- <h1> to <h6>
+- <p>
+- <br>
+- <strong>, <em>, <u>, <sub>, <sup>
+- <ul>, <ol>, <li>
+- <table>, <thead>, <tbody>, <tr>, <th>, <td>
+- <hr>
+
+Formatting rules:
+- Prefer <p> over nested <div>.
+- Use tables for structured alignment when needed.
+- Keep styles minimal and inline only when necessary.
+- Only use simple inline styles such as:
+  text-align, font-size, font-family, font-weight, margin, text-indent
+- Do not use:
+  flex, grid, float, position, transform, rgba(), opacity, negative margins, external CSS, JavaScript, SVG, canvas
+- Avoid unnecessary nesting.
+
+Images:
+- If an image is essential, represent it as a short text note like:
+  <p>[Logo]</p>
+- Do not rely on external image paths unless explicitly provided and required.
+
+Output must be valid HTML that Microsoft Word can open directly.
+Visual color preservation:
+- Preserve important visual colors from the document.
+- If text is clearly colored (e.g., red titles or red stamps), reflect that using simple HTML inline styles.
+
+Seals / stamps:
+- If a stamp or official seal is present, represent it as a paragraph.
+- Use red color to reflect the stamp.
+- Prefer simple styles compatible with Microsoft Word.
+- Do not use rgba() or opacity.
+- Example:
+  <p style="color:#C00000; font-weight:bold;">[Official Seal]</p>"""
 
 
 def _ocr_single_image(img_b64: str, mime_type: str, api_key: str, model: str,
