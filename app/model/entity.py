@@ -10,6 +10,7 @@ class Task(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     task_id = Column(String, unique=True, index=True, nullable=True)
+    display_no = Column(String, unique=True, index=True, nullable=True)
     task_type = Column(String, index=True, nullable=False, default="ocr")
     filename = Column(String, nullable=False)
     status = Column(String, index=True, default="queued")

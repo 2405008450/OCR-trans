@@ -1558,6 +1558,7 @@ def _run_alignment_sync(
     original_path: str,
     translated_path: str,
     task_id: str,
+    display_no: Optional[str],
     source_lang: str,
     target_lang: str,
     model_name: str,
@@ -1593,7 +1594,7 @@ def _run_alignment_sync(
         base_name = os.path.splitext(os.path.basename(original_path))[0]
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-        task_dir = os.path.join(OUTPUT_DIR, "alignment", f"{base_name}_{timestamp}")
+        task_dir = os.path.join(OUTPUT_DIR, "alignment", display_no or f"{base_name}_{timestamp}")
         temp_dir = os.path.join(task_dir, "中间文件")
         os.makedirs(task_dir, exist_ok=True)
         os.makedirs(temp_dir, exist_ok=True)
@@ -1817,6 +1818,7 @@ async def run_alignment_task(
     original_path: str,
     translated_path: str,
     task_id: str,
+    display_no: Optional[str] = None,
     source_lang: str = "中文",
     target_lang: str = "英语",
     model_name: str = DEFAULT_MODEL,
@@ -1838,7 +1840,7 @@ async def run_alignment_task(
         executor,
         functools.partial(
             _run_alignment_sync,
-            original_path, translated_path, task_id,
+            original_path, translated_path, task_id, display_no,
             source_lang, target_lang, model_name, enable_post_split,
             threshold_2=threshold_2, threshold_3=threshold_3,
             threshold_4=threshold_4, threshold_5=threshold_5,

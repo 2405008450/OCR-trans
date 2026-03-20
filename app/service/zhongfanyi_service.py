@@ -83,6 +83,7 @@ def run_zhongfanyi_task(
     original_path: str,
     translated_path: str,
     task_id: str,
+    display_no: Optional[str] = None,
     use_ai_rule: bool = False,
     ai_rule_file_path: Optional[str] = None,
     session_rule_text: Optional[str] = None,
@@ -90,7 +91,8 @@ def run_zhongfanyi_task(
     """
     在指定输出目录下执行中翻译专检完整流程（对比 + 修复），结果复制到 output_dir 供下载。
     """
-    output_dir = Path(settings.OUTPUT_DIR) / "zhongfanyi" / task_id
+    folder_name = display_no or task_id
+    output_dir = Path(settings.OUTPUT_DIR) / "zhongfanyi" / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
     output_base = str(output_dir)
 
@@ -130,10 +132,10 @@ def run_zhongfanyi_task(
             if path and os.path.exists(path):
                 subdir = report_dir_names.get(name, name)
                 fname = os.path.basename(path)
-                reports[f"{name}_json"] = f"outputs/zhongfanyi/{task_id}/{subdir}/output_json/{fname}"
+                reports[f"{name}_json"] = f"outputs/zhongfanyi/{folder_name}/{subdir}/output_json/{fname}"
 
     # 前端下载使用相对站点的路径，如 /outputs/zhongfanyi/{task_id}/corrected.docx
-    corrected_web_path = f"outputs/zhongfanyi/{task_id}/corrected.docx"
+    corrected_web_path = f"outputs/zhongfanyi/{folder_name}/corrected.docx"
     result = {
         "task_id": task_id,
         "corrected_docx": corrected_web_path,

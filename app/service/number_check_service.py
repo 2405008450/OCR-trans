@@ -162,6 +162,7 @@ async def run_number_check_task(
     original_file: UploadFile,
     translated_file: UploadFile,
     task_id: str = "",
+    display_no: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     数值专检流程：
@@ -180,14 +181,15 @@ async def run_number_check_task(
     # 初始化进度跟踪（7个主要步骤）
     _init_task_progress(task_id, total_steps=7)
 
-    upload_dir = Path(settings.UPLOAD_DIR) / "number_check"
-    output_dir = Path(settings.OUTPUT_DIR) / "number_check" / task_id
+    folder_name = display_no or task_id
+    upload_dir = Path(settings.UPLOAD_DIR) / "number_check" / folder_name
+    output_dir = Path(settings.OUTPUT_DIR) / "number_check" / folder_name
     report_dir = output_dir / "reports"
     upload_dir.mkdir(parents=True, exist_ok=True)
     report_dir.mkdir(parents=True, exist_ok=True)
 
-    original_path = upload_dir / f"{task_id}_original.docx"
-    translated_path = upload_dir / f"{task_id}_translated.docx"
+    original_path = upload_dir / "original.docx"
+    translated_path = upload_dir / "translated.docx"
 
     _update_progress(task_id, 1, 7, "正在保存上传文件...")
 
@@ -265,7 +267,7 @@ async def run_number_check_task(
 
     doc.save(backup_copy_path)
 
-    final_doc_path = output_dir / f"{task_id}_corrected.docx"
+    final_doc_path = output_dir / "corrected.docx"
     shutil.copy2(backup_copy_path, final_doc_path)
 
     total_success = body_stat["success"] + header_stat["success"] + footer_stat["success"]

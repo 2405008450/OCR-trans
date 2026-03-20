@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import inspect, text
 
 from app.db.database import Base, engine
@@ -13,6 +15,7 @@ def _ensure_task_table_columns():
     existing_columns = {column["name"] for column in inspector.get_columns("task")}
     missing_columns = {
         "task_id": "ALTER TABLE task ADD COLUMN task_id VARCHAR",
+        "display_no": "ALTER TABLE task ADD COLUMN display_no VARCHAR",
         "task_type": "ALTER TABLE task ADD COLUMN task_type VARCHAR DEFAULT 'ocr' NOT NULL",
         "progress": "ALTER TABLE task ADD COLUMN progress INTEGER DEFAULT 0 NOT NULL",
         "message": "ALTER TABLE task ADD COLUMN message VARCHAR",
@@ -31,8 +34,26 @@ def _ensure_task_table_columns():
             if column_name not in existing_columns:
                 connection.execute(text(ddl))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_task_task_id ON task (task_id)"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_task_display_no ON task (display_no)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_task_status ON task (status)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_task_task_type ON task (task_type)"))
+
+        rows = connection.execute(text("SELECT id, created_at FROM task WHERE display_no IS NULL ORDER BY id")).fetchall()
+        for row in rows:
+            task_id = row[0]
+            created_at = row[1]
+            if isinstance(created_at, datetime):
+                dt = created_at
+            else:
+                try:
+                    dt = datetime.fromisoformat(str(created_at))
+                except Exception:
+                    dt = datetime.now()
+            display_no = f"{dt:%Y%m%d}-{int(task_id):06d}"
+            connection.execute(
+                text("UPDATE task SET display_no = :display_no WHERE id = :task_id"),
+                {"display_no": display_no, "task_id": task_id},
+            )
 
 
 def init_db():

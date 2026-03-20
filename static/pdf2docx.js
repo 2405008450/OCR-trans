@@ -2,6 +2,16 @@ let selectedFile = null;
 let pollingTimer = null;
 let modelConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
+const MODEL_DISPLAY_NAMES = {
+    'google/gemini-2.5-flash': '快速版V1',
+    'google/gemini-2.5-pro': '增强版V1',
+    'google/gemini-3-flash-preview': '快速版V2',
+    'google/gemini-3.1-pro-preview': '增强版V2',
+    'Google Gemini 2.5 Flash': '快速版V1',
+    'Google Gemini 2.5 Pro': '增强版V1',
+    'Google Gemini 3 Flash Preview': '快速版V2',
+    'Google Gemini 3.1 Pro Preview': '增强版V2',
+};
 
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
@@ -59,11 +69,11 @@ async function loadConfig() {
         console.error(error);
         modelConfig = {
             'google/gemini-3-flash-preview': {
-                label: 'Google Gemini 3 Flash Preview',
+                label: getModelDisplayName('google/gemini-3-flash-preview'),
                 description: '速度更快，适合常规 PDF / 图片转 Word 场景。',
             },
             'google/gemini-3.1-pro-preview': {
-                label: 'Google Gemini 3.1 Pro Preview',
+                label: getModelDisplayName('google/gemini-3.1-pro-preview'),
                 description: '更强调复杂版面与细节理解，适合高难度文档。',
             },
         };
@@ -71,7 +81,7 @@ async function loadConfig() {
 
     modelSelect.innerHTML = '';
     Object.entries(modelConfig).forEach(([value, info]) => {
-        modelSelect.add(new Option(info.label || value, value));
+        modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
     });
     modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
 }
@@ -79,7 +89,7 @@ async function loadConfig() {
 function updateModelInfo() {
     const model = modelSelect.value;
     const info = modelConfig[model] || {};
-    modelLabel.textContent = info.label || model;
+    modelLabel.textContent = getModelDisplayName(info.label || model);
     modelDesc.textContent = info.description || '';
 }
 
@@ -220,7 +230,7 @@ function showResult(result) {
         </div>
         <div class="stat-card">
             <i class="fas fa-robot"></i>
-            <h3>${escapeHtml(result.model || '-')}</h3>
+            <h3>${escapeHtml(getModelDisplayName(result.model || '-'))}</h3>
             <p>使用模型</p>
         </div>
         <div class="stat-card">
@@ -285,4 +295,8 @@ function escapeHtml(value) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+}
+
+function getModelDisplayName(name) {
+    return MODEL_DISPLAY_NAMES[name] || name;
 }

@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional
 from fastapi import UploadFile
 
 from app.core.config import settings
+from app.core.file_naming import build_storage_filename
 from app.db.session import SessionLocal
 from app.repository import task_repo
 from app.service import business_licence_service as bl_service
@@ -51,37 +52,71 @@ class TaskQueueService:
 
     async def submit_ocr_task(self, **kwargs) -> str:
         file: UploadFile = kwargs.pop("file")
-        task_id, input_path, original_filename = await self._save_single_upload(file, "ocr")
-        return self._create_db_task(
-            task_id=task_id,
+        reserved_task = self._create_db_task(
             task_type="ocr",
-            filename=original_filename,
+            filename=file.filename or "input.bin",
             params=kwargs,
-            input_files={"input_path": input_path, "original_filename": original_filename},
+            input_files={},
         )
+        try:
+            input_path, original_filename = await self._save_single_upload(
+                file,
+                "ocr",
+                reserved_task.display_no,
+                reserved_task.task_id,
+            )
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {"input_path": input_path, "original_filename": original_filename},
+            )
+            return reserved_task.task_id
+        except Exception as exc:
+            self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
 
     async def submit_number_check_task(self, *, original_file: UploadFile, translated_file: UploadFile) -> str:
-        task_id = str(uuid.uuid4())
-        upload_dir = Path(settings.UPLOAD_DIR) / "number_check"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        original_ext = Path(original_file.filename or "original.docx").suffix or ".docx"
-        translated_ext = Path(translated_file.filename or "translated.docx").suffix or ".docx"
-        original_path = upload_dir / f"{task_id}_original{original_ext}"
-        translated_path = upload_dir / f"{task_id}_translated{translated_ext}"
-        original_path.write_bytes(await original_file.read())
-        translated_path.write_bytes(await translated_file.read())
-        return self._create_db_task(
-            task_id=task_id,
+        reserved_task = self._create_db_task(
             task_type="number_check",
             filename=f"{original_file.filename} | {translated_file.filename}",
             params={},
-            input_files={
-                "original_path": str(original_path).replace("\\", "/"),
-                "translated_path": str(translated_path).replace("\\", "/"),
-                "original_filename": original_file.filename,
-                "translated_filename": translated_file.filename,
-            },
+            input_files={},
         )
+        try:
+            upload_dir = Path(settings.UPLOAD_DIR) / "number_check" / reserved_task.display_no
+            upload_dir.mkdir(parents=True, exist_ok=True)
+
+            original_ext = Path(original_file.filename or "original.docx").suffix or ".docx"
+            translated_ext = Path(translated_file.filename or "translated.docx").suffix or ".docx"
+            original_path = upload_dir / build_storage_filename(
+                reserved_task.display_no,
+                original_file.filename,
+                reserved_task.task_id,
+                role="original",
+                ext=original_ext,
+            )
+            translated_path = upload_dir / build_storage_filename(
+                reserved_task.display_no,
+                translated_file.filename,
+                reserved_task.task_id,
+                role="translated",
+                ext=translated_ext,
+            )
+            original_path.write_bytes(await original_file.read())
+            translated_path.write_bytes(await translated_file.read())
+
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {
+                    "original_path": str(original_path).replace("\\", "/"),
+                    "translated_path": str(translated_path).replace("\\", "/"),
+                    "original_filename": original_file.filename,
+                    "translated_filename": translated_file.filename,
+                },
+            )
+            return reserved_task.task_id
+        except Exception as exc:
+            self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
 
     async def submit_zhongfanyi_task(
         self,
@@ -92,37 +127,71 @@ class TaskQueueService:
         rule_file: Optional[UploadFile],
         session_rule_content: Optional[str],
     ) -> str:
-        task_id = str(uuid.uuid4())
-        upload_dir = Path(settings.UPLOAD_DIR) / "zhongfanyi" / task_id
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        ext_orig = Path(original_file.filename or "original.docx").suffix.lower()
-        ext_tran = Path(translated_file.filename or "translated.docx").suffix.lower()
-        original_path = upload_dir / f"original{ext_orig}"
-        translated_path = upload_dir / f"translated{ext_tran}"
-        original_path.write_bytes(await original_file.read())
-        translated_path.write_bytes(await translated_file.read())
-
-        ai_rule_file_path = None
-        if rule_file and use_ai_rule:
-            ext_rule = Path(rule_file.filename or "rule.txt").suffix.lower()
-            ai_rule_path = upload_dir / f"rule{ext_rule}"
-            ai_rule_path.write_bytes(await rule_file.read())
-            ai_rule_file_path = str(ai_rule_path).replace("\\", "/")
-
-        return self._create_db_task(
-            task_id=task_id,
+        reserved_task = self._create_db_task(
             task_type="zhongfanyi",
             filename=f"{original_file.filename} | {translated_file.filename}",
             params={
                 "use_ai_rule": use_ai_rule,
-                "ai_rule_file_path": ai_rule_file_path,
+                "ai_rule_file_path": None,
                 "session_rule_text": (session_rule_content.strip() or None) if session_rule_content else None,
             },
-            input_files={
-                "original_path": str(original_path).replace("\\", "/"),
-                "translated_path": str(translated_path).replace("\\", "/"),
-            },
+            input_files={},
         )
+        try:
+            upload_dir = Path(settings.UPLOAD_DIR) / "zhongfanyi" / reserved_task.display_no
+            upload_dir.mkdir(parents=True, exist_ok=True)
+
+            ext_orig = Path(original_file.filename or "original.docx").suffix.lower()
+            ext_tran = Path(translated_file.filename or "translated.docx").suffix.lower()
+            original_path = upload_dir / build_storage_filename(
+                reserved_task.display_no,
+                original_file.filename,
+                reserved_task.task_id,
+                role="original",
+                ext=ext_orig,
+            )
+            translated_path = upload_dir / build_storage_filename(
+                reserved_task.display_no,
+                translated_file.filename,
+                reserved_task.task_id,
+                role="translated",
+                ext=ext_tran,
+            )
+            original_path.write_bytes(await original_file.read())
+            translated_path.write_bytes(await translated_file.read())
+
+            ai_rule_file_path = None
+            if rule_file and use_ai_rule:
+                ext_rule = Path(rule_file.filename or "rule.txt").suffix.lower()
+                ai_rule_path = upload_dir / build_storage_filename(
+                    reserved_task.display_no,
+                    rule_file.filename,
+                    reserved_task.task_id,
+                    role="rule",
+                    ext=ext_rule,
+                )
+                ai_rule_path.write_bytes(await rule_file.read())
+                ai_rule_file_path = str(ai_rule_path).replace("\\", "/")
+
+            with SessionLocal() as db:
+                task = task_repo.get_task_by_task_id(db, reserved_task.task_id)
+                if task:
+                    params = json.loads(task.params_json or "{}")
+                    params["ai_rule_file_path"] = ai_rule_file_path
+                    task.params_json = json.dumps(params, ensure_ascii=False)
+                    db.commit()
+
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {
+                    "original_path": str(original_path).replace("\\", "/"),
+                    "translated_path": str(translated_path).replace("\\", "/"),
+                },
+            )
+            return reserved_task.task_id
+        except Exception as exc:
+            self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
 
     async def submit_alignment_task(
         self,
@@ -142,17 +211,7 @@ class TaskQueueService:
         threshold_8: int,
         buffer_chars: int,
     ) -> str:
-        task_id = str(uuid.uuid4())
-        upload_dir = Path(settings.UPLOAD_DIR) / "alignment"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        orig_ext = Path(original_file.filename or "original.docx").suffix.lower()
-        trans_ext = Path(translated_file.filename or "translated.docx").suffix.lower()
-        original_path = upload_dir / f"{task_id}_original{orig_ext}"
-        translated_path = upload_dir / f"{task_id}_translated{trans_ext}"
-        original_path.write_bytes(await original_file.read())
-        translated_path.write_bytes(await translated_file.read())
-        return self._create_db_task(
-            task_id=task_id,
+        reserved_task = self._create_db_task(
             task_type="alignment",
             filename=f"{original_file.filename} | {translated_file.filename}",
             params={
@@ -169,11 +228,42 @@ class TaskQueueService:
                 "threshold_8": threshold_8,
                 "buffer_chars": buffer_chars,
             },
-            input_files={
-                "original_path": str(original_path).replace("\\", "/"),
-                "translated_path": str(translated_path).replace("\\", "/"),
-            },
+            input_files={},
         )
+        try:
+            upload_dir = Path(settings.UPLOAD_DIR) / "alignment" / reserved_task.display_no
+            upload_dir.mkdir(parents=True, exist_ok=True)
+
+            orig_ext = Path(original_file.filename or "original.docx").suffix.lower()
+            trans_ext = Path(translated_file.filename or "translated.docx").suffix.lower()
+            original_path = upload_dir / build_storage_filename(
+                reserved_task.display_no,
+                original_file.filename,
+                reserved_task.task_id,
+                role="original",
+                ext=orig_ext,
+            )
+            translated_path = upload_dir / build_storage_filename(
+                reserved_task.display_no,
+                translated_file.filename,
+                reserved_task.task_id,
+                role="translated",
+                ext=trans_ext,
+            )
+            original_path.write_bytes(await original_file.read())
+            translated_path.write_bytes(await translated_file.read())
+
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {
+                    "original_path": str(original_path).replace("\\", "/"),
+                    "translated_path": str(translated_path).replace("\\", "/"),
+                },
+            )
+            return reserved_task.task_id
+        except Exception as exc:
+            self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
 
     async def submit_business_licence_task(
         self,
@@ -183,15 +273,32 @@ class TaskQueueService:
         target_lang: str,
         config_file: str,
     ) -> str:
-        task_id, input_path, original_filename = await self._save_single_upload(file, "business_licence")
-        await bl_service.prepare_business_licence_task(task_id, original_filename)
-        return self._create_db_task(
-            task_id=task_id,
+        reserved_task = self._create_db_task(
             task_type="business_licence",
-            filename=original_filename,
+            filename=file.filename or "input.bin",
             params={"source_lang": source_lang, "target_lang": target_lang, "config_file": config_file},
-            input_files={"input_path": input_path, "original_filename": original_filename},
+            input_files={},
         )
+        try:
+            input_path, original_filename = await self._save_single_upload(
+                file,
+                "business_licence",
+                reserved_task.display_no,
+                reserved_task.task_id,
+            )
+            await bl_service.prepare_business_licence_task(
+                reserved_task.task_id,
+                original_filename,
+                reserved_task.display_no,
+            )
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {"input_path": input_path, "original_filename": original_filename},
+            )
+            return reserved_task.task_id
+        except Exception as exc:
+            self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
 
     async def submit_pdf2docx_task(
         self,
@@ -199,14 +306,27 @@ class TaskQueueService:
         file: UploadFile,
         model: str,
     ) -> str:
-        task_id, input_path, original_filename = await self._save_single_upload(file, "pdf2docx")
-        return self._create_db_task(
-            task_id=task_id,
+        reserved_task = self._create_db_task(
             task_type="pdf2docx",
-            filename=original_filename,
+            filename=file.filename or "input.bin",
             params={"model": model},
-            input_files={"input_path": input_path, "original_filename": original_filename},
+            input_files={},
         )
+        try:
+            input_path, original_filename = await self._save_single_upload(
+                file,
+                "pdf2docx",
+                reserved_task.display_no,
+                reserved_task.task_id,
+            )
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {"input_path": input_path, "original_filename": original_filename},
+            )
+            return reserved_task.task_id
+        except Exception as exc:
+            self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
@@ -217,6 +337,7 @@ class TaskQueueService:
             tasks_ahead = task_repo.count_tasks_ahead(db, task) if task.status == "queued" else 0
             status_map = {"queued": "queued", "running": "processing", "done": "done", "failed": "failed"}
             payload: Dict[str, Any] = {
+                "display_no": task.display_no,
                 "status": status_map.get(task.status, task.status),
                 "progress": task.progress,
                 "message": task.message or "",
@@ -230,9 +351,10 @@ class TaskQueueService:
                 payload["message"] = task.message or f"任务排队中，前方还有 {tasks_ahead} 个任务"
             return payload
 
-    def _create_db_task(self, *, task_id: str, task_type: str, filename: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> str:
+    def _create_db_task(self, *, task_type: str, filename: str, params: Dict[str, Any], input_files: Dict[str, Any]):
+        task_id = str(uuid.uuid4())
         with SessionLocal() as db:
-            task_repo.create_task(
+            task = task_repo.create_task(
                 db,
                 task_id=task_id,
                 task_type=task_type,
@@ -243,16 +365,23 @@ class TaskQueueService:
                 params_json=json.dumps(params, ensure_ascii=False),
                 input_files_json=json.dumps(input_files, ensure_ascii=False),
             )
-        return task_id
+        return task
 
-    async def _save_single_upload(self, file: UploadFile, folder: str):
-        task_id = str(uuid.uuid4())
-        upload_dir = Path(settings.UPLOAD_DIR) / folder
+    def _update_task_input_files(self, task_id: str, input_files: Dict[str, Any]) -> None:
+        with SessionLocal() as db:
+            task_repo.update_task_input_files(db, task_id, json.dumps(input_files, ensure_ascii=False))
+
+    def _fail_reserved_task(self, task_id: str, exc: Exception) -> None:
+        with SessionLocal() as db:
+            task_repo.fail_task(db, task_id, f"保存上传文件失败: {exc}")
+
+    async def _save_single_upload(self, file: UploadFile, folder: str, display_no: str, task_id: str):
+        upload_dir = Path(settings.UPLOAD_DIR) / folder / display_no
         upload_dir.mkdir(parents=True, exist_ok=True)
         file_ext = Path(file.filename or "input.bin").suffix or ".bin"
-        input_path = upload_dir / f"{task_id}{file_ext}"
+        input_path = upload_dir / build_storage_filename(display_no, file.filename, task_id, ext=file_ext)
         input_path.write_bytes(await file.read())
-        return task_id, str(input_path).replace("\\", "/"), file.filename or input_path.name
+        return str(input_path).replace("\\", "/"), file.filename or input_path.name
 
     def _requeue_interrupted_tasks(self):
         with SessionLocal() as db:
@@ -276,6 +405,7 @@ class TaskQueueService:
             input_files = json.loads(task.input_files_json or "{}")
             task_type = task.task_type
             filename = task.filename
+            display_no = task.display_no
 
         async def update(progress: int, message: str):
             with SessionLocal() as db:
@@ -285,6 +415,7 @@ class TaskQueueService:
             if task_type == "ocr":
                 result = await execute_ocr_task_from_path(
                     task_id=task_id,
+                    display_no=display_no,
                     input_path=input_files["input_path"],
                     original_filename=input_files.get("original_filename") or filename,
                     progress_callback=update,
@@ -293,19 +424,19 @@ class TaskQueueService:
                 )
                 output_path = result.get("results", [{}])[0].get("translated_image") if result.get("results") else None
             elif task_type == "number_check":
-                result = await self._execute_number_check(task_id, input_files, update)
+                result = await self._execute_number_check(task_id, display_no, input_files, update)
                 output_path = result.get("corrected_docx")
             elif task_type == "zhongfanyi":
-                result = await self._execute_zhongfanyi(task_id, input_files, params, update)
+                result = await self._execute_zhongfanyi(task_id, display_no, input_files, params, update)
                 output_path = result.get("corrected_docx")
             elif task_type == "alignment":
-                result = await self._execute_alignment(task_id, input_files, params, update)
+                result = await self._execute_alignment(task_id, display_no, input_files, params, update)
                 output_path = result.get("output_excel") if result else None
             elif task_type == "business_licence":
-                result = await self._execute_business_licence(task_id, input_files, params, update)
+                result = await self._execute_business_licence(task_id, display_no, input_files, params, update)
                 output_path = result.get("output_path") if result else None
             elif task_type == "pdf2docx":
-                result = await self._execute_pdf2docx(task_id, input_files, params, update)
+                result = await self._execute_pdf2docx(task_id, display_no, input_files, params, update)
                 output_path = result.get("output_docx") if result else None
             else:
                 raise ValueError(f"不支持的任务类型: {task_type}")
@@ -321,17 +452,38 @@ class TaskQueueService:
             with SessionLocal() as db:
                 task_repo.fail_task(db, task_id, str(exc))
 
-    async def _execute_number_check(self, task_id: str, input_files: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+    async def _execute_number_check(
+        self,
+        task_id: str,
+        display_no: str,
+        input_files: Dict[str, Any],
+        update: Callable[[int, str], Any],
+    ) -> Dict[str, Any]:
         await update(5, "开始执行数字专检")
         original_bytes = Path(input_files["original_path"]).read_bytes()
         translated_bytes = Path(input_files["translated_path"]).read_bytes()
-        original_upload = UploadFile(filename=input_files.get("original_filename") or "original.docx", file=io.BytesIO(original_bytes))
-        translated_upload = UploadFile(filename=input_files.get("translated_filename") or "translated.docx", file=io.BytesIO(translated_bytes))
-        job = asyncio.create_task(run_number_check_task(original_upload, translated_upload, task_id=task_id))
+        original_upload = UploadFile(
+            filename=input_files.get("original_filename") or "original.docx",
+            file=io.BytesIO(original_bytes),
+        )
+        translated_upload = UploadFile(
+            filename=input_files.get("translated_filename") or "translated.docx",
+            file=io.BytesIO(translated_bytes),
+        )
+        job = asyncio.create_task(
+            run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no)
+        )
         await self._mirror_progress(job, lambda: get_number_check_progress(task_id), update)
         return await job
 
-    async def _execute_zhongfanyi(self, task_id: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+    async def _execute_zhongfanyi(
+        self,
+        task_id: str,
+        display_no: str,
+        input_files: Dict[str, Any],
+        params: Dict[str, Any],
+        update: Callable[[int, str], Any],
+    ) -> Dict[str, Any]:
         await update(5, "开始执行中翻译专检")
         loop = asyncio.get_running_loop()
         job = loop.run_in_executor(
@@ -340,33 +492,52 @@ class TaskQueueService:
                 input_files["original_path"],
                 input_files["translated_path"],
                 task_id,
-                params.get("use_ai_rule", False),
-                params.get("ai_rule_file_path"),
-                params.get("session_rule_text"),
+                display_no=display_no,
+                use_ai_rule=params.get("use_ai_rule", False),
+                ai_rule_file_path=params.get("ai_rule_file_path"),
+                session_rule_text=params.get("session_rule_text"),
             ),
         )
         await self._mirror_progress(job, lambda: zf_service.get_task_progress(task_id), update)
         return await job
 
-    async def _execute_alignment(self, task_id: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+    async def _execute_alignment(
+        self,
+        task_id: str,
+        display_no: str,
+        input_files: Dict[str, Any],
+        params: Dict[str, Any],
+        update: Callable[[int, str], Any],
+    ) -> Dict[str, Any]:
         await update(5, "开始执行多语对照记忆处理")
         from app.service import alignment_service
 
-        job = asyncio.create_task(alignment_service.run_alignment_task(
-            original_path=input_files["original_path"],
-            translated_path=input_files["translated_path"],
-            task_id=task_id,
-            executor=self._task_executor,
-            **params,
-        ))
+        job = asyncio.create_task(
+            alignment_service.run_alignment_task(
+                original_path=input_files["original_path"],
+                translated_path=input_files["translated_path"],
+                task_id=task_id,
+                display_no=display_no,
+                executor=self._task_executor,
+                **params,
+            )
+        )
         await self._mirror_progress(job, lambda: alignment_service.get_alignment_progress(task_id), update)
         status = alignment_service.get_alignment_progress(task_id) or {}
         return status.get("result") or {}
 
-    async def _execute_business_licence(self, task_id: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+    async def _execute_business_licence(
+        self,
+        task_id: str,
+        display_no: str,
+        input_files: Dict[str, Any],
+        params: Dict[str, Any],
+        update: Callable[[int, str], Any],
+    ) -> Dict[str, Any]:
         await update(5, "开始执行营业执照翻译")
         await bl_service.start_prepared_business_licence_task(
             task_id=task_id,
+            display_no=display_no,
             input_path=input_files["input_path"],
             source_lang=params["source_lang"],
             target_lang=params["target_lang"],
@@ -375,21 +546,30 @@ class TaskQueueService:
         while True:
             snapshot = bl_service.get_task_snapshot(task_id)
             if snapshot:
-                await update(snapshot.get("progress", 0), snapshot.get("message", "????"))
+                await update(snapshot.get("progress", 0), snapshot.get("message", "处理中"))
                 if snapshot.get("status") == "done":
                     return {
                         "task_id": task_id,
+                        "display_no": display_no,
                         "output_path": snapshot.get("output_path"),
                         "input_filename": snapshot.get("input_filename"),
                     }
                 if snapshot.get("status") == "error":
-                    raise RuntimeError(snapshot.get("error") or "??????????")
+                    raise RuntimeError(snapshot.get("error") or "营业执照处理失败")
             await asyncio.sleep(1)
 
-    async def _execute_pdf2docx(self, task_id: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+    async def _execute_pdf2docx(
+        self,
+        task_id: str,
+        display_no: str,
+        input_files: Dict[str, Any],
+        params: Dict[str, Any],
+        update: Callable[[int, str], Any],
+    ) -> Dict[str, Any]:
         await update(5, "开始执行 PDF 转 Word")
         return await execute_pdf2docx_task_from_path(
             task_id=task_id,
+            display_no=display_no,
             input_path=input_files["input_path"],
             original_filename=input_files.get("original_filename") or "input.pdf",
             model=params.get("model", "google/gemini-3-flash-preview"),
@@ -397,7 +577,12 @@ class TaskQueueService:
             executor=self._task_executor,
         )
 
-    async def _mirror_progress(self, job: asyncio.Task, getter: Callable[[], Optional[Dict[str, Any]]], update: Callable[[int, str], Any]):
+    async def _mirror_progress(
+        self,
+        job: asyncio.Task,
+        getter: Callable[[], Optional[Dict[str, Any]]],
+        update: Callable[[int, str], Any],
+    ):
         while not job.done():
             snapshot = getter()
             if snapshot:

@@ -36,6 +36,7 @@ def get_pdf2docx_models() -> Dict[str, Dict[str, str]]:
 async def execute_pdf2docx_task_from_path(
     *,
     task_id: str,
+    display_no: Optional[str] = None,
     input_path: str,
     original_filename: str,
     model: str = "google/gemini-3-flash-preview",
@@ -49,7 +50,7 @@ async def execute_pdf2docx_task_from_path(
 
     loop = asyncio.get_running_loop()
     input_file = Path(input_path)
-    task_output_dir = Path(settings.OUTPUT_DIR) / "pdf2docx" / task_id
+    task_output_dir = Path(settings.OUTPUT_DIR) / "pdf2docx" / (display_no or task_id)
     task_output_dir.mkdir(parents=True, exist_ok=True)
 
     raw_output_path = task_output_dir / f"{input_file.stem}_raw.txt"

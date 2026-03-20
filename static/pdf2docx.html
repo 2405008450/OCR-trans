@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>不可编辑文件预处理beta版</title>
+    <title>不可编辑文档预处理</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -15,7 +15,7 @@
             <div class="logo">
                 <div class="logo-mark"><i class="fas fa-file-word"></i></div>
                 <div>
-                    <h1>不可编辑文件预处理beta版</h1>
+                    <h1>不可编辑文档预处理</h1>
                     <p class="subtitle">上传 PDF 或图片，调用视觉模型 OCR 后生成可下载的 DOCX 文档。</p>
                 </div>
             </div>
@@ -31,7 +31,7 @@
             <div>
                 <span class="section-kicker">New Module</span>
                 <h2>复杂文档也能直接整理成 Word</h2>
-                <p>支持 PDF、PNG、JPG、BMP、GIF、WEBP。可在不同 Gemini 模型间切换，适合票据、扫描件、表格型页面等场景。</p>
+                <p>支持 PDF、PNG、JPG、BMP、GIF、WEBP。可在不同快速版 / 增强版间切换，适合票据、扫描件、表格型页面等场景。</p>
             </div>
             <div class="hero-metrics">
                 <div class="metric-card">
@@ -40,7 +40,7 @@
                 </div>
                 <div class="metric-card">
                     <strong>模型可选</strong>
-                    <span>支持 `google/gemini-3-flash-preview` 与 `google/gemini-3.1-pro-preview`。</span>
+                    <span>支持 `快速版V2` 与 `增强版V2`。</span>
                 </div>
             </div>
         </section>
@@ -56,7 +56,7 @@
                             </div>
                             <div class="section-chip">PDF / Image</div>
                         </div>
-                        <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试 Pro 模型。</p>
+                        <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试增强版。</p>
 
                         <div class="upload-area" id="uploadArea">
                             <input type="file" id="fileInput" accept=".pdf,image/*" hidden>
@@ -110,7 +110,7 @@
                         <ul class="info-list">
                             <li>页数较多时建议耐心等待，系统会串行处理。</li>
                             <li>扫描件若存在阴影或倾斜，先做预清理会更稳。</li>
-                            <li>复杂表格优先试 `gemini-3.1-pro-preview`。</li>
+                            <li>复杂表格优先试 `增强版V2`。</li>
                         </ul>
                     </div>
                     <div class="info-card emphasis">

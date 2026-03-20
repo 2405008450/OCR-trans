@@ -3,6 +3,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.file_naming import build_display_no
 from app.model.entity import Task
 
 
@@ -31,11 +32,26 @@ def create_task(
     db.add(task)
     db.commit()
     db.refresh(task)
+    if not task.display_no:
+        task.display_no = build_display_no(task.id)
+        db.commit()
+        db.refresh(task)
     return task
 
 
 def get_task_by_task_id(db: Session, task_id: str) -> Optional[Task]:
     return db.query(Task).filter(Task.task_id == task_id).first()
+
+
+def update_task_input_files(db: Session, task_id: str, input_files_json: str) -> Optional[Task]:
+    task = get_task_by_task_id(db, task_id)
+    if not task:
+        return None
+
+    task.input_files_json = input_files_json
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 def count_tasks_ahead(db: Session, task: Task) -> int:

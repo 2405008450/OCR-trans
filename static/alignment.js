@@ -31,6 +31,12 @@ const POLL_INTERVAL = 1500;
 const DEFAULT_MODEL_NAME = 'Google gemini-3-flash-preview';
 let pollingTimer = null;
 let configData = null;
+const MODEL_DISPLAY_NAMES = {
+    'Google Gemini 2.5 Flash': '快速版V1',
+    'Google Gemini 2.5 Pro': '增强版V1',
+    'Google gemini-3-flash-preview': '快速版V2',
+    'Google: google/gemini-3.1-pro-preview': '增强版V2',
+};
 
 (async function init() {
     try {
@@ -61,7 +67,7 @@ function populateSelects() {
 
     modelSelect.innerHTML = '';
     for (const name of Object.keys(models)) {
-        modelSelect.add(new Option(name, name));
+        modelSelect.add(new Option(getModelDisplayName(name), name));
     }
     if (models[DEFAULT_MODEL_NAME]) {
         modelSelect.value = DEFAULT_MODEL_NAME;
@@ -95,8 +101,8 @@ function populateDefaults() {
     targetLangSelect.value = '英语';
 
     modelSelect.innerHTML = '';
-    modelSelect.add(new Option('Google gemini-3-flash-preview', 'Google gemini-3-flash-preview'));
-    modelSelect.add(new Option('Google Gemini 2.5 Pro', 'Google Gemini 2.5 Pro'));
+    modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
+    modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
     updateModelInfo();
 }
@@ -106,7 +112,7 @@ function updateModelInfo() {
     const info = configData?.models?.[name];
     if (info) {
         modelDesc.textContent = info.description || '';
-        modelIdDisplay.textContent = info.id || '-';
+        modelIdDisplay.textContent = getModelDisplayName(name);
         modelMaxOutput.textContent = info.max_output ? `${info.max_output.toLocaleString()} tokens` : '-';
     } else {
         modelDesc.textContent = '';
@@ -124,6 +130,10 @@ function updateLangLabels() {
     const srcDesc = configData?.languages?.[src] || src;
     const tgtDesc = configData?.languages?.[tgt] || tgt;
     langHintText.textContent = `${srcDesc} → ${tgtDesc}`;
+}
+
+function getModelDisplayName(name) {
+    return MODEL_DISPLAY_NAMES[name] || name;
 }
 
 modelSelect.addEventListener('change', updateModelInfo);

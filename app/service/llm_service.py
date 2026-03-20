@@ -31,6 +31,7 @@ def _normalize_path(path: Optional[str]) -> Optional[str]:
 async def execute_ocr_task_from_path(
     *,
     task_id: str,
+    display_no: Optional[str] = None,
     input_path: str,
     original_filename: str,
     from_lang: str = "zh",
@@ -54,6 +55,8 @@ async def execute_ocr_task_from_path(
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
     loop = asyncio.get_running_loop()
+    output_dir = os.path.join(settings.OUTPUT_DIR, "ocr", display_no or task_id)
+    os.makedirs(output_dir, exist_ok=True)
 
     await _maybe_report(progress_callback, 5, "文件已入队，准备解析")
     image_paths = await loop.run_in_executor(executor, convert_input_to_images, input_path, settings.TEMP_IMAGES_DIR)
@@ -95,7 +98,7 @@ async def execute_ocr_task_from_path(
                     executor,
                     lambda: process_marriage_cert_image(
                         input_path=img_path,
-                        output_dir=settings.OUTPUT_DIR,
+                        output_dir=output_dir,
                         from_lang=from_lang,
                         to_lang=to_lang,
                         enable_correction=enable_correction,
@@ -121,7 +124,7 @@ async def execute_ocr_task_from_path(
                     executor,
                     lambda: process_image(
                         input_path=img_path,
-                        output_dir=settings.OUTPUT_DIR,
+                        output_dir=output_dir,
                         from_lang=from_lang,
                         to_lang=to_lang,
                         enable_correction=enable_correction,

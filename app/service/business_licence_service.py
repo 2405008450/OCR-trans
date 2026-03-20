@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.core.config import settings
+from app.core.file_naming import build_storage_filename
 
 # businesslicence 项目根目录
 BL_DIR = Path(__file__).resolve().parent.parent.parent / "businesslicence"
@@ -156,6 +157,13 @@ def _make_sync_verification_callback(task_id: str, loop: asyncio.AbstractEventLo
     return callback
 
 
+def _to_bl_relative_output_path(output_path: str) -> str:
+    try:
+        return Path(output_path).resolve().relative_to(BL_OUTPUTS_DIR.resolve()).as_posix()
+    except Exception:
+        return Path(output_path).name
+
+
 # ---------------------------------------------------------------------------
 # 流水线线程函数
 # ---------------------------------------------------------------------------
@@ -252,13 +260,14 @@ def _run_pipeline_in_thread(task_id: str, input_path: str, output_path: str,
         log(f"翻译完成！输出文件: {Path(output_path).name}")
         log("=" * 60)
 
+        relative_output_path = _to_bl_relative_output_path(output_path)
         task["status"] = "done"
-        task["output_path"] = output_path
+        task["output_path"] = relative_output_path
         progress(100, "完成")
 
         push({
             "type": "done",
-            "output_filename": Path(output_path).name,
+            "output_filename": relative_output_path,
             "input_filename": task["input_filename"],
         })
 
@@ -391,11 +400,12 @@ def get_task_snapshot(task_id: str) -> Optional[dict]:
     }
 
 
-async def prepare_business_licence_task(task_id: str, original_filename: str):
+async def prepare_business_licence_task(task_id: str, original_filename: str, display_no: Optional[str] = None):
     if task_id not in _tasks:
         _make_task(task_id)
     _tasks[task_id]["sse_queue"] = asyncio.Queue()
     _tasks[task_id]["input_filename"] = original_filename
+    _tasks[task_id]["display_no"] = display_no
     _tasks[task_id]["status"] = "pending"
     await _tasks[task_id]["sse_queue"].put({
         "type": "progress",
@@ -406,6 +416,7 @@ async def prepare_business_licence_task(task_id: str, original_filename: str):
 
 async def start_prepared_business_licence_task(
     task_id: str,
+    display_no: str,
     input_path: str,
     source_lang: str,
     target_lang: str,
@@ -418,9 +429,16 @@ async def start_prepared_business_licence_task(
         task["sse_queue"] = asyncio.Queue()
     loop = asyncio.get_event_loop()
     suffix = Path(input_path).suffix or ".jpg"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    output_filename = f"{task_id}_translated_{timestamp}{suffix}"
-    output_path = str(BL_OUTPUTS_DIR / output_filename)
+    output_dir = BL_OUTPUTS_DIR / display_no
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_filename = build_storage_filename(
+        display_no,
+        task.get("input_filename"),
+        task_id,
+        role="translated",
+        ext=suffix,
+    )
+    output_path = str(output_dir / output_filename)
     t = threading.Thread(
         target=_run_pipeline_in_thread,
         args=(task_id, input_path, output_path, source_lang, target_lang, config_file, loop),
