@@ -97,6 +97,11 @@ async def pdf2docx_page():
     return _read_page("pdf2docx.html")
 
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
 if __name__ == "__main__":
     import uvicorn
 
