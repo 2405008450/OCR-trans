@@ -87,10 +87,24 @@ nano .env
 ```
 DEEPSEEK_API_KEY=你的真实API_KEY
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+OPENROUTER_API_KEY=你的真实OPENROUTER_API_KEY
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+LIBREOFFICE_PATH=/usr/bin/soffice
 HOST=0.0.0.0
 PORT=8001
 DEBUG=False
 ALLOWED_ORIGINS=*
+```
+
+### 5.1 LibreOffice 说明
+当前项目的 PDF/图片转 Word 功能依赖 LibreOffice 的 `soffice` 命令。
+
+- Docker 部署：`Dockerfile` 已安装 `libreoffice` 和 `libreoffice-writer`，默认路径为 `/usr/bin/soffice`
+- 裸机 Linux 部署：请先安装 LibreOffice，再执行 `export LIBREOFFICE_PATH=/usr/bin/soffice`
+- 验证命令：
+```bash
+which soffice
+soffice --headless --version
 ```
 
 ### 6. 如果服务器直接构建（网络好的情况）

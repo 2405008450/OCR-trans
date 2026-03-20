@@ -7,6 +7,8 @@ import re
 import sys
 import os
 import time
+import subprocess
+import shutil
 from pathlib import Path
 from openai import OpenAI
 
@@ -34,6 +36,8 @@ except ImportError:
 # ============================================================
 # 1. LLM OCR 调用
 # ============================================================
+LIBREOFFICE_PATH = os.getenv("LIBREOFFICE_PATH", "").strip()
+
 SYS_PROMPT = """Convert the document into simple, Microsoft Word-safe HTML.
 
 Return only a complete HTML document. Do not include explanations. Do not use markdown. Do not wrap the output in code fences.
@@ -193,6 +197,150 @@ def ocr_file(file_path: str, api_key: str, model: str = "google/gemini-3.1-pro-p
 # ============================================================
 # 2. 混合格式解析与 DOCX 渲染引擎
 # ============================================================
+def normalize_to_word_html(raw_text: str, title: str = "Document") -> str:
+    """将 OCR/翻译结果整理为可交给 LibreOffice 转 Word 的完整 HTML。"""
+    text = raw_text.strip()
+    text = re.sub(r"^```(?:html|markdown)?\s*\n?", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\n?```\s*$", "", text)
+
+    page_break_pattern = re.compile(r"\s*<page_break\s*/>\s*", flags=re.IGNORECASE)
+    parts = [part.strip() for part in page_break_pattern.split(text) if part.strip()]
+    if not parts:
+        parts = [""]
+
+    body_segments = []
+    for part in parts:
+        soup = BeautifulSoup(part, "html.parser")
+        body = soup.find("body")
+        if body:
+            segment = "".join(str(child) for child in body.contents).strip()
+        else:
+            segment = part
+        body_segments.append(segment)
+
+    page_break_html = '<p style="page-break-before: always;"></p>'
+    body_html = f"\n{page_break_html}\n".join(body_segments)
+
+    return (
+        "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head>\n"
+        '  <meta charset="utf-8">\n'
+        f"  <title>{title}</title>\n"
+        "</head>\n"
+        "<body>\n"
+        f"{body_html}\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def convert_html_to_docx_via_libreoffice(
+    html_text: str,
+    output_path: str,
+    html_output_path: str | None = None,
+    libreoffice_path: str = LIBREOFFICE_PATH,
+) -> str:
+    """将 HTML 写盘后通过 LibreOffice 转为 DOCX。"""
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    html_file = Path(html_output_path) if html_output_path else output_file.with_suffix(".html")
+    html_file.parent.mkdir(parents=True, exist_ok=True)
+    html_file.write_text(html_text, encoding="utf-8")
+    user_profile_dir = html_file.parent / ".libreoffice-profile"
+    user_profile_dir.mkdir(parents=True, exist_ok=True)
+
+    libreoffice = _resolve_libreoffice_path(libreoffice_path)
+
+    expected_docx = html_file.with_suffix(".docx")
+    if expected_docx.exists():
+        expected_docx.unlink()
+    if output_file.exists() and output_file != expected_docx:
+        output_file.unlink()
+
+    result = subprocess.run(
+        [
+            str(libreoffice),
+            f"-env:UserInstallation={user_profile_dir.resolve().as_uri()}",
+            "--headless",
+            "--convert-to",
+            "docx:Office Open XML Text",
+            "--outdir",
+            str(html_file.parent),
+            str(html_file),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "LibreOffice 转换失败: "
+            f"returncode={result.returncode}, stdout={result.stdout}, stderr={result.stderr}"
+        )
+
+    if not expected_docx.exists():
+        raise RuntimeError(
+            "LibreOffice 未生成 DOCX 文件: "
+            f"stdout={result.stdout}, stderr={result.stderr}"
+        )
+
+    if expected_docx != output_file:
+        expected_docx.replace(output_file)
+
+    return str(output_file)
+
+
+def _resolve_libreoffice_path(configured_path: str | None = None) -> str:
+    """优先读取显式配置，其次从环境变量和 PATH 中查找 LibreOffice 可执行文件。"""
+    candidates: list[str] = []
+
+    for candidate in [
+        configured_path,
+        os.getenv("LIBREOFFICE_PATH", "").strip(),
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        "/usr/bin/soffice",
+        "/usr/bin/libreoffice",
+        "soffice",
+        "libreoffice",
+    ]:
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if any(sep in candidate for sep in ("/", "\\")) or Path(candidate).is_absolute():
+            if Path(candidate).exists():
+                return str(Path(candidate))
+            continue
+
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+
+    raise FileNotFoundError(
+        "未找到 LibreOffice 可执行文件。请安装 LibreOffice，并在环境变量 LIBREOFFICE_PATH "
+        "中指定 soffice 路径，或确保 `soffice` 已加入 PATH。"
+    )
+
+
+def convert_text_to_word_via_libreoffice(
+    raw_text: str,
+    output_path: str,
+    html_output_path: str | None = None,
+    title: str = "Document",
+) -> tuple[str, str]:
+    """将文本规范化为 HTML，并用 LibreOffice 转 DOCX。"""
+    html_text = normalize_to_word_html(raw_text, title=title)
+    html_file = html_output_path or str(Path(output_path).with_suffix(".html"))
+    docx_file = convert_html_to_docx_via_libreoffice(
+        html_text=html_text,
+        output_path=output_path,
+        html_output_path=html_file,
+    )
+    return html_file, docx_file
+
+
 class HybridToDocxConverter:
     """
     将混合 HTML + Markdown 的 OCR 输出转换为格式化的 Word 文档。
@@ -802,8 +950,12 @@ def main():
     print(f"📄 原始 OCR 输出已保存: {raw_output_path}")
 
     # Step 2: 转换为 Word
-    converter = HybridToDocxConverter()
-    converter.convert(raw_output, OUTPUT_DOCX)
+    html_output_path = OUTPUT_DOCX.replace(".docx", ".html")
+    convert_text_to_word_via_libreoffice(
+        raw_output,
+        OUTPUT_DOCX,
+        html_output_path=html_output_path,
+    )
 
     print(f"\n🎉 全部完成！输出文件: {OUTPUT_DOCX}")
 
@@ -818,8 +970,7 @@ def convert_text_to_docx(raw_text: str, output_path: str):
     Usage:
         convert_text_to_docx(your_ocr_output, "output.docx")
     """
-    converter = HybridToDocxConverter()
-    converter.convert(raw_text, output_path)
+    convert_text_to_word_via_libreoffice(raw_text, output_path)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ services:
       - DEEPSEEK_BASE_URL=https://api.deepseek.com
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+      - LIBREOFFICE_PATH=${LIBREOFFICE_PATH:-/usr/bin/soffice}
       - HOST=0.0.0.0
       - PORT=8001
       - DEBUG=False

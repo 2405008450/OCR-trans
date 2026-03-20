@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from openai import OpenAI
 
 from app.core.config import settings
-from pdf2docx import HybridToDocxConverter, ocr_file
+from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
@@ -283,16 +283,23 @@ async def execute_doc_translate_task(
             f"正在生成{lang_name} Word 文档...",
         )
 
+        html_path = task_output_dir / f"{stem}_{lang}.html"
         docx_path = task_output_dir / f"{stem}_{lang}.docx"
         await loop.run_in_executor(
             executor,
-            lambda txt=translated_text, out=str(docx_path): HybridToDocxConverter().convert(txt, out),
+            lambda txt=translated_text, out=str(docx_path), html=str(html_path): convert_text_to_word_via_libreoffice(
+                txt,
+                out,
+                html_output_path=html,
+                title=f"{stem}_{lang}",
+            ),
         )
 
         results_per_lang[lang] = {
             "lang_code": lang,
             "lang_name": lang_name,
             "translated_txt": _normalize_path(translated_txt_path),
+            "output_html": _normalize_path(html_path),
             "output_docx": _normalize_path(docx_path),
         }
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.config import settings
-from pdf2docx import HybridToDocxConverter, ocr_file
+from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
@@ -54,6 +54,7 @@ async def execute_pdf2docx_task_from_path(
     task_output_dir.mkdir(parents=True, exist_ok=True)
 
     raw_output_path = task_output_dir / f"{input_file.stem}_raw.txt"
+    html_output_path = task_output_dir / f"{input_file.stem}.html"
     docx_output_path = task_output_dir / f"{input_file.stem}.docx"
 
     await _maybe_report(progress_callback, 5, "文件已入队，准备调用视觉模型")
@@ -72,7 +73,12 @@ async def execute_pdf2docx_task_from_path(
     await _maybe_report(progress_callback, 85, "正在生成 Word 文档")
     await loop.run_in_executor(
         executor,
-        lambda: HybridToDocxConverter().convert(raw_text, str(docx_output_path)),
+        lambda: convert_text_to_word_via_libreoffice(
+            raw_text,
+            str(docx_output_path),
+            html_output_path=str(html_output_path),
+            title=input_file.stem,
+        ),
     )
 
     await _maybe_report(progress_callback, 95, "正在整理输出结果")
@@ -81,5 +87,6 @@ async def execute_pdf2docx_task_from_path(
         "filename": original_filename,
         "model": model,
         "raw_output_txt": _normalize_path(raw_output_path),
+        "output_html": _normalize_path(html_output_path),
         "output_docx": _normalize_path(docx_output_path),
     }

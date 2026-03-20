@@ -12,6 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PADDLEOCR_HOME=/app/.paddleocr \
+    LIBREOFFICE_PATH=/usr/bin/soffice \
     OPENCV_IO_MAX_IMAGE_PIXELS=1099511627776 \
     # 让 pip 跳过 SSL 验证（代理环境下避免 SSL EOF 错误）
     PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org download.pytorch.org pypi.tuna.tsinghua.edu.cn www.paddlepaddle.org.cn"
@@ -22,6 +23,8 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; \
     libglib2.0-0 \
     libgl1 \
     libgomp1 \
+    libreoffice \
+    libreoffice-writer \
     fonts-noto-cjk \
     libsm6 \
     libxext6 \
@@ -53,6 +56,7 @@ RUN pip install -r requirements.txt \
 
 # ── 复制项目代码 ──
 COPY app/ ./app/
+COPY pdf2docx.py ./
 COPY static/ ./static/
 COPY businesslicence/ ./businesslicence/
 COPY memory/ ./memory/
