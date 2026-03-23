@@ -124,6 +124,7 @@ class TaskQueueService:
         original_file: UploadFile,
         translated_file: UploadFile,
         use_ai_rule: bool,
+        gemini_route: str,
         rule_file: Optional[UploadFile],
         session_rule_content: Optional[str],
     ) -> str:
@@ -132,6 +133,7 @@ class TaskQueueService:
             filename=f"{original_file.filename} | {translated_file.filename}",
             params={
                 "use_ai_rule": use_ai_rule,
+                "gemini_route": gemini_route,
                 "ai_rule_file_path": None,
                 "session_rule_text": (session_rule_content.strip() or None) if session_rule_content else None,
             },
@@ -201,6 +203,7 @@ class TaskQueueService:
         source_lang: str,
         target_lang: str,
         model_name: str,
+        gemini_route: str,
         enable_post_split: bool,
         threshold_2: int,
         threshold_3: int,
@@ -218,6 +221,7 @@ class TaskQueueService:
                 "source_lang": source_lang,
                 "target_lang": target_lang,
                 "model_name": model_name,
+                "gemini_route": gemini_route,
                 "enable_post_split": enable_post_split,
                 "threshold_2": threshold_2,
                 "threshold_3": threshold_3,
@@ -272,11 +276,12 @@ class TaskQueueService:
         source_lang: str,
         target_langs: str,
         ocr_model: str,
+        gemini_route: str,
     ) -> str:
         reserved_task = self._create_db_task(
             task_type="doc_translate",
             filename=file.filename or "input.bin",
-            params={"source_lang": source_lang, "target_langs": target_langs, "ocr_model": ocr_model},
+            params={"source_lang": source_lang, "target_langs": target_langs, "ocr_model": ocr_model, "gemini_route": gemini_route},
             input_files={},
         )
         try:
@@ -300,11 +305,12 @@ class TaskQueueService:
         *,
         file: UploadFile,
         model: str,
+        gemini_route: str,
     ) -> str:
         reserved_task = self._create_db_task(
             task_type="pdf2docx",
             filename=file.filename or "input.bin",
-            params={"model": model},
+            params={"model": model, "gemini_route": gemini_route},
             input_files={},
         )
         try:
@@ -489,6 +495,7 @@ class TaskQueueService:
                 task_id,
                 display_no=display_no,
                 use_ai_rule=params.get("use_ai_rule", False),
+                gemini_route=params.get("gemini_route", "google"),
                 ai_rule_file_path=params.get("ai_rule_file_path"),
                 session_rule_text=params.get("session_rule_text"),
             ),
@@ -540,6 +547,7 @@ class TaskQueueService:
             source_lang=params.get("source_lang", "zh"),
             target_langs=target_langs,
             ocr_model=params.get("ocr_model", "google/gemini-3-flash-preview"),
+            gemini_route=params.get("gemini_route", "google"),
             progress_callback=update,
             executor=self._task_executor,
         )
@@ -559,6 +567,7 @@ class TaskQueueService:
             input_path=input_files["input_path"],
             original_filename=input_files.get("original_filename") or "input.pdf",
             model=params.get("model", "google/gemini-3-flash-preview"),
+            gemini_route=params.get("gemini_route", "google"),
             progress_callback=update,
             executor=self._task_executor,
         )

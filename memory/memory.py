@@ -11,8 +11,8 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from openai import OpenAI
 import tkinter as tk
+from app.service.gemini_service import generate_text
 from tkinter import ttk, filedialog, scrolledtext, messagebox
 import websockets
 import asyncio
@@ -28,10 +28,7 @@ load_dotenv(os.path.join(_project_root, ".env"))
 # === ⚙️ 全局配置 ===
 # ==========================================
 ROW_BUCKET = 20_000
-API_KEY = os.getenv("OPENROUTER_API_KEY", "")  # 从项目根 .env 统一管理
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-
-
+_gemini_route_local = threading.local()
 
 # 每块≤25000字：2份=50k, 3份=75k, 4份=100k, 5份=125k, 6份=150k, 7份=175k, 8份=200k
 THRESHOLD_2_PARTS = 25000
@@ -74,6 +71,14 @@ OPENROUTER_MODELS = {
 # 当前可用模型（根据提供商切换）
 AVAILABLE_MODELS = OPENROUTER_MODELS.copy()
 DEFAULT_MODEL = "Google gemini-3-flash-preview"
+
+
+def set_gemini_route(route: str):
+    _gemini_route_local.route = route
+
+
+def get_gemini_route() -> str:
+    return getattr(_gemini_route_local, "route", os.getenv("GEMINI_ROUTE", "google"))
 DEFAULT_PROVIDER = "openrouter"  # 路智深已屏蔽，默认使用 OpenRouter
 
 
@@ -1632,47 +1637,32 @@ def save_issues_report(issues, output_path):
 # === 🤖 核心 AI 对齐 ===
 # ==========================================
 def call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename=""):
-    """OpenRouter API 流式调用"""
-    client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    """统一 Gemini 文本调用，按当前线程选择 Google 官方或 OpenRouter 线路"""
+    route = get_gemini_route()
 
     try:
-        log_manager.log("请求 OpenRouter API...")
-        stream = client.chat.completions.create(
-            model=model_id,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.1,
-            max_tokens=max_output_tokens,
-            stream=True,
-            timeout=600.0,
-            extra_headers={"HTTP-Referer": "local-debug", "X-Title": "Doc-Aligner"},
-        )
-
-        full_response_text = ""
-        log_manager.log("接收数据流...")
+        log_manager.log(f"请求 Gemini API... route={route}")
         log_manager.log_stream("\n" + "=" * 50 + f" {filename} " + "=" * 50 + "\n")
-
-        for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if hasattr(delta, "content") and delta.content:
-                content = delta.content
-                log_manager.log_stream(content)
-                full_response_text += content
-
+        full_response_text = generate_text(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model_id,
+            route=route,
+            temperature=0.1,
+            max_output_tokens=max_output_tokens,
+            timeout=600.0,
+            log_callback=log_manager.log,
+        )
+        if full_response_text:
+            log_manager.log_stream(full_response_text)
         log_manager.log_stream("\n" + "=" * 50 + " 输出结束 " + "=" * 50 + "\n")
         return full_response_text
 
     except Exception as e:
-        log_manager.log_exception(f"OpenRouter API调用失败", str(e))
+        log_manager.log_exception("Gemini API调用失败", str(e))
         import traceback
         log_manager.log_exception("详细堆栈", traceback.format_exc())
         return None
-
-
 
 
 def call_llm_stream(system_prompt, user_prompt, model_id, filename=""):

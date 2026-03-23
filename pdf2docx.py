@@ -10,7 +10,8 @@ import time
 import subprocess
 import shutil
 from pathlib import Path
-from openai import OpenAI
+
+from app.service.gemini_service import generate_vision_html
 
 # ============================================================
 # 依赖检查与导入
@@ -103,39 +104,26 @@ Seals / stamps:
   <p style="color:#C00000; font-weight:bold;">[Official Seal]</p>"""
 
 
-def _ocr_single_image(img_b64: str, mime_type: str, api_key: str, model: str,
-                      retries: int = 3) -> str:
+def _ocr_single_image(
+    img_b64: str,
+    mime_type: str,
+    model: str,
+    gemini_route: str = "google",
+    retries: int = 3,
+) -> str:
     """对单张图片（base64）调用 LLM OCR，失败自动重试"""
     for attempt in range(retries):
         try:
-            client = OpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=api_key,
-            )
-            full_response = []
-            stream = client.chat.completions.create(
+            response_text = generate_vision_html(
+                system_prompt=SYS_PROMPT,
+                image_bytes=base64.standard_b64decode(img_b64),
+                mime_type=mime_type,
                 model=model,
-                messages=[
-                    {"role": "system", "content": SYS_PROMPT},
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime_type};base64,{img_b64}"},
-                            }
-                        ],
-                    },
-                ],
+                route=gemini_route,
                 temperature=0,
-                stream=True,
             )
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    print(delta, end="", flush=True)
-                    full_response.append(delta)
-            return "".join(full_response)
+            print(response_text, end="", flush=True)
+            return response_text
         except Exception as e:
             if attempt < retries - 1:
                 wait = 3 * (attempt + 1)
@@ -145,7 +133,12 @@ def _ocr_single_image(img_b64: str, mime_type: str, api_key: str, model: str,
                 raise
 
 
-def ocr_file(file_path: str, api_key: str, model: str = "google/gemini-3.1-pro-preview") -> str:
+def ocr_file(
+    file_path: str,
+    api_key: str = "",
+    model: str = "google/gemini-3.1-pro-preview",
+    gemini_route: str = "google",
+) -> str:
     """调用 LLM 对图片或 PDF 进行 OCR，返回混合 HTML/Markdown 文本。
     PDF 会逐页渲染为图片后分页发送，避免大文件直传超限。
     """
@@ -166,7 +159,7 @@ def ocr_file(file_path: str, api_key: str, model: str = "google/gemini-3.1-pro-p
             print(f"\n🔄 正在处理第 {i + 1}/{total} 页...")
             pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_b64 = base64.standard_b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode("utf-8")
-            text = _ocr_single_image(img_b64, "image/jpeg", api_key, model)
+            text = _ocr_single_image(img_b64, "image/jpeg", model, gemini_route=gemini_route)
             all_results.append(text)
             if i < total - 1:
                 time.sleep(1)
@@ -189,7 +182,7 @@ def ocr_file(file_path: str, api_key: str, model: str = "google/gemini-3.1-pro-p
             img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
 
         print("🔄 正在调用 LLM 进行 OCR...")
-        result = _ocr_single_image(img_b64, mime_type, api_key, model)
+        result = _ocr_single_image(img_b64, mime_type, model, gemini_route=gemini_route)
         print("\n✅ OCR 完成")
         return result
 

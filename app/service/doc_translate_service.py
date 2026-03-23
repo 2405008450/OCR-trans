@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from openai import OpenAI
 
 from app.core.config import settings
+from app.service.gemini_service import ensure_gemini_route_configured
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
@@ -199,6 +200,7 @@ async def execute_doc_translate_task(
     source_lang: str = "zh",
     target_langs: List[str],
     ocr_model: str = "google/gemini-3-flash-preview",
+    gemini_route: str = "google",
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
@@ -218,8 +220,7 @@ async def execute_doc_translate_task(
     """
     if ocr_model not in DOC_TRANSLATE_MODELS:
         raise ValueError(f"不支持的 OCR 模型: {ocr_model}")
-    if not settings.OPENROUTER_API_KEY:
-        raise ValueError("未配置 OPENROUTER_API_KEY，无法执行 OCR")
+    gemini_route = ensure_gemini_route_configured(gemini_route)
     if not settings.DEEPSEEK_API_KEY:
         raise ValueError("未配置 DEEPSEEK_API_KEY，无法执行翻译")
 
@@ -239,8 +240,8 @@ async def execute_doc_translate_task(
         executor,
         lambda: ocr_file(
             file_path=input_path,
-            api_key=settings.OPENROUTER_API_KEY,
             model=ocr_model,
+            gemini_route=gemini_route,
         ),
     )
 
@@ -309,6 +310,7 @@ async def execute_doc_translate_task(
         "task_id": task_id,
         "filename": original_filename,
         "ocr_model": ocr_model,
+        "gemini_route": gemini_route,
         "source_lang": source_lang,
         "raw_output_txt": _normalize_path(raw_output_path),
         "translations": results_per_lang,

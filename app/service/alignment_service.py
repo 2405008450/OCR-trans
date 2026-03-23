@@ -23,14 +23,22 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from openai import OpenAI
 
 from app.core.config import settings
+from app.service.gemini_service import ensure_gemini_route_configured, generate_text
 
 # ── 全局配置 ──────────────────────────────────────────────
 ROW_BUCKET = 20_000
-API_KEY = settings.OPENROUTER_API_KEY
-BASE_URL = settings.OPENROUTER_BASE_URL
+_gemini_route_local = threading.local()
+
+
+def _set_current_gemini_route(route: str) -> None:
+    _gemini_route_local.route = route
+
+
+def _get_current_gemini_route() -> str:
+    return getattr(_gemini_route_local, "route", settings.GEMINI_DEFAULT_ROUTE)
+
 
 THRESHOLD_MAP = {
     2: 25_000, 3: 50_000, 4: 75_000, 5: 100_000,
@@ -1077,36 +1085,25 @@ def _smart_split_with_buffer(src_path, num_parts, output_dir, lang_type, buffer_
 
 # ── LLM 调用 ─────────────────────────────────────────────
 def _call_llm(system_prompt: str, user_prompt: str, model_id: str, max_output: int = 65536) -> Optional[str]:
-    client = OpenAI(base_url=BASE_URL, api_key=API_KEY)
+    route = _get_current_gemini_route()
     try:
-        print(f"[alignment-llm] 请求 model={model_id}, sys_len={len(system_prompt)}, user_len={len(user_prompt)}")
-        stream = client.chat.completions.create(
+        print(f"[alignment-llm] route={route}, model={model_id}, sys_len={len(system_prompt)}, user_len={len(user_prompt)}")
+        full = generate_text(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             model=model_id,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            route=route,
             temperature=0.1,
-            max_tokens=max_output,
-            stream=True,
+            max_output_tokens=max_output,
             timeout=600.0,
-            extra_headers={"HTTP-Referer": "local-debug", "X-Title": "Doc-Aligner"},
         )
-        full = ""
-        for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if hasattr(delta, "content") and delta.content:
-                full += delta.content
-        print(f"[alignment-llm] 完成, 返回 {len(full)} 字符")
+        print(f"[alignment-llm] ??, ?? {len(full)} ??")
         return full
     except Exception as e:
-        print(f"[alignment-llm] 调用失败: {e}")
+        print(f"[alignment-llm] ????: {e}")
         import traceback as _tb
         _tb.print_exc()
         return None
-
 
 def _get_model_max_output(model_id: str) -> int:
     for info in AVAILABLE_MODELS.values():
@@ -1562,6 +1559,7 @@ def _run_alignment_sync(
     source_lang: str,
     target_lang: str,
     model_name: str,
+    gemini_route: str,
     enable_post_split: bool,
     threshold_2: int = 25000,
     threshold_3: int = 50000,
@@ -1575,6 +1573,8 @@ def _run_alignment_sync(
     """同步执行对齐任务 - 线程安全版，支持多任务并发"""
     try:
         _update_progress(task_id, 5, "正在加载处理引擎...", stream_log="")
+        gemini_route = ensure_gemini_route_configured(gemini_route)
+        _set_current_gemini_route(gemini_route)
 
         memory_module = _get_memory_module()
         _install_log_patches()
@@ -1606,6 +1606,7 @@ def _run_alignment_sync(
         print(f"[alignment] lang: {source_lang} → {target_lang}")
         _log(f"语言对: {source_lang} → {target_lang}")
         _log(f"后处理分句: {'启用' if enable_post_split else '禁用'}")
+        _log(f"Gemini ???: {gemini_route}")
         _log(f"模型: {model_name} ({model_id})")
         _log(f"文件类型: {file_type.upper()}")
 
@@ -1627,6 +1628,7 @@ def _run_alignment_sync(
         if file_type == 'excel':
             _update_progress(task_id, 10, "Excel 双文件对齐模式...")
             out_path = os.path.join(task_dir, f"{base_name}_对齐结果.xlsx")
+            memory_module.set_gemini_route(gemini_route)
             success = memory_module.process_excel_dual_file_alignment(
                 original_path, translated_path, out_path, model_id,
                 source_lang=source_lang, target_lang=target_lang,
@@ -1637,6 +1639,7 @@ def _run_alignment_sync(
                     "output_excel": rel,
                     "row_count": len(pd.read_excel(out_path)),
                     "file_type": "excel",
+                "gemini_route": gemini_route,
                     "intermediate_files": _list_intermediate_files(temp_dir),
                 })
             else:
@@ -1743,6 +1746,7 @@ def _run_alignment_sync(
             except Exception as diag_e:
                 print(f"[alignment]   read_file_content 诊断异常: {diag_e}")
 
+            memory_module.set_gemini_route(gemini_route)
             success = memory_module.run_llm_alignment(
                 task['original'],
                 task['trans'],
@@ -1794,6 +1798,7 @@ def _run_alignment_sync(
                 "output_excel": rel,
                 "row_count": row_count,
                 "file_type": file_type,
+                "gemini_route": gemini_route,
                 "split_parts": split_parts,
                 "issues": issues[:10] if issues else [],
                 "intermediate_files": _list_intermediate_files(temp_dir),
@@ -1822,6 +1827,7 @@ async def run_alignment_task(
     source_lang: str = "中文",
     target_lang: str = "英语",
     model_name: str = DEFAULT_MODEL,
+    gemini_route: str = settings.GEMINI_DEFAULT_ROUTE,
     enable_post_split: bool = True,
     threshold_2: int = 25000,
     threshold_3: int = 50000,
@@ -1841,7 +1847,7 @@ async def run_alignment_task(
         functools.partial(
             _run_alignment_sync,
             original_path, translated_path, task_id, display_no,
-            source_lang, target_lang, model_name, enable_post_split,
+            source_lang, target_lang, model_name, gemini_route, enable_post_split,
             threshold_2=threshold_2, threshold_3=threshold_3,
             threshold_4=threshold_4, threshold_5=threshold_5,
             threshold_6=threshold_6, threshold_7=threshold_7,

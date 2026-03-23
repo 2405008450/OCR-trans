@@ -1,7 +1,9 @@
 let selectedFile = null;
 let pollingTimer = null;
 let modelConfig = {};
+let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
+let defaultRoute = 'google';
 const MODEL_DISPLAY_NAMES = {
     'google/gemini-2.5-flash': '快速版V1',
     'google/gemini-2.5-pro': '增强版V1',
@@ -22,6 +24,7 @@ const btnRemove = document.getElementById('btnRemove');
 const btnProcess = document.getElementById('btnProcess');
 const btnNewTask = document.getElementById('btnNewTask');
 const modelSelect = document.getElementById('modelSelect');
+let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 const modelLabel = document.getElementById('modelLabel');
 const modelDesc = document.getElementById('modelDesc');
 
@@ -37,9 +40,21 @@ const resultGrid = document.getElementById('resultGrid');
 init();
 
 async function init() {
+    ensureGeminiRouteSelect();
     bindEvents();
     await loadConfig();
     updateModelInfo();
+}
+
+function ensureGeminiRouteSelect() {
+    if (geminiRouteSelect) return;
+    const panel = document.querySelector('.options-panel');
+    if (!panel) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = "option-group option-card";
+    wrapper.innerHTML = `<label for="geminiRouteSelect">Gemini Route</label><div class="field-wrap"><i class="fas fa-route"></i><select id="geminiRouteSelect"></select></div>`;
+    panel.insertBefore(wrapper, panel.children[1] || null);
+    geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 
 function bindEvents() {
@@ -64,9 +79,12 @@ async function loadConfig() {
         }
         const data = await response.json();
         modelConfig = data.models || {};
+        routeConfig = data.routes || {};
         defaultModel = data.default_model || defaultModel;
+        defaultRoute = data.default_route || defaultRoute;
     } catch (error) {
         console.error(error);
+        routeConfig = { google: { label: '???1 Google ???' }, openrouter: { label: '???2 OpenRouter' } };
         modelConfig = {
             'google/gemini-3-flash-preview': {
                 label: getModelDisplayName('google/gemini-3-flash-preview'),
@@ -84,6 +102,11 @@ async function loadConfig() {
         modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
     });
     modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
+    geminiRouteSelect.innerHTML = '';
+    Object.entries(routeConfig).forEach(([value, info]) => {
+        geminiRouteSelect.add(new Option(info.label || value, value));
+    });
+    geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
 }
 
 function updateModelInfo() {
@@ -155,6 +178,7 @@ async function processFile() {
 
         const params = new URLSearchParams({
             model: modelSelect.value,
+            gemini_route: geminiRouteSelect.value,
         });
 
         const response = await fetch(`/task/pdf2docx?${params.toString()}`, {

@@ -3,6 +3,8 @@ const translatedFileInput = document.getElementById('translatedFile');
 const sourceLangSelect = document.getElementById('sourceLang');
 const targetLangSelect = document.getElementById('targetLang');
 const modelSelect = document.getElementById('modelSelect');
+let geminiRouteSelect = document.getElementById('geminiRouteSelect');
+let geminiRouteDesc = document.getElementById('geminiRouteDesc');
 const modelDesc = document.getElementById('modelDesc');
 const modelIdDisplay = document.getElementById('modelIdDisplay');
 const modelMaxOutput = document.getElementById('modelMaxOutput');
@@ -39,6 +41,7 @@ const MODEL_DISPLAY_NAMES = {
 };
 
 (async function init() {
+    ensureGeminiRouteSelect();
     try {
         const resp = await fetch('/task/alignment/config');
         if (resp.ok) {
@@ -51,6 +54,18 @@ const MODEL_DISPLAY_NAMES = {
         populateDefaults();
     }
 })();
+
+function ensureGeminiRouteSelect() {
+    if (geminiRouteSelect && geminiRouteDesc) return;
+    const modelGroups = document.querySelectorAll('.options-panel .option-group');
+    if (modelGroups.length < 2) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = "option-group";
+    wrapper.innerHTML = `<label><i class="fas fa-route"></i> Gemini Route:</label><select id="geminiRouteSelect"></select><div class="model-desc" id="geminiRouteDesc"></div>`;
+    modelGroups[0].insertAdjacentElement('afterend', wrapper);
+    geminiRouteSelect = document.getElementById('geminiRouteSelect');
+    geminiRouteDesc = document.getElementById('geminiRouteDesc');
+}
 
 function populateSelects() {
     const langs = configData?.languages || {};
@@ -72,6 +87,14 @@ function populateSelects() {
     if (models[DEFAULT_MODEL_NAME]) {
         modelSelect.value = DEFAULT_MODEL_NAME;
     }
+    const routes = configData?.routes || {};
+    const defaultRoute = configData?.default_route || "google";
+    geminiRouteSelect.innerHTML = '';
+    Object.entries(routes).forEach(([value, info]) => {
+        geminiRouteSelect.add(new Option(info.label || value, value));
+    });
+    geminiRouteSelect.value = routes[defaultRoute] ? defaultRoute : Object.keys(routes)[0];
+    updateRouteInfo();
     updateModelInfo();
     updateLangLabels();
 }
@@ -104,6 +127,9 @@ function populateDefaults() {
     modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
+    geminiRouteSelect.innerHTML = '<option value="google">???1 Google ???</option><option value="openrouter">???2 OpenRouter</option>';
+    geminiRouteSelect.value = "google";
+    updateRouteInfo();
     updateModelInfo();
 }
 
@@ -132,11 +158,17 @@ function updateLangLabels() {
     langHintText.textContent = `${srcDesc} → ${tgtDesc}`;
 }
 
+function updateRouteInfo() {
+    const info = configData?.routes?.[geminiRouteSelect.value];
+    geminiRouteDesc.textContent = info?.description || "";
+}
+
 function getModelDisplayName(name) {
     return MODEL_DISPLAY_NAMES[name] || name;
 }
 
 modelSelect.addEventListener('change', updateModelInfo);
+geminiRouteSelect.addEventListener('change', updateRouteInfo);
 sourceLangSelect.addEventListener('change', updateLangLabels);
 targetLangSelect.addEventListener('change', updateLangLabels);
 btnStart.addEventListener('click', startAlignment);
@@ -177,6 +209,7 @@ async function startAlignment() {
             source_lang: sourceLangSelect.value,
             target_lang: targetLangSelect.value,
             model_name: modelSelect.value,
+            gemini_route: geminiRouteSelect.value,
             enable_post_split: enablePostSplit.checked,
             threshold_2: document.getElementById('threshold2').value,
             threshold_3: document.getElementById('threshold3').value,
@@ -368,4 +401,13 @@ function resetPage() {
     progressDetails.innerHTML = '';
     streamLogWrap.style.display = 'none';
     streamLogEl.textContent = '';
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
 }

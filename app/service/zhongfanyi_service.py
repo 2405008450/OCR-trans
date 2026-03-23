@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from app.core.config import settings
+from app.service.gemini_service import ensure_gemini_route_configured
 
 
 _task_progress: Dict[str, Dict[str, Any]] = {}
@@ -85,6 +86,7 @@ def run_zhongfanyi_task(
     task_id: str,
     display_no: Optional[str] = None,
     use_ai_rule: bool = False,
+    gemini_route: str = "google",
     ai_rule_file_path: Optional[str] = None,
     session_rule_text: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -92,17 +94,21 @@ def run_zhongfanyi_task(
     在指定输出目录下执行中翻译专检完整流程（对比 + 修复），结果复制到 output_dir 供下载。
     """
     folder_name = display_no or task_id
+    gemini_route = ensure_gemini_route_configured(gemini_route)
     output_dir = Path(settings.OUTPUT_DIR) / "zhongfanyi" / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
     output_base = str(output_dir)
 
     _prepare_zhongfanyi_path()
     # 注入 API 配置到环境变量，供 zhongfanyi 子模块（rule_generation/check）读取，避免后台线程中 .env 未生效
+    if settings.GOOGLE_API_KEY:
+        os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
     if settings.OPENROUTER_API_KEY:
         os.environ["OPENROUTER_API_KEY"] = settings.OPENROUTER_API_KEY
         os.environ["OPENAI_API_KEY"] = settings.OPENROUTER_API_KEY
     if settings.OPENROUTER_BASE_URL:
         os.environ["OPENROUTER_BASE_URL"] = settings.OPENROUTER_BASE_URL
+    os.environ["GEMINI_ROUTE"] = gemini_route
     from zhongfanyi.main import run_full_pipeline
 
     _update_task(task_id, "正在提取与对比原文/译文...", 20)
@@ -138,6 +144,7 @@ def run_zhongfanyi_task(
     corrected_web_path = f"outputs/zhongfanyi/{folder_name}/corrected.docx"
     result = {
         "task_id": task_id,
+        "gemini_route": gemini_route,
         "corrected_docx": corrected_web_path,
         "reports": reports,
         "stats": stats or {"success": 0, "failed": 0, "skipped": 0},

@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
+from app.service.gemini_service import DEFAULT_GEMINI_ROUTE, get_gemini_routes
 from app.service import zhongfanyi_service as zf_service
 from app.service.number_check_service import _get_task_progress as get_number_check_progress
 from app.service.pdf2docx_service import get_pdf2docx_models
@@ -107,6 +108,7 @@ async def run_zhongfanyi(
     original_file: UploadFile = File(..., description="original document"),
     translated_file: UploadFile = File(..., description="translated document"),
     use_ai_rule: bool = Query(False),
+    gemini_route: str = Query(DEFAULT_GEMINI_ROUTE),
     rule_file: Optional[UploadFile] = File(None),
     session_rule_content: Optional[str] = Form(None),
 ):
@@ -122,6 +124,7 @@ async def run_zhongfanyi(
         original_file=original_file,
         translated_file=translated_file,
         use_ai_rule=use_ai_rule,
+        gemini_route=gemini_route,
         rule_file=rule_file,
         session_rule_content=session_rule_content,
     )
@@ -187,6 +190,8 @@ async def get_alignment_config():
             }
             for name, info in ALIGNMENT_MODELS.items()
         },
+        "routes": get_gemini_routes(),
+        "default_route": DEFAULT_GEMINI_ROUTE,
         "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()},
         "thresholds": THRESHOLD_MAP,
         "buffer_chars": BUFFER_CHARS,
@@ -200,6 +205,7 @@ async def run_alignment(
     source_lang: str = Query("中文"),
     target_lang: str = Query("英语"),
     model_name: str = Query("Google gemini-3-flash-preview"),
+    gemini_route: str = Query(DEFAULT_GEMINI_ROUTE),
     enable_post_split: bool = Query(True),
     threshold_2: int = Query(25000),
     threshold_3: int = Query(50000),
@@ -224,6 +230,7 @@ async def run_alignment(
         source_lang=source_lang,
         target_lang=target_lang,
         model_name=model_name,
+        gemini_route=gemini_route,
         enable_post_split=enable_post_split,
         threshold_2=threshold_2,
         threshold_3=threshold_3,
@@ -264,6 +271,8 @@ async def get_doc_translate_config():
     return {
         "models": get_doc_translate_models(),
         "default_model": "google/gemini-3-flash-preview",
+        "routes": get_gemini_routes(),
+        "default_route": DEFAULT_GEMINI_ROUTE,
         "languages": get_supported_languages(),
     }
 
@@ -274,6 +283,7 @@ async def submit_doc_translate(
     source_lang: str = Query("zh"),
     target_langs: str = Query("en", description="逗号分隔的目标语言代码，如 en,es,ja"),
     ocr_model: str = Query("google/gemini-3-flash-preview"),
+    gemini_route: str = Query(DEFAULT_GEMINI_ROUTE),
 ):
     allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
     ext = os.path.splitext(file.filename or "")[1].lower()
@@ -285,6 +295,7 @@ async def submit_doc_translate(
         source_lang=source_lang,
         target_langs=target_langs,
         ocr_model=ocr_model,
+        gemini_route=gemini_route,
     )
     return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
 
@@ -302,6 +313,8 @@ async def get_pdf2docx_config():
     return {
         "models": get_pdf2docx_models(),
         "default_model": "google/gemini-3-flash-preview",
+        "routes": get_gemini_routes(),
+        "default_route": DEFAULT_GEMINI_ROUTE,
     }
 
 
@@ -309,13 +322,14 @@ async def get_pdf2docx_config():
 async def run_pdf2docx(
     file: UploadFile = File(..., description="pdf or image file"),
     model: str = Query("google/gemini-3-flash-preview"),
+    gemini_route: str = Query(DEFAULT_GEMINI_ROUTE),
 ):
     allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
 
-    task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model)
+    task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
     return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
 
 

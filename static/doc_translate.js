@@ -12,6 +12,7 @@ const btnRemove = document.getElementById('btnRemove');
 const btnProcess = document.getElementById('btnProcess');
 const btnNewTask = document.getElementById('btnNewTask');
 const modelSelect = document.getElementById('modelSelect');
+let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 const sourceLangSelect = document.getElementById('sourceLangSelect');
 const targetLangGroup = document.getElementById('targetLangGroup');
 
@@ -28,7 +29,9 @@ let selectedFile = null;
 let pollingTimer = null;
 let modelConfig = {};
 let languageConfig = {};
+let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
+let defaultRoute = 'google';
 
 const MODEL_DISPLAY_NAMES = {
     'google/gemini-3-flash-preview': '快速版V2',
@@ -41,8 +44,20 @@ const MODEL_DISPLAY_NAMES = {
 init();
 
 async function init() {
+    ensureGeminiRouteSelect();
     bindEvents();
     await loadConfig();
+}
+
+function ensureGeminiRouteSelect() {
+    if (geminiRouteSelect) return;
+    const panel = document.querySelector('.options-panel');
+    if (!panel) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = "option-group option-card";
+    wrapper.innerHTML = `<label for="geminiRouteSelect">Gemini Route</label><div class="field-wrap"><i class="fas fa-route"></i><select id="geminiRouteSelect"></select></div>`;
+    panel.insertBefore(wrapper, panel.children[1] || null);
+    geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 
 function bindEvents() {
@@ -69,12 +84,15 @@ async function loadConfig() {
         modelConfig = data.models || {};
         defaultModel = data.default_model || defaultModel;
         languageConfig = data.languages || {};
+        routeConfig = data.routes || {};
+        defaultRoute = data.default_route || defaultRoute;
     } catch (error) {
         console.error(error);
         modelConfig = {
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '更精确' },
         };
+        routeConfig = { google: { label: '???1 Google ???' }, openrouter: { label: '???2 OpenRouter' } };
         languageConfig = {
             'zh': { name: '中文' }, 'en': { name: '英文' }, 'ja': { name: '日文' },
             'ko': { name: '韩文' }, 'es': { name: '西班牙文' }, 'fr': { name: '法文' },
@@ -230,6 +248,7 @@ async function processFile() {
             source_lang: sourceLangSelect.value,
             target_langs: targetLangs.join(','),
             ocr_model: modelSelect.value,
+            gemini_route: geminiRouteSelect.value,
         });
 
         const response = await fetch(`/task/doc-translate?${params.toString()}`, {

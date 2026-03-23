@@ -1,28 +1,26 @@
 import os
 import traceback
 from dotenv import load_dotenv
-from openai import OpenAI
 
+from app.service.gemini_service import generate_text
 from zhongfanyi.llm.llm_project.llm_check.rule_generation import rule
 from zhongfanyi.llm.llm_project.parsers.word.body_extractor import extract_body_text
 from zhongfanyi.llm.llm_project.parsers.word.footer_extractor import extract_footers
 from zhongfanyi.llm.llm_project.parsers.word.header_extractor import extract_headers
+
 # 加载API密钥：优先从项目根目录 .env 读取（与 FastAPI 主应用一致）
 # 专检/zhongfanyi/llm/llm_project/llm_check -> 项目根 fastapi-llm-demo 需 6 层 ..
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", ".."))
 _env_path = os.path.join(_project_root, ".env")
 if os.path.isfile(_env_path):
     load_dotenv(_env_path)
+
 # 兼容 OPENROUTER_* 与旧版 API_KEY/BASE_URL
-api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("API_KEY")
-base_url = os.getenv("OPENROUTER_BASE_URL") or os.getenv("BASE_URL", "https://openrouter.ai/api/v1")
-client = OpenAI(
-    api_key=api_key,
-    base_url=base_url,
-)
+
+
 class Match:
     # 文本对比函数，利用OpenAI GPT对比原文和译文
-    def compare_texts(self, original_text, translated_text,rule):
+    def compare_texts(self, original_text, translated_text, rule):
         prompt = f"""
         原文：{original_text}
         译文（待检查）：{translated_text}
@@ -67,34 +65,16 @@ class Match:
         """
 
         try:
-            # 使用正确的API调用方式，并启用流式响应
-            response = client.chat.completions.create(
-                extra_headers={
-                    "HTTP-Referer": "<YOUR_SITE_URL>",  # Optional. Site URL for rankings on openrouter.ai.
-                    "X-Title": "<YOUR_SITE_NAME>",  # Optional. Site title for rankings on openrouter.ai.
-                },
-                model="google/gemini-3.1-pro-preview",  # 使用 OpenAI 的 google/gemini-3-pro-preview 模型
-                max_tokens=65532,
-                messages=[
-                    {"role": "system",
-                     "content": "你是中译英译文合规审校员，只负责依据要求对英文译文做错误类型规则符合性检查与修改建议，不要自行修正、不要补全缺失信息。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0,  # 设置温度为0，确保生成的内容精确、简洁
-                stream=True  # 开启流式响应
+            full_response = generate_text(
+                system_prompt="你是中译英译文合规审校员，只负责依据要求对英文译文做错误类型规则符合性检查与修改建议，不要自行修正、不要补全缺失信息。",
+                user_prompt=prompt,
+                model="google/gemini-3.1-pro-preview",
+                route=os.getenv("GEMINI_ROUTE", "google"),
+                temperature=0,
+                max_output_tokens=65532,
             )
-
-            # 流式输出处理
-            full_response = ""
-            for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    message_content = chunk.choices[0].delta.content
-                    full_response += message_content
-                    print(message_content, end="")  # 实时输出返回的内容
-
-            # 返回完整的流式响应内容
+            print(full_response, end="")
             return full_response.strip()
-
         except Exception as e:
             raise e
 
@@ -106,14 +86,14 @@ if __name__ == "__main__":
     translated_path = r"C:\Users\Administrator\Desktop\项目文件\专检\数值检查\测试文件\译文-中翻译规则测试文件.docx"  # 请替换为译文文件路径
 
     #处理页眉
-    original_header_text=extract_headers(original_path)
-    translated_header_text=extract_headers(translated_path)
+    original_header_text = extract_headers(original_path)
+    translated_header_text = extract_headers(translated_path)
     #处理页脚
     original_footer_text = extract_footers(original_path)
     translated_footer_text = extract_footers(translated_path)
     #处理正文(含脚注/表格/自动编号)
-    original_body_text=extract_body_text(original_path)
-    translated_body_text=extract_body_text(translated_path)
+    original_body_text = extract_body_text(original_path)
+    translated_body_text = extract_body_text(translated_path)
     print("======页眉===========")
     print(original_header_text)
     print(translated_header_text)
@@ -136,6 +116,3 @@ if __name__ == "__main__":
     print("======正在检查页脚===========")
     footer_result = matcher.compare_texts(original_footer_text, translated_footer_text)
     print("================================")
-
-
-

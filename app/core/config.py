@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "sk-f2a71209abd64087a69147ab6a0bb2ec")
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY", "")
+    GEMINI_DEFAULT_ROUTE: str = os.getenv("GEMINI_DEFAULT_ROUTE", "google")
+
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 

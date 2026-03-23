@@ -1,4 +1,4 @@
-let originalFileInput, translatedFileInput, ruleFileInput, useAiRuleCheckbox, btnRun, btnReset;
+let originalFileInput, translatedFileInput, ruleFileInput, useAiRuleCheckbox, geminiRouteSelect, btnRun, btnReset;
 let uploadSection, processingSection, resultSection, resultStats, resultGrid;
 let progressBar, progressPercent, progressDetails, processingTitle, processingText;
 let ruleEditorModal, ruleContentArea;
@@ -14,6 +14,7 @@ function initElements() {
     translatedFileInput = document.getElementById('translatedFile');
     ruleFileInput = document.getElementById('ruleFile');
     useAiRuleCheckbox = document.getElementById('useAiRule');
+    geminiRouteSelect = document.getElementById('geminiRouteSelect');
     btnRun = document.getElementById('btnRun');
     btnReset = document.getElementById('btnReset');
     uploadSection = document.getElementById('uploadSection');
@@ -29,6 +30,7 @@ function initElements() {
     ruleEditorModal = document.getElementById('ruleEditorModal');
     ruleContentArea = document.getElementById('ruleContent');
 
+    ensureGeminiRouteSelect();
     if (btnRun) btnRun.addEventListener('click', runZhongfanyi);
     if (btnReset) btnReset.addEventListener('click', resetPage);
 
@@ -73,7 +75,7 @@ async function runZhongfanyi() {
             formData.append('session_rule_content', sessionRuleContent.trim());
         }
 
-        const url = '/task/zhongfanyi?use_ai_rule=' + (useAiRule ? 'true' : 'false');
+        const url = '/task/zhongfanyi?use_ai_rule=' + (useAiRule ? 'true' : 'false') + '&gemini_route=' + encodeURIComponent(geminiRouteSelect.value);
         const resp = await fetch(url, {
             method: 'POST',
             body: formData,
@@ -239,3 +241,15 @@ document.addEventListener('click', function(event) {
         closeRuleEditor();
     }
 });
+
+function ensureGeminiRouteSelect() {
+    if (geminiRouteSelect) return;
+    const panel = document.querySelector('.options-panel');
+    if (!panel) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = "option-group";
+    wrapper.style.gridColumn = "1 / -1";
+    wrapper.innerHTML = `<label style="width: 100%;"><i class="fas fa-route"></i> Gemini Route:<select id="geminiRouteSelect" style="margin-left: 8px;"><option value="google">??1 Google ??</option><option value="openrouter">??2 OpenRouter</option></select></label><span class="model-desc">???? Google ?? Gemini API?OpenRouter ???????</span>`;
+    panel.appendChild(wrapper);
+    geminiRouteSelect = document.getElementById('geminiRouteSelect');
+}

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.config import settings
+from app.service.gemini_service import ensure_gemini_route_configured
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
@@ -40,13 +41,13 @@ async def execute_pdf2docx_task_from_path(
     input_path: str,
     original_filename: str,
     model: str = "google/gemini-3-flash-preview",
+    gemini_route: str = "google",
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
     if model not in PDF2DOCX_MODELS:
         raise ValueError(f"不支持的模型: {model}")
-    if not settings.OPENROUTER_API_KEY:
-        raise ValueError("未配置 OPENROUTER_API_KEY，无法执行 PDF 转 Word 任务")
+    gemini_route = ensure_gemini_route_configured(gemini_route)
 
     loop = asyncio.get_running_loop()
     input_file = Path(input_path)
@@ -62,8 +63,8 @@ async def execute_pdf2docx_task_from_path(
         executor,
         lambda: ocr_file(
             file_path=input_path,
-            api_key=settings.OPENROUTER_API_KEY,
             model=model,
+            gemini_route=gemini_route,
         ),
     )
 
@@ -86,6 +87,7 @@ async def execute_pdf2docx_task_from_path(
         "task_id": task_id,
         "filename": original_filename,
         "model": model,
+        "gemini_route": gemini_route,
         "raw_output_txt": _normalize_path(raw_output_path),
         "output_html": _normalize_path(html_output_path),
         "output_docx": _normalize_path(docx_output_path),

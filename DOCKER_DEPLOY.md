@@ -87,6 +87,8 @@ nano .env
 ```
 DEEPSEEK_API_KEY=你的真实API_KEY
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+GOOGLE_API_KEY=????GOOGLE_API_KEY
+GEMINI_DEFAULT_ROUTE=google
 OPENROUTER_API_KEY=你的真实OPENROUTER_API_KEY
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 LIBREOFFICE_PATH=/usr/bin/soffice
