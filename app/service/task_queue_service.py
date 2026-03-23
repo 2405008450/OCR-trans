@@ -78,11 +78,17 @@ class TaskQueueService:
             self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_number_check_task(self, *, original_file: UploadFile, translated_file: UploadFile) -> str:
+    async def submit_number_check_task(
+        self,
+        *,
+        original_file: UploadFile,
+        translated_file: UploadFile,
+        gemini_route: str,
+    ) -> str:
         reserved_task = self._create_db_task(
             task_type="number_check",
             filename=f"{original_file.filename} | {translated_file.filename}",
-            params={},
+            params={"gemini_route": gemini_route},
             input_files={},
         )
         try:
@@ -457,7 +463,7 @@ class TaskQueueService:
                 )
                 output_path = result.get("results", [{}])[0].get("translated_image") if result.get("results") else None
             elif task_type == "number_check":
-                result = await self._execute_number_check(task_id, display_no, input_files, update)
+                result = await self._execute_number_check(task_id, display_no, input_files, params, update)
                 output_path = result.get("corrected_docx")
             elif task_type == "zhongfanyi":
                 result = await self._execute_zhongfanyi(task_id, display_no, input_files, params, update)
@@ -495,6 +501,7 @@ class TaskQueueService:
         task_id: str,
         display_no: str,
         input_files: Dict[str, Any],
+        params: Dict[str, Any],
         update: Callable[[int, str], Any],
     ) -> Dict[str, Any]:
         await update(5, "开始执行数字专检")
@@ -509,7 +516,13 @@ class TaskQueueService:
             file=io.BytesIO(translated_bytes),
         )
         job = asyncio.create_task(
-            run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no)
+            run_number_check_task(
+                original_upload,
+                translated_upload,
+                task_id=task_id,
+                display_no=display_no,
+                gemini_route=params.get("gemini_route", "google"),
+            )
         )
         await self._mirror_progress(task_id, job, lambda: get_number_check_progress(task_id), update)
         return await job

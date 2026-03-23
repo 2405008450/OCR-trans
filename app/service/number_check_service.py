@@ -10,6 +10,7 @@ from fastapi import UploadFile
 from docx import Document
 
 from app.core.config import settings
+from app.service.gemini_service import ensure_gemini_route_configured
 
 
 # 任务进度存储
@@ -163,6 +164,7 @@ async def run_number_check_task(
     translated_file: UploadFile,
     task_id: str = "",
     display_no: Optional[str] = None,
+    gemini_route: str = "google",
 ) -> Dict[str, Any]:
     """
     数值专检流程：
@@ -174,6 +176,7 @@ async def run_number_check_task(
     """
     _validate_docx(original_file, "原文")
     _validate_docx(translated_file, "译文")
+    gemini_route = ensure_gemini_route_configured(gemini_route)
 
     if not task_id:
         task_id = str(uuid.uuid4())
@@ -199,6 +202,14 @@ async def run_number_check_task(
         f.write(await translated_file.read())
 
     _prepare_specialized_import_path()
+    if settings.GOOGLE_API_KEY:
+        os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
+    if settings.OPENROUTER_API_KEY:
+        os.environ["OPENROUTER_API_KEY"] = settings.OPENROUTER_API_KEY
+        os.environ["OPENAI_API_KEY"] = settings.OPENROUTER_API_KEY
+    if settings.OPENROUTER_BASE_URL:
+        os.environ["OPENROUTER_BASE_URL"] = settings.OPENROUTER_BASE_URL
+    os.environ["GEMINI_ROUTE"] = gemini_route
 
     _update_progress(task_id, 2, 7, "正在加载处理模块...")
 

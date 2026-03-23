@@ -2,6 +2,7 @@ const originalFileInput = document.getElementById('originalFile');
 const translatedFileInput = document.getElementById('translatedFile');
 const btnRunCheck = document.getElementById('btnRunCheck');
 const btnReset = document.getElementById('btnReset');
+let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 
 const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
@@ -21,9 +22,51 @@ const processingText = document.getElementById('processingText');
 const POLL_INTERVAL = 1000;
 let pollingTimer = null;
 let currentTaskId = null;
+let routeConfig = {};
+let defaultRoute = 'google';
 
+init();
+
+async function init() {
+    ensureGeminiRouteSelect();
+    await loadConfig();
+}
 btnRunCheck.addEventListener('click', runNumberCheck);
 btnReset.addEventListener('click', resetPage);
+
+function ensureGeminiRouteSelect() {
+    if (geminiRouteSelect) return;
+    const panel = document.querySelector('.options-panel');
+    if (!panel) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'option-group';
+    wrapper.style.gridColumn = '1 / -1';
+    wrapper.innerHTML = '<label style="width: 100%;"><i class="fas fa-route"></i> 路线切换:<select id="geminiRouteSelect" style="margin-left: 8px;"></select></label>';
+    panel.appendChild(wrapper);
+    geminiRouteSelect = document.getElementById('geminiRouteSelect');
+}
+
+async function loadConfig() {
+    try {
+        const resp = await fetch('/task/number-check/config');
+        if (!resp.ok) throw new Error(`配置加载失败: ${resp.status}`);
+        const data = await resp.json();
+        routeConfig = data.routes || {};
+        defaultRoute = data.default_route || defaultRoute;
+    } catch (error) {
+        console.error(error);
+        routeConfig = {
+            google: { label: '线路1' },
+            openrouter: { label: '线路2' },
+        };
+    }
+
+    geminiRouteSelect.innerHTML = '';
+    Object.entries(routeConfig).forEach(([value, info]) => {
+        geminiRouteSelect.add(new Option(info.label || value, value));
+    });
+    geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
+}
 
 async function runNumberCheck() {
     const originalFile = originalFileInput.files[0];
@@ -46,7 +89,10 @@ async function runNumberCheck() {
         formData.append('translated_file', translatedFile);
 
         // 提交任务（立即返回task_id）
-        const resp = await fetch('/task/number-check', {
+        const params = new URLSearchParams({
+            gemini_route: geminiRouteSelect?.value || defaultRoute,
+        });
+        const resp = await fetch(`/task/number-check?${params.toString()}`, {
             method: 'POST',
             body: formData,
         });

@@ -84,12 +84,22 @@ async def get_run_task_status(task_id: str):
 async def run_number_check(
     original_file: UploadFile = File(..., description="original docx"),
     translated_file: UploadFile = File(..., description="translated docx"),
+    gemini_route: str = Query(DEFAULT_GEMINI_ROUTE),
 ):
     task_id = await task_queue_service.submit_number_check_task(
         original_file=original_file,
         translated_file=translated_file,
+        gemini_route=gemini_route,
     )
     return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
+
+
+@router.get("/number-check/config")
+async def get_number_check_config():
+    return {
+        "routes": get_gemini_routes(),
+        "default_route": DEFAULT_GEMINI_ROUTE,
+    }
 
 
 @router.get("/number-check/status/{task_id}")

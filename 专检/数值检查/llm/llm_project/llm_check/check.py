@@ -2,7 +2,7 @@ import os
 import traceback
 from pathlib import Path
 from dotenv import load_dotenv
-from openai import OpenAI
+from app.service.gemini_service import generate_text
 from llm.llm_project.parsers.body_extractor import extract_body_text
 from llm.llm_project.parsers.footer_extractor import extract_footers
 from llm.llm_project.parsers.header_extractor import extract_headers
@@ -10,12 +10,6 @@ from llm.llm_project.parsers.header_extractor import extract_headers
 # 加载项目根目录的 .env 统一配置
 _project_root = Path(__file__).resolve().parents[5]  # 从 专检/数值检查/llm/llm_project/llm_check/ 向上5级到项目根
 load_dotenv(_project_root / ".env")
-api_key = os.getenv("OPENROUTER_API_KEY", "")
-base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-client = OpenAI(
-    api_key=api_key,
-    base_url=base_url,
-)
 
 class Match:
     # 文本对比函数，利用OpenAI GPT对比原文和译文
@@ -69,32 +63,15 @@ class Match:
         """
 
         try:
-            # 使用正确的API调用方式，并启用流式响应
-            response = client.chat.completions.create(
-                extra_headers={
-                    "HTTP-Referer": "<YOUR_SITE_URL>",  # Optional. Site URL for rankings on openrouter.ai.
-                    "X-Title": "<YOUR_SITE_NAME>",  # Optional. Site title for rankings on openrouter.ai.
-                },
-                model="google/gemini-2.5-pro",  # 使用 OpenAI 的 google/gemini-3-pro-preview 模型
-                max_tokens=65536,
-                messages=[
-                    {"role": "system",
-                     "content": "你是中译英译文合规审校员，只负责依据要求对英文译文做错误类型规则符合性检查与修改建议，不要自行修正、不要补全缺失信息。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0,  # 设置温度为0，确保生成的内容精确、简洁
-                stream=True  # 开启流式响应
+            full_response = generate_text(
+                system_prompt="???????????????????????????????????????????????????????????",
+                user_prompt=prompt,
+                model="google/gemini-2.5-pro",
+                route=os.getenv("GEMINI_ROUTE", "google"),
+                temperature=0,
+                max_output_tokens=65536,
             )
-
-            # 流式输出处理
-            full_response = ""
-            for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    message_content = chunk.choices[0].delta.content
-                    full_response += message_content
-                    print(message_content, end="")  # 实时输出返回的内容
-
-            # 返回完整的流式响应内容
+            print(full_response, end="")
             return full_response.strip()
 
         except Exception as e:
