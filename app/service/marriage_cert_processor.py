@@ -710,12 +710,13 @@ def _inpaint_regions(image: np.ndarray, filtered_data: List[Dict], use_lama: boo
             255, -1
         )
 
-    if use_lama and LAMA_AVAILABLE and lama_model is not None:
+    lama_engine = _get_lama_model() if use_lama and LAMA_AVAILABLE else None
+    if lama_engine is not None:
         try:
             img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             img_pil = Image.fromarray(img_rgb)
             mask_pil = Image.fromarray(mask)
-            result_pil = lama_model(img_pil, mask_pil)
+            result_pil = lama_engine(img_pil, mask_pil)
             inpainted = cv2.cvtColor(np.array(result_pil), cv2.COLOR_RGB2BGR)
             print("   LaMa 涂抹完成")
             return inpainted
@@ -1019,8 +1020,8 @@ def _draw_translated_texts(
                     value_font = _get_font_italic(max(12, int(font_size * 0.9)))
                     _, label_h = _text_size(draw, label_text, label_font)
                     value_line_h = _text_size(draw, "Ay", value_font)[1]
-                    reg_y = max(0, sign_box[1] - max(26, int(font_size * 1.7)))
-                    reg_x = sign_box[0]
+                    reg_y = max(0, sign_box[1] - max(26, int(font_size * 1.7)) + int(registered_by_offset_y))
+                    reg_x = max(0, sign_box[0] + int(registered_by_offset_x))
                     max_width = max(60, img_w - reg_x - 8)
 
                     # 第一行：标签
@@ -1033,7 +1034,10 @@ def _draw_translated_texts(
                         draw.text((reg_x, value_y), line, font=value_font, fill=(255, 0, 0))
                         value_y += value_line_h + 2
 
-                    print(f"  Registered by补填: {label_text} + {len(wrapped_lines)} 行手写文本")
+                    print(
+                        f"  Registered by补填: {label_text} + {len(wrapped_lines)} 行手写文本 "
+                        f"(offset_x={registered_by_offset_x}px, offset_y={registered_by_offset_y}px)"
+                    )
 
                 _draw_single_text(
                     draw,
@@ -1278,6 +1282,8 @@ def process_marriage_cert_image(
     page_template: str = 'page2',
     registrar_signature_text: Optional[str] = None,
     registered_by_text: Optional[str] = None,
+    registered_by_offset_x: int = 0,
+    registered_by_offset_y: int = 0,
     registrar_signature_offset_x: int = 36,
     registrar_signature_offset_y: int = -12,
 ) -> Dict[str, Any]:
@@ -1299,6 +1305,8 @@ def process_marriage_cert_image(
         page_template: 模板页标识（'page1'/'page2'/'page3'）
         registrar_signature_text: 婚姻登记员手写签名手动输入文本（可选）
         registered_by_text: Registered by中的xxx手动输入文本（可选）
+        registered_by_offset_x: Registered by 文本水平偏移(px)
+        registered_by_offset_y: Registered by 文本纵向偏移(px)
         registrar_signature_offset_x: 婚姻登记员手写签名右移偏移(px)
         registrar_signature_offset_y: 婚姻登记员手写签名纵向偏移(px)
 
@@ -1324,11 +1332,14 @@ def process_marriage_cert_image(
         print(f"手动签名纵向偏移: {registrar_signature_offset_y}px")
     if registered_by_text:
         print(f"Registered by输入: {registered_by_text}")
+        print(f"Registered by水平偏移: {registered_by_offset_x}px")
+        print(f"Registered by纵向偏移: {registered_by_offset_y}px")
     print(f"框体合并: {'开启' if enable_merge else '关闭'}")
     print(f"重叠修正: {'开启' if enable_overlap_fix else '关闭'}")
     print(f"冒号修正: {'开启' if enable_colon_fix else '关闭'}")
     print(f"字体大小: {font_size}px")
-    print(f"使用LaMa: {LAMA_AVAILABLE and lama_model is not None}")
+    lama_engine = _get_lama_model() if LAMA_AVAILABLE else None
+    print(f"使用LaMa: {lama_engine is not None}")
     print("=" * 80)
 
     # ---- 步骤0: 直接使用原图，避免预处理导致清晰度下降 ----
@@ -1434,6 +1445,8 @@ def process_marriage_cert_image(
         enable_overlap_fix=enable_overlap_fix,
         manual_registrar_signature_en=manual_registrar_signature_en,
         manual_registered_by_en=manual_registered_by_en,
+        registered_by_offset_x=registered_by_offset_x,
+        registered_by_offset_y=registered_by_offset_y,
         registrar_signature_offset_x=registrar_signature_offset_x,
         registrar_signature_offset_y=registrar_signature_offset_y
     )

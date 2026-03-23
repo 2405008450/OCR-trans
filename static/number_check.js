@@ -2,7 +2,6 @@ const originalFileInput = document.getElementById('originalFile');
 const translatedFileInput = document.getElementById('translatedFile');
 const btnRunCheck = document.getElementById('btnRunCheck');
 const btnReset = document.getElementById('btnReset');
-let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 
 const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
@@ -10,40 +9,102 @@ const resultSection = document.getElementById('resultSection');
 const resultStats = document.getElementById('resultStats');
 const resultGrid = document.getElementById('resultGrid');
 
-// 进度条相关元素
 const progressBar = document.getElementById('progressBar');
 const progressPercent = document.getElementById('progressPercent');
 const progressDetails = document.getElementById('progressDetails');
-const progressStep = document.getElementById('progressStep');
 const processingTitle = document.getElementById('processingTitle');
 const processingText = document.getElementById('processingText');
 
-// 轮询间隔 (毫秒)
 const POLL_INTERVAL = 1000;
+
+const MODEL_DISPLAY_NAMES = {
+    'gemini-3-flash-preview': '快速版V2',
+    'google/gemini-3-flash-preview': '快速版V2',
+    'gemini-3.1-pro-preview': '增强版V2',
+    'google/gemini-3.1-pro-preview': '增强版V2',
+    'Gemini 3.1 Pro Preview': '增强版V2',
+};
+
 let pollingTimer = null;
-let currentTaskId = null;
 let routeConfig = {};
-let defaultRoute = 'google';
+let modelConfig = {};
+let defaultRoute = 'openrouter';
+let defaultModel = 'gemini-3-flash-preview';
+let geminiRouteSelect = null;
+let modelSelect = null;
+let streamLogWrap = null;
+let streamLogEl = null;
 
 init();
 
 async function init() {
-    ensureGeminiRouteSelect();
+    ensureOptionControls();
+    ensureLogPanel();
+    bindEvents();
     await loadConfig();
 }
-btnRunCheck.addEventListener('click', runNumberCheck);
-btnReset.addEventListener('click', resetPage);
 
-function ensureGeminiRouteSelect() {
-    if (geminiRouteSelect) return;
+function bindEvents() {
+    btnRunCheck?.addEventListener('click', runNumberCheck);
+    btnReset?.addEventListener('click', resetPage);
+}
+
+function ensureOptionControls() {
     const panel = document.querySelector('.options-panel');
     if (!panel) return;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'option-group';
-    wrapper.style.gridColumn = '1 / -1';
-    wrapper.innerHTML = '<label style="width: 100%;"><i class="fas fa-route"></i> 路线切换:<select id="geminiRouteSelect" style="margin-left: 8px;"></select></label>';
-    panel.appendChild(wrapper);
+
+    if (!document.getElementById('geminiRouteSelect')) {
+        const routeGroup = document.createElement('div');
+        routeGroup.className = 'option-group option-card';
+        routeGroup.style.gridColumn = '1 / -1';
+        routeGroup.innerHTML = [
+            '<label for="geminiRouteSelect">路线切换</label>',
+            '<div class="field-wrap">',
+            '<i class="fas fa-route"></i>',
+            '<select id="geminiRouteSelect"></select>',
+            '</div>',
+        ].join('');
+        panel.appendChild(routeGroup);
+    }
+
+    if (!document.getElementById('numberCheckModelSelect')) {
+        const modelGroup = document.createElement('div');
+        modelGroup.className = 'option-group option-card';
+        modelGroup.style.gridColumn = '1 / -1';
+        modelGroup.innerHTML = [
+            '<label for="numberCheckModelSelect">模型选择</label>',
+            '<div class="field-wrap">',
+            '<i class="fas fa-robot"></i>',
+            '<select id="numberCheckModelSelect"></select>',
+            '</div>',
+            '<p id="numberCheckModelDesc" class="option-hint"></p>',
+        ].join('');
+        panel.appendChild(modelGroup);
+    }
+
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
+    modelSelect = document.getElementById('numberCheckModelSelect');
+    modelSelect?.addEventListener('change', updateModelHint);
+}
+
+function ensureLogPanel() {
+    streamLogWrap = document.getElementById('streamLogWrap');
+    streamLogEl = document.getElementById('streamLog');
+    if (streamLogWrap && streamLogEl) return;
+
+    const card = processingSection?.querySelector('.processing-card');
+    if (!card) return;
+
+    streamLogWrap = document.createElement('div');
+    streamLogWrap.id = 'streamLogWrap';
+    streamLogWrap.className = 'stream-log-wrap';
+    streamLogWrap.style.display = 'none';
+    streamLogWrap.innerHTML = [
+        '<div class="stream-log-head"><i class="fas fa-terminal"></i><span>后端日志</span></div>',
+        '<pre id="streamLog" class="stream-log"></pre>',
+    ].join('');
+    card.appendChild(streamLogWrap);
+    streamLogEl = document.getElementById('streamLog');
 }
 
 async function loadConfig() {
@@ -52,20 +113,55 @@ async function loadConfig() {
         if (!resp.ok) throw new Error(`配置加载失败: ${resp.status}`);
         const data = await resp.json();
         routeConfig = data.routes || {};
+        modelConfig = data.models || {};
         defaultRoute = data.default_route || defaultRoute;
+        defaultModel = data.default_model || defaultModel;
     } catch (error) {
         console.error(error);
         routeConfig = {
-            google: { label: '线路1' },
-            openrouter: { label: '线路2' },
+            openrouter: { label: '线路1（推荐）' },
+            google: { label: '线路2（直连）' },
+        };
+        modelConfig = {
+            'gemini-3-flash-preview': {
+                label: '快速版V2',
+                description: '速度更快，适合常规数字核对场景。',
+            },
+            'gemini-3.1-pro-preview': {
+                label: '增强版V2',
+                description: '推理更强，适合复杂编号和上下文判断场景。',
+            },
         };
     }
 
+    renderRouteOptions();
+    renderModelOptions();
+    updateModelHint();
+}
+
+function renderRouteOptions() {
+    if (!geminiRouteSelect) return;
     geminiRouteSelect.innerHTML = '';
     Object.entries(routeConfig).forEach(([value, info]) => {
         geminiRouteSelect.add(new Option(info.label || value, value));
     });
     geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
+}
+
+function renderModelOptions() {
+    if (!modelSelect) return;
+    modelSelect.innerHTML = '';
+    Object.entries(modelConfig).forEach(([value, info]) => {
+        modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
+    });
+    modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
+}
+
+function updateModelHint() {
+    const hintEl = document.getElementById('numberCheckModelDesc');
+    if (!hintEl || !modelSelect) return;
+    const info = modelConfig[modelSelect.value] || {};
+    hintEl.textContent = info.description || '';
 }
 
 async function runNumberCheck() {
@@ -79,8 +175,7 @@ async function runNumberCheck() {
 
     uploadSection.style.display = 'none';
     processingSection.style.display = 'block';
-
-    // 初始化进度条
+    clearLog();
     updateProgressUI(0, '正在提交任务...');
 
     try {
@@ -88,118 +183,106 @@ async function runNumberCheck() {
         formData.append('original_file', originalFile);
         formData.append('translated_file', translatedFile);
 
-        // 提交任务（立即返回task_id）
         const params = new URLSearchParams({
             gemini_route: geminiRouteSelect?.value || defaultRoute,
+            model_name: modelSelect?.value || defaultModel,
         });
+
         const resp = await fetch(`/task/number-check?${params.toString()}`, {
             method: 'POST',
             body: formData,
         });
 
         if (!resp.ok) {
-            let detailMsg = '';
-            try {
-                const errJson = await resp.json();
-                const detail = errJson?.detail;
-                if (typeof detail === 'string') {
-                    detailMsg = detail;
-                } else if (detail && typeof detail === 'object') {
-                    const trace = Array.isArray(detail.traceback) ? detail.traceback.join('\n') : '';
-                    detailMsg = `${detail.error || ''}\n${trace}`.trim();
-                }
-            } catch (e) {
-                // ignore JSON parse error and fallback to status
-            }
+            const detailMsg = await safeReadError(resp);
             throw new Error(detailMsg || `请求失败: ${resp.status}`);
         }
 
         const submitResp = await resp.json();
-
         if (submitResp.status === 'ACCEPTED' && submitResp.task_id) {
-            // 开始轮询进度
             updateProgressUI(5, '任务已提交，正在后台处理...');
             startPolling(submitResp.task_id);
-        } else {
-            // 兼容旧版本的同步返回
-            showResult(submitResp);
+            return;
         }
-    } catch (err) {
-        alert(`数字专检失败: ${err.message}`);
-        resetPage();
+
+        showResult(submitResp);
+    } catch (error) {
+        showFailure(`数字专检失败: ${error.message}`);
     }
 }
 
-// 更新进度条UI
 function updateProgressUI(progress, message, details = []) {
     progressBar.style.setProperty('--progress', `${progress}%`);
     progressPercent.textContent = `${progress}%`;
     processingTitle.textContent = message || '数字专检处理中...';
     processingText.textContent = message || '正在处理...';
 
-    // 更新详情
-    if (details && details.length > 0) {
-        progressDetails.innerHTML = details.map(d => `<div class="detail-item">${d}</div>`).join('');
+    if (details?.length) {
+        progressDetails.innerHTML = details.map((item) => `<div class="detail-item">${escapeHtml(item)}</div>`).join('');
     } else {
-        progressDetails.innerHTML = `<div class="detail-item">${message}</div>`;
+        progressDetails.innerHTML = `<div class="detail-item">${escapeHtml(message || '正在处理...')}</div>`;
     }
 }
 
-// 轮询任务状态
 async function pollTaskStatus(taskId) {
     try {
         const resp = await fetch(`/task/number-check/status/${taskId}`);
         if (!resp.ok) {
-            console.error('获取任务状态失败');
-            return null;
+            throw new Error(`获取任务状态失败: ${resp.status}`);
         }
 
         const status = await resp.json();
+        updateProgressUI(status.progress || 0, status.message || '正在处理...', status.details || []);
+        syncLog(status.stream_log || status.result?.stream_log || '');
 
-        // 更新进度条
-        updateProgressUI(
-            status.progress || 0,
-            status.message || '正在处理...',
-            status.details || []
-        );
-
-        // 检查任务是否完成
         if (status.status === 'done') {
             stopPolling();
-            if (status.result) {
-                showResult(status.result);
-            }
+            showResult(status.result || status);
         } else if (status.status === 'failed') {
             stopPolling();
-            alert(`数字专检失败: ${status.error || '未知错误'}`);
-            resetPage();
+            showFailure(`数字专检失败: ${status.error || '未知错误'}`, status.stream_log || '');
         }
 
         return status;
-    } catch (err) {
-        console.error('轮询任务状态出错:', err);
+    } catch (error) {
+        stopPolling();
+        showFailure(error.message);
         return null;
     }
 }
 
-// 开始轮询
 function startPolling(taskId) {
-    currentTaskId = taskId;
-    // 立即查询一次
+    stopPolling();
     pollTaskStatus(taskId);
-    // 设置定时轮询
     pollingTimer = setInterval(() => {
         pollTaskStatus(taskId);
     }, POLL_INTERVAL);
 }
 
-// 停止轮询
 function stopPolling() {
     if (pollingTimer) {
         clearInterval(pollingTimer);
         pollingTimer = null;
     }
-    currentTaskId = null;
+}
+
+function syncLog(logText) {
+    if (!streamLogWrap || !streamLogEl || !logText) return;
+    streamLogWrap.style.display = 'block';
+    streamLogEl.textContent = logText;
+    streamLogEl.scrollTop = streamLogEl.scrollHeight;
+}
+
+function clearLog() {
+    if (!streamLogWrap || !streamLogEl) return;
+    streamLogWrap.style.display = 'none';
+    streamLogEl.textContent = '';
+}
+
+function showFailure(message, logText = '') {
+    processingSection.style.display = 'block';
+    syncLog(logText);
+    updateProgressUI(100, message || '处理失败');
 }
 
 function showResult(data) {
@@ -223,6 +306,11 @@ function showResult(data) {
             <h3>${stats.skipped ?? 0}</h3>
             <p>跳过</p>
         </div>
+        <div class="stat-card">
+            <i class="fas fa-robot"></i>
+            <h3>${escapeHtml(getModelDisplayName(data.model_name || defaultModel))}</h3>
+            <p>模型</p>
+        </div>
     `;
 
     const reports = data.reports || {};
@@ -233,9 +321,9 @@ function showResult(data) {
                 <a href="/${data.corrected_docx}" download class="download-btn">
                     <i class="fas fa-file-word"></i> 下载修复后译文
                 </a>
-                ${reports.body_json ? `<a href="/${reports.body_json}" download class="download-btn"><i class="fas fa-file-code"></i> 正文报告JSON</a>` : ''}
-                ${reports.header_json ? `<a href="/${reports.header_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页眉报告JSON</a>` : ''}
-                ${reports.footer_json ? `<a href="/${reports.footer_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页脚报告JSON</a>` : ''}
+                ${reports.body_json ? `<a href="/${reports.body_json}" download class="download-btn"><i class="fas fa-file-code"></i> 正文报告 JSON</a>` : ''}
+                ${reports.header_json ? `<a href="/${reports.header_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页眉报告 JSON</a>` : ''}
+                ${reports.footer_json ? `<a href="/${reports.footer_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页脚报告 JSON</a>` : ''}
             </div>
         </div>
     `;
@@ -247,12 +335,31 @@ function resetPage() {
     uploadSection.style.display = 'block';
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';
-
-    // 停止轮询
     stopPolling();
-
-    // 重置进度条
+    clearLog();
     progressBar.style.setProperty('--progress', '0%');
     progressPercent.textContent = '0%';
     progressDetails.innerHTML = '';
+}
+
+async function safeReadError(response) {
+    try {
+        const payload = await response.json();
+        return payload?.detail?.error || payload?.detail || payload?.message || '';
+    } catch (_) {
+        return '';
+    }
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function getModelDisplayName(name) {
+    return MODEL_DISPLAY_NAMES[name] || name;
 }

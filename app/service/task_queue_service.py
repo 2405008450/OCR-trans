@@ -84,11 +84,12 @@ class TaskQueueService:
         original_file: UploadFile,
         translated_file: UploadFile,
         gemini_route: str,
+        model_name: str,
     ) -> str:
         reserved_task = self._create_db_task(
             task_type="number_check",
             filename=f"{original_file.filename} | {translated_file.filename}",
-            params={"gemini_route": gemini_route},
+            params={"gemini_route": gemini_route, "model_name": model_name},
             input_files={},
         )
         try:
@@ -522,6 +523,7 @@ class TaskQueueService:
                 task_id=task_id,
                 display_no=display_no,
                 gemini_route=params.get("gemini_route", "google"),
+                model_name=params.get("model_name", "gemini-3-flash-preview"),
             )
         )
         await self._mirror_progress(task_id, job, lambda: get_number_check_progress(task_id), update)

@@ -12,16 +12,21 @@ GeminiLogCallback = Optional[Callable[[str], None]]
 
 GEMINI_ROUTE_GOOGLE = "google"
 GEMINI_ROUTE_OPENROUTER = "openrouter"
-DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_GOOGLE
+# 读取 .env 中的 GEMINI_DEFAULT_ROUTE，fallback 到 google
+DEFAULT_GEMINI_ROUTE = (
+    settings.GEMINI_DEFAULT_ROUTE
+    if settings.GEMINI_DEFAULT_ROUTE in (GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_OPENROUTER)
+    else GEMINI_ROUTE_GOOGLE
+)
 
 GEMINI_ROUTE_OPTIONS: Dict[str, Dict[str, str]] = {
-    GEMINI_ROUTE_GOOGLE: {
-        "label": "线路1",
-        "description": "默认主线路，直连 Google 官方 Gemini API。",
-    },
     GEMINI_ROUTE_OPENROUTER: {
-        "label": "线路2",
-        "description": "备用线路，通过 OpenRouter 转发 Gemini 模型。",
+        "label": "线路1（推荐）",
+        "description": "通过 OpenRouter 转发 Gemini 模型，推荐使用。",
+    },
+    GEMINI_ROUTE_GOOGLE: {
+        "label": "线路2（直连）",
+        "description": "直连 Google 官方 Gemini API，需要网络支持。",
     },
 }
 
@@ -107,7 +112,7 @@ def generate_text(
         return (_extract_google_text(response) or "").strip()
 
     client = OpenAI(base_url=settings.OPENROUTER_BASE_URL, api_key=settings.OPENROUTER_API_KEY, timeout=timeout)
-    response = client.chat.completions.create(
+    stream = client.chat.completions.create(
         model=resolved_model,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -116,8 +121,22 @@ def generate_text(
         temperature=temperature,
         max_tokens=max_output_tokens,
         extra_headers={"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
+        stream=True,
     )
-    return (response.choices[0].message.content or "").strip()
+    full_text = ""
+    token_count = 0
+    last_log_at = 0
+    for chunk in stream:
+        delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+        if delta:
+            full_text += delta
+            token_count += len(delta)
+            if log_callback and token_count - last_log_at >= 200:
+                log_callback(f"[stream] 正在生成... 已收到约 {token_count} 字符")
+                last_log_at = token_count
+    if log_callback:
+        log_callback(f"[stream] 生成完成，共 {token_count} 字符")
+    return full_text.strip()
 
 
 def generate_vision_html(

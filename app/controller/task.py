@@ -10,7 +10,10 @@ from pydantic import BaseModel
 from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
 from app.service.gemini_service import DEFAULT_GEMINI_ROUTE, get_gemini_routes
 from app.service import zhongfanyi_service as zf_service
-from app.service.number_check_service import _get_task_progress as get_number_check_progress
+from app.service.number_check_service import (
+    _get_task_progress as get_number_check_progress,
+    get_number_check_models,
+)
 from app.service.pdf2docx_service import get_pdf2docx_models
 from app.service.task_queue_service import task_queue_service
 
@@ -85,11 +88,13 @@ async def run_number_check(
     original_file: UploadFile = File(..., description="original docx"),
     translated_file: UploadFile = File(..., description="translated docx"),
     gemini_route: str = Query(DEFAULT_GEMINI_ROUTE),
+    model_name: str = Query("gemini-3-flash-preview"),
 ):
     task_id = await task_queue_service.submit_number_check_task(
         original_file=original_file,
         translated_file=translated_file,
         gemini_route=gemini_route,
+        model_name=model_name,
     )
     return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}
 
@@ -97,6 +102,8 @@ async def run_number_check(
 @router.get("/number-check/config")
 async def get_number_check_config():
     return {
+        "models": get_number_check_models(),
+        "default_model": "gemini-3-flash-preview",
         "routes": get_gemini_routes(),
         "default_route": DEFAULT_GEMINI_ROUTE,
     }
@@ -108,6 +115,11 @@ async def get_number_check_status(task_id: str):
     if not queue_task:
         raise HTTPException(status_code=404, detail="任务不存在")
     progress = get_number_check_progress(task_id)
+    # DB 已终态（done/failed）时，强制使用 DB 的状态，防止内存状态未同步导致前端无限轮询
+    if queue_task.get("status") in ("done", "failed"):
+        if progress and progress.get("stream_log"):
+            queue_task["stream_log"] = progress.get("stream_log")
+        return queue_task
     if progress and queue_task.get("status") != "queued":
         return progress
     return queue_task

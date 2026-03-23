@@ -1,18 +1,32 @@
 import os
+import sys
 import traceback
 from pathlib import Path
+from typing import Callable, Optional
+
 from dotenv import load_dotenv
+
+_project_root = Path(__file__).resolve().parents[5]
+load_dotenv(_project_root / ".env")
+
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
 from app.service.gemini_service import generate_text
 from llm.llm_project.parsers.body_extractor import extract_body_text
 from llm.llm_project.parsers.footer_extractor import extract_footers
 from llm.llm_project.parsers.header_extractor import extract_headers
 
-# 加载项目根目录的 .env 统一配置
-_project_root = Path(__file__).resolve().parents[5]  # 从 专检/数值检查/llm/llm_project/llm_check/ 向上5级到项目根
-load_dotenv(_project_root / ".env")
 
 class Match:
-    # 文本对比函数，利用OpenAI GPT对比原文和译文
+    def __init__(self, model_name: str = "gemini-3-flash-preview", task_logger: Optional[Callable[[str], None]] = None):
+        self.model_name = model_name
+        self.task_logger = task_logger
+
+    def _log(self, message: str) -> None:
+        if self.task_logger:
+            self.task_logger(message)
+
     def compare_texts(self, original_text, translated_text):
         prompt = f"""
         原文：{original_text}
@@ -27,74 +41,75 @@ class Match:
         2) 不改变原文原意；不四舍五入数值；单位与位数严格按规则；
 
         【错误类型】（逐条执行，不要漏）：
-        (一) 数值错误：
-        - 检查译文全文是否与原文数值不一致，是否漏译 / 错译 / 数量级错误
-        - 单位是否一致（%/公式符号等数量单位和计量单位）
+        （一）数值错误：
+        - 检查译文全文是否与原文数值不一致，是否漏译 / 错译 / 数量级错误？
+        - 单位是否一致（%/公式符号等数量单位和计量单位）？
         - 原文/译文大小写数值、数字（包括罗马数字和阿拉伯数字）必须完全一致
         - 零误差原则，禁止四舍五入
-        (二) 标题与编号层级：
-        - 禁止序号重复（如出现两个 Article 1）、顺序倒置、禁止跨越式跳号,检查章节序号（Chapter/Section）、条目序号（Article）、以及列表项序号（i/ii/iii/1/2/3）的连续性与中英映射准确性.
-        (三) 时间与日期数值不对应与格式规范错误
+        （二）标题与编号层级：
+        - 禁止序号重复（如出现两个 Article 1）、顺序倒置、禁止跨越式跳号，检查章节序号（Chapter/Section）、条目序号（Article），以及列表项序号（i/ii/iii/1/2/3）的连续性与中英映射准确性
+        （三）时间与日期数值不对应与格式规范错误：
         - 年、月、日、周期必须完全对应
         - 12/24 小时制必须时间一致
-        ##请严格以json格式按顺序输出检查错误结果，不得输出任何其他内容：
+
+        请严格以 JSON 格式按顺序输出检查错误结果，不得输出任何其他内容。
+
         输出要求：
-        1) 对于加粗斜体等这种非文本内容的格式问题在译文修改建议值加上中文括号备注如（加粗、斜体等格式）,如译文修改建议值: Chapter II(加粗)
-        2) 输出的`原文数值`、`译文数值`、`原文上下文`、`译文上下文`、`替换锚点`字段的值必须严格按照原内容进行输出，不得做任何改动
+        1) 对于加粗斜体等这类非文本内容的格式问题，在译文修改建议值加上中文括号备注如（加粗）、（斜体等格式），如译文修改建议值：Chapter II（加粗）
+        2) 输出的“原文数值”“译文数值”“原文上下文”“译文上下文”“替换锚点”字段的值必须严格按照原内容进行输出，不得做任何改动
         3) 若输入原文和译文有一个为空，则输出空值
-        4) 若出现连续错误或者错误距离过近，必须需拆分成多个json对象错误或者整句作为json对象处理进行处理，保证`译文数值`字段为译文原内容片段。如This Contract is made in 7 counterparts, with 2 copies held by Party A and three copies held by Party B.中若7 3 three数值错误，则输出译文数值7 译文数值2 译文数值three 译文建议修改值6 译文建议修改值5 译文建议修改值five ，或者译文数值：This Contract is made in 7 counterparts, with 2 copies held by Party A and three copies held by Party B.译文建议修改值：This Contract is made in 6 counterparts, with 5 copies held by Party A and five copies held by Party B.严禁出现译文数值：7/3/three 译文建议修改值：6/5/five多个错误在一起
+        4) 若出现连续错误或者错误距离过近，必须拆分成多个 JSON 对象错误或者整句作为 JSON 对象处理进行处理，保证“译文数值”字段为译文原内容片段。
+
         输出格式示例：
-                  [
-                    {{
-                    "错误编号": "2",
-                    "错误类型": "数值错误",
-                    "原文数值": "本合同一式六份",
-                    "译文数值": "This Contract is made in 7 counterparts",
-                    "译文修改建议值": "This Contract is made in 6 counterparts",
-                    "修改理由": "违反了正文中加书名号的法律法规/议案名称等：英文需全部实词首字母大写",
-                    "违反的规则": "正文中加书名号的法律法规/议案名称等：英文需全部实词首字母大写",
-                    "原文上下文": "本合同一式六份",
-                    "译文上下文": "This Contract is made in 7 counterparts",
-                    "原文位置": "正文",
-                    "译文位置": "正文",
-                    "替换锚点": "made in 7 counterparts"
-                    }}
-                ]
+        [
+          {{
+            "错误编号": "2",
+            "错误类型": "数值错误",
+            "原文数值": "本合同一式六份",
+            "译文数值": "This Contract is made in 7 counterparts",
+            "译文修改建议值": "This Contract is made in 6 counterparts",
+            "修改理由": "译文数值与原文不一致",
+            "违反的规则": "数值必须与原文保持严格一致",
+            "原文上下文": "本合同一式六份",
+            "译文上下文": "This Contract is made in 7 counterparts",
+            "原文位置": "正文",
+            "译文位置": "正文",
+            "替换锚点": "made in 7 counterparts"
+          }}
+        ]
         """
 
         try:
+            route = os.getenv("GEMINI_ROUTE", "google")
+            self._log(f"[llm] 开始调用 route={route}, model={self.model_name}")
             full_response = generate_text(
-                system_prompt="???????????????????????????????????????????????????????????",
+                system_prompt="你是中译英译文数字合规审校员，只负责依据要求对英文译文做数值、编号、日期与时间相关的错误检查与修改建议，不要自行修正、不要补全缺失信息。",
                 user_prompt=prompt,
-                model="google/gemini-2.5-pro",
-                route=os.getenv("GEMINI_ROUTE", "google"),
+                model=self.model_name,
+                route=route,
                 temperature=0,
                 max_output_tokens=65536,
+                log_callback=self.task_logger,
             )
-            print(full_response, end="")
+            self._log("[llm] 模型响应已返回")
             return full_response.strip()
-
-        except Exception as e:
-            print(f"Error occurred: {e}")
+        except Exception as exc:
+            self._log(f"[llm-error] {type(exc).__name__}: {exc}")
             traceback.print_exc()
-            return "Error occurred during API call."
+            raise RuntimeError(f"数字专检模型调用失败: {exc}") from exc
 
 
-# 主程序
 if __name__ == "__main__":
-    # 示例文件路径
-    original_path = r"C:\Users\Administrator\Desktop\project\效果\TP251117023，北京中翻译，中译英（字数2w）\原文-B251124195-Y-更新1121-附件1：中国银行股份有限公司模型风险管理办法（2025年修订）.docx"  # 请替换为原文文件路径
-    translated_path = r"C:\Users\Administrator\Desktop\project\效果\TP251117023，北京中翻译，中译英（字数2w）\测试译文-清洁版-B251124195-附件1：中国银行股份有限公司模型风险管理政策（2025年修订）-.docx"  # 请替换为译文文件路径
+    original_path = r"C:\path\to\original.docx"
+    translated_path = r"C:\path\to\translated.docx"
 
-    #处理页眉
-    original_header_text=extract_headers(original_path)
-    translated_header_text=extract_headers(translated_path)
-    #处理页脚
+    original_header_text = extract_headers(original_path)
+    translated_header_text = extract_headers(translated_path)
     original_footer_text = extract_footers(original_path)
     translated_footer_text = extract_footers(translated_path)
-    #处理正文(含脚注/表格/自动编号)
-    original_body_text=extract_body_text(original_path)
-    translated_body_text=extract_body_text(translated_path)
+    original_body_text = extract_body_text(original_path)
+    translated_body_text = extract_body_text(translated_path)
+
     print("======页眉===========")
     print(original_header_text)
     print(translated_header_text)
@@ -105,18 +120,14 @@ if __name__ == "__main__":
     print(original_body_text)
     print(translated_body_text)
 
-    # # 实例化对象并进行对比
     matcher = Match()
-    #正文对比
-    print("======正在检查正文===========")
+    print("======正在检查正文==========")
     body_result = matcher.compare_texts(original_body_text, translated_body_text)
-    #页眉对比
-    print("======正在检查页眉===========")
+    print("======正在检查页眉==========")
     header_result = matcher.compare_texts(original_header_text, translated_header_text)
-    #页脚对比
-    print("======正在检查页脚===========")
+    print("======正在检查页脚==========")
     footer_result = matcher.compare_texts(original_footer_text, translated_footer_text)
     print("================================")
-
-
-
+    print(body_result)
+    print(header_result)
+    print(footer_result)

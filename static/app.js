@@ -312,10 +312,10 @@ async function processFile() {
                         clearInterval(pollInterval);
                         if (queueOverlay) queueOverlay.style.display = 'none';
                         resolve(statusData.result);
-                    } else if (statusData.status === 'error') {
+                    } else if (statusData.status === 'error' || statusData.status === 'failed') {
                         clearInterval(pollInterval);
                         if (queueOverlay) queueOverlay.style.display = 'none';
-                        reject(new Error(statusData.error || '处理失败'));
+                        reject(new Error(statusData.error || statusData.message || '处理失败'));
                     }
                 } catch (e) {
                     clearInterval(pollInterval);
@@ -340,7 +340,10 @@ async function processFile() {
     } catch (error) {
         clearInterval(progressInterval);
         console.error('处理失败:', error);
-        alert(`处理失败: ${error.message}`);
+        const message = error && error.message === 'Failed to fetch'
+            ? '无法连接后端接口。请确认当前页面是否由 FastAPI 服务提供，并检查后端服务、端口、反向代理或浏览器控制台中的网络/CORS 错误。'
+            : error.message;
+        alert(`处理失败: ${message}`);
         resetApp();
     }
 }
