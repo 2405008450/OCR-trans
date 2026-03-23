@@ -1,8 +1,5 @@
 'use strict';
 
-// ─────────────────────────────────────────────
-// DOM
-// ─────────────────────────────────────────────
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
 const uploadPlaceholder = document.getElementById('uploadPlaceholder');
@@ -32,19 +29,20 @@ let languageConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultRoute = 'google';
+let streamLogWrap = null;
+let streamLogEl = null;
+let retryBtn = null;
 
 const MODEL_DISPLAY_NAMES = {
     'google/gemini-3-flash-preview': '快速版V2',
     'google/gemini-3.1-pro-preview': '增强版V2',
 };
 
-// ─────────────────────────────────────────────
-// Init
-// ─────────────────────────────────────────────
 init();
 
 async function init() {
     ensureGeminiRouteSelect();
+    ensureLogPanel();
     bindEvents();
     await loadConfig();
 }
@@ -54,28 +52,52 @@ function ensureGeminiRouteSelect() {
     const panel = document.querySelector('.options-panel');
     if (!panel) return;
     const wrapper = document.createElement('div');
-    wrapper.className = "option-group option-card";
-    wrapper.innerHTML = `<label for="geminiRouteSelect">Gemini Route</label><div class="field-wrap"><i class="fas fa-route"></i><select id="geminiRouteSelect"></select></div>`;
+    wrapper.className = 'option-group option-card';
+    wrapper.innerHTML = [
+        '<label for="geminiRouteSelect">路线切换</label>',
+        '<div class="field-wrap">',
+        '<i class="fas fa-route"></i>',
+        '<select id="geminiRouteSelect"></select>',
+        '</div>',
+    ].join('');
     panel.insertBefore(wrapper, panel.children[1] || null);
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 
+function ensureLogPanel() {
+    streamLogWrap = document.getElementById('streamLogWrap');
+    streamLogEl = document.getElementById('streamLog');
+    if (streamLogWrap && streamLogEl) return;
+
+    const card = processingSection?.querySelector('.processing-card');
+    if (!card) return;
+
+    streamLogWrap = document.createElement('div');
+    streamLogWrap.id = 'streamLogWrap';
+    streamLogWrap.className = 'stream-log-wrap';
+    streamLogWrap.style.display = 'none';
+    streamLogWrap.innerHTML = [
+        '<div class="stream-log-head"><i class="fas fa-terminal"></i><span>后端日志</span></div>',
+        '<pre id="streamLog" class="stream-log"></pre>',
+    ].join('');
+    card.appendChild(streamLogWrap);
+    streamLogEl = document.getElementById('streamLog');
+}
+
 function bindEvents() {
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', handleDragOver);
-    uploadArea.addEventListener('drop', handleDrop);
-    fileInput.addEventListener('change', handleFileSelect);
-    btnRemove.addEventListener('click', (event) => {
+    uploadArea?.addEventListener('click', () => fileInput?.click());
+    uploadArea?.addEventListener('dragover', handleDragOver);
+    uploadArea?.addEventListener('drop', handleDrop);
+    fileInput?.addEventListener('change', handleFileSelect);
+    btnRemove?.addEventListener('click', (event) => {
         event.stopPropagation();
         clearFile();
     });
-    btnProcess.addEventListener('click', processFile);
-    btnNewTask.addEventListener('click', resetPage);
+    btnProcess?.addEventListener('click', processFile);
+    btnNewTask?.addEventListener('click', resetPage);
+    sourceLangSelect?.addEventListener('change', renderTargetLanguages);
 }
 
-// ─────────────────────────────────────────────
-// Config
-// ─────────────────────────────────────────────
 async function loadConfig() {
     try {
         const response = await fetch('/task/doc-translate/config');
@@ -89,34 +111,53 @@ async function loadConfig() {
     } catch (error) {
         console.error(error);
         modelConfig = {
-            'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快' },
-            'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '更精确' },
+            'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规 OCR。' },
+            'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '复杂版面表现更稳。' },
         };
-        routeConfig = { google: { label: '???1 Google ???' }, openrouter: { label: '???2 OpenRouter' } };
+        routeConfig = {
+            google: { label: '线路1' },
+            openrouter: { label: '线路2' },
+        };
         languageConfig = {
-            'zh': { name: '中文' }, 'en': { name: '英文' }, 'ja': { name: '日文' },
-            'ko': { name: '韩文' }, 'es': { name: '西班牙文' }, 'fr': { name: '法文' },
-            'de': { name: '德文' }, 'ru': { name: '俄文' }, 'ar': { name: '阿拉伯文' },
+            zh: { name: '中文' },
+            en: { name: '英文' },
+            ja: { name: '日文' },
+            ko: { name: '韩文' },
+            es: { name: '西班牙文' },
+            fr: { name: '法文' },
+            de: { name: '德文' },
+            ru: { name: '俄文' },
         };
     }
 
-    // 填充 OCR 模型下拉
+    renderModels();
+    renderRoutes();
+    renderSourceLanguages();
+    renderTargetLanguages();
+}
+
+function renderModels() {
     modelSelect.innerHTML = '';
     Object.entries(modelConfig).forEach(([value, info]) => {
-        const label = MODEL_DISPLAY_NAMES[value] || info.label || value;
-        modelSelect.add(new Option(label, value));
+        modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
     });
     modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
+}
 
-    // 填充源语言下拉
+function renderRoutes() {
+    geminiRouteSelect.innerHTML = '';
+    Object.entries(routeConfig).forEach(([value, info]) => {
+        geminiRouteSelect.add(new Option(info.label || value, value));
+    });
+    geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
+}
+
+function renderSourceLanguages() {
     sourceLangSelect.innerHTML = '';
     Object.entries(languageConfig).forEach(([code, info]) => {
         sourceLangSelect.add(new Option(info.name, code));
     });
-    sourceLangSelect.value = 'zh';
-
-    // 填充目标语言多选
-    renderTargetLanguages();
+    sourceLangSelect.value = languageConfig.zh ? 'zh' : Object.keys(languageConfig)[0];
 }
 
 function renderTargetLanguages() {
@@ -124,17 +165,14 @@ function renderTargetLanguages() {
     const sourceLang = sourceLangSelect.value;
 
     Object.entries(languageConfig).forEach(([code, info]) => {
-        if (code === sourceLang) return; // 排除源语言
+        if (code === sourceLang) return;
 
         const chip = document.createElement('label');
         chip.className = 'lang-chip';
-        chip.dataset.lang = code;
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.value = code;
-
-        // 默认选中英文
         if (code === 'en') {
             checkbox.checked = true;
             chip.classList.add('active');
@@ -150,9 +188,8 @@ function renderTargetLanguages() {
         chip.appendChild(checkbox);
         chip.appendChild(checkIcon);
         chip.appendChild(nameSpan);
-
-        chip.addEventListener('click', (e) => {
-            e.preventDefault();
+        chip.addEventListener('click', (event) => {
+            event.preventDefault();
             checkbox.checked = !checkbox.checked;
             chip.classList.toggle('active', checkbox.checked);
             updateProcessButton();
@@ -161,26 +198,17 @@ function renderTargetLanguages() {
         targetLangGroup.appendChild(chip);
     });
 
-    // 源语言切换时重新渲染
-    sourceLangSelect.addEventListener('change', () => {
-        renderTargetLanguages();
-    });
+    updateProcessButton();
 }
 
 function getSelectedTargetLangs() {
-    const checked = targetLangGroup.querySelectorAll('input[type="checkbox"]:checked');
-    return Array.from(checked).map(cb => cb.value);
+    return Array.from(targetLangGroup.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
 }
 
 function updateProcessButton() {
-    const hasFile = selectedFile !== null;
-    const hasLangs = getSelectedTargetLangs().length > 0;
-    btnProcess.disabled = !(hasFile && hasLangs);
+    btnProcess.disabled = !(selectedFile && getSelectedTargetLangs().length > 0);
 }
 
-// ─────────────────────────────────────────────
-// File handling
-// ─────────────────────────────────────────────
 function handleDragOver(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -203,7 +231,7 @@ function handleFileSelect(event) {
 function handleFile(file) {
     const allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tif', '.tiff'];
     const lowerName = file.name.toLowerCase();
-    const matched = allowedExtensions.some(ext => lowerName.endsWith(ext));
+    const matched = allowedExtensions.some((ext) => lowerName.endsWith(ext));
     if (!matched) {
         alert('仅支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP、TIF 文件。');
         return;
@@ -224,20 +252,20 @@ function clearFile() {
     updateProcessButton();
 }
 
-// ─────────────────────────────────────────────
-// Process
-// ─────────────────────────────────────────────
 async function processFile() {
     if (!selectedFile) return;
 
     const targetLangs = getSelectedTargetLangs();
     if (targetLangs.length === 0) {
-        alert('请至少选择一种目标翻译语言');
+        alert('请至少选择一种目标翻译语言。');
         return;
     }
 
     uploadSection.style.display = 'none';
+    resultSection.style.display = 'none';
     processingSection.style.display = 'block';
+    clearLog();
+    removeRetryButton();
     updateProgress(5, '正在提交任务...');
 
     try {
@@ -264,14 +292,10 @@ async function processFile() {
         const data = await response.json();
         startPolling(data.task_id);
     } catch (error) {
-        alert(`处理失败: ${error.message}`);
-        resetPage();
+        showFailure(error.message);
     }
 }
 
-// ─────────────────────────────────────────────
-// Polling
-// ─────────────────────────────────────────────
 function startPolling(taskId) {
     stopPolling();
     pollStatus(taskId);
@@ -292,18 +316,18 @@ async function pollStatus(taskId) {
 
         const data = await response.json();
         updateProgress(data.progress || 0, data.message || '正在处理中...');
+        syncLog(data.stream_log || data.result?.stream_log || '');
 
         if (data.status === 'done') {
             stopPolling();
             showResult(data.result || {});
         } else if (data.status === 'failed') {
             stopPolling();
-            throw new Error(data.error || '翻译失败');
+            showFailure(data.error || '翻译失败', data.stream_log || '');
         }
     } catch (error) {
         stopPolling();
-        alert(`处理失败: ${error.message}`);
-        resetPage();
+        showFailure(error.message);
     }
 }
 
@@ -313,9 +337,41 @@ function updateProgress(percent, message) {
     processingStatus.textContent = message;
 }
 
-// ─────────────────────────────────────────────
-// Result
-// ─────────────────────────────────────────────
+function syncLog(logText) {
+    if (!streamLogWrap || !streamLogEl || !logText) return;
+    streamLogWrap.style.display = 'block';
+    streamLogEl.textContent = logText;
+    streamLogEl.scrollTop = streamLogEl.scrollHeight;
+}
+
+function clearLog() {
+    if (!streamLogWrap || !streamLogEl) return;
+    streamLogWrap.style.display = 'none';
+    streamLogEl.textContent = '';
+}
+
+function showFailure(message, logText = '') {
+    processingSection.style.display = 'block';
+    syncLog(logText);
+    updateProgress(100, message || '处理失败');
+    processingStatus.textContent = message || '处理失败';
+    removeRetryButton();
+
+    retryBtn = document.createElement('button');
+    retryBtn.className = 'btn-secondary';
+    retryBtn.style.marginTop = '18px';
+    retryBtn.innerHTML = '<i class="fas fa-rotate-right"></i> 重新开始';
+    retryBtn.addEventListener('click', resetPage);
+    processingSection.querySelector('.processing-card')?.appendChild(retryBtn);
+}
+
+function removeRetryButton() {
+    if (retryBtn) {
+        retryBtn.remove();
+        retryBtn = null;
+    }
+}
+
 function showResult(result) {
     processingSection.style.display = 'none';
     resultSection.style.display = 'block';
@@ -331,7 +387,7 @@ function showResult(result) {
         </div>
         <div class="stat-card">
             <i class="fas fa-robot"></i>
-            <h3>${escapeHtml(MODEL_DISPLAY_NAMES[result.ocr_model] || result.ocr_model || '-')}</h3>
+            <h3>${escapeHtml(getModelDisplayName(result.ocr_model || '-'))}</h3>
             <p>OCR 模型</p>
         </div>
         <div class="stat-card">
@@ -346,15 +402,13 @@ function showResult(result) {
         </div>
     `;
 
-    let resultsHtml = '';
-
-    // 原始 OCR 文本下载
+    let html = '';
     if (result.raw_output_txt) {
-        resultsHtml += `
+        html += `
             <div class="translation-result-item">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <span class="lang-badge"><i class="fas fa-file-lines"></i> 原始文本</span>
-                    <span style="color:var(--text-secondary);font-size:13px;">OCR 识别结果（未翻译）</span>
+                    <span style="color:var(--text-secondary);font-size:13px;">OCR 识别结果</span>
                 </div>
                 <div class="download-actions">
                     <a href="/${result.raw_output_txt}" download class="download-btn">
@@ -365,9 +419,8 @@ function showResult(result) {
         `;
     }
 
-    // 各语种翻译结果
     Object.entries(translations).forEach(([langCode, langResult]) => {
-        resultsHtml += `
+        html += `
             <div class="translation-result-item">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <span class="lang-badge"><i class="fas fa-language"></i> ${escapeHtml(langResult.lang_name || langCode)}</span>
@@ -377,26 +430,25 @@ function showResult(result) {
                         <i class="fas fa-file-word"></i> 下载 Word
                     </a>
                     <a href="/${langResult.translated_txt}" download class="download-btn">
-                        <i class="fas fa-file-lines"></i> 下载翻译文本
+                        <i class="fas fa-file-lines"></i> 下载译文文本
                     </a>
                 </div>
             </div>
         `;
     });
 
-    translationResults.innerHTML = resultsHtml;
+    translationResults.innerHTML = html;
 }
 
-// ─────────────────────────────────────────────
-// Reset & Utilities
-// ─────────────────────────────────────────────
 function resetPage() {
     clearFile();
     stopPolling();
+    clearLog();
+    removeRetryButton();
     uploadSection.style.display = 'block';
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';
-    updateProgress(0, '正在提交任务...');
+    updateProgress(0, '等待开始处理');
 }
 
 async function safeReadError(response) {
@@ -421,4 +473,8 @@ function escapeHtml(value) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+}
+
+function getModelDisplayName(name) {
+    return MODEL_DISPLAY_NAMES[name] || name;
 }

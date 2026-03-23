@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -25,6 +26,9 @@ class TaskQueueService:
         self._worker_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
         self._task_executor: Optional[ThreadPoolExecutor] = None
+        self._task_logs: Dict[str, str] = {}
+        self._last_log_line: Dict[str, str] = {}
+        self._max_log_chars = 50000
 
     async def start(self):
         if self._worker_task and not self._worker_task.done():
@@ -345,6 +349,7 @@ class TaskQueueService:
                 "details": [],
                 "result": result,
                 "error": task.error_message,
+                "stream_log": self._task_logs.get(task_id, ""),
             }
             if task.status == "queued":
                 payload["queue_position"] = tasks_ahead + 1
@@ -354,6 +359,7 @@ class TaskQueueService:
 
     def _create_db_task(self, *, task_type: str, filename: str, params: Dict[str, Any], input_files: Dict[str, Any]):
         task_id = str(uuid.uuid4())
+        self._set_task_log(task_id, f"[queue] 任务已提交，等待处理: {filename}")
         with SessionLocal() as db:
             task = task_repo.create_task(
                 db,
@@ -373,8 +379,32 @@ class TaskQueueService:
             task_repo.update_task_input_files(db, task_id, json.dumps(input_files, ensure_ascii=False))
 
     def _fail_reserved_task(self, task_id: str, exc: Exception) -> None:
+        self._append_task_log(task_id, f"[error] 保存上传文件失败: {exc}")
         with SessionLocal() as db:
             task_repo.fail_task(db, task_id, f"保存上传文件失败: {exc}")
+
+    def _trim_task_log(self, text: str) -> str:
+        if len(text) <= self._max_log_chars:
+            return text
+        return text[-self._max_log_chars :]
+
+    def _set_task_log(self, task_id: str, text: str) -> None:
+        normalized = self._trim_task_log(text or "")
+        self._task_logs[task_id] = normalized
+        lines = [line for line in normalized.splitlines() if line.strip()]
+        if lines:
+            self._last_log_line[task_id] = lines[-1]
+
+    def _append_task_log(self, task_id: str, message: str) -> None:
+        line = (message or "").strip()
+        if not line:
+            return
+        if self._last_log_line.get(task_id) == line:
+            return
+        current = self._task_logs.get(task_id, "")
+        combined = f"{current}\n{line}" if current else line
+        self._task_logs[task_id] = self._trim_task_log(combined)
+        self._last_log_line[task_id] = line
 
     async def _save_single_upload(self, file: UploadFile, folder: str, display_no: str, task_id: str):
         upload_dir = Path(settings.UPLOAD_DIR) / folder / display_no
@@ -409,10 +439,12 @@ class TaskQueueService:
             display_no = task.display_no
 
         async def update(progress: int, message: str):
+            self._append_task_log(task_id, f"[{progress:>3}%] {message}")
             with SessionLocal() as db:
                 task_repo.update_task_progress(db, task_id, progress=progress, message=message, status="running")
 
         try:
+            self._append_task_log(task_id, f"[start] 开始处理任务类型: {task_type}")
             if task_type == "ocr":
                 result = await execute_ocr_task_from_path(
                     task_id=task_id,
@@ -449,7 +481,12 @@ class TaskQueueService:
                     result_json=json.dumps(result, ensure_ascii=False) if result is not None else None,
                     output_path=output_path,
                 )
+            self._append_task_log(task_id, "[done] 任务处理完成")
         except Exception as exc:
+            self._append_task_log(task_id, f"[error] {type(exc).__name__}: {exc}")
+            brief_tb = traceback.format_exc(limit=5)
+            if brief_tb:
+                self._append_task_log(task_id, brief_tb.rstrip())
             with SessionLocal() as db:
                 task_repo.fail_task(db, task_id, str(exc))
 
@@ -474,7 +511,7 @@ class TaskQueueService:
         job = asyncio.create_task(
             run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no)
         )
-        await self._mirror_progress(job, lambda: get_number_check_progress(task_id), update)
+        await self._mirror_progress(task_id, job, lambda: get_number_check_progress(task_id), update)
         return await job
 
     async def _execute_zhongfanyi(
@@ -500,7 +537,7 @@ class TaskQueueService:
                 session_rule_text=params.get("session_rule_text"),
             ),
         )
-        await self._mirror_progress(job, lambda: zf_service.get_task_progress(task_id), update)
+        await self._mirror_progress(task_id, job, lambda: zf_service.get_task_progress(task_id), update)
         return await job
 
     async def _execute_alignment(
@@ -524,7 +561,7 @@ class TaskQueueService:
                 **params,
             )
         )
-        await self._mirror_progress(job, lambda: alignment_service.get_alignment_progress(task_id), update)
+        await self._mirror_progress(task_id, job, lambda: alignment_service.get_alignment_progress(task_id), update)
         status = alignment_service.get_alignment_progress(task_id) or {}
         return status.get("result") or {}
 
@@ -574,6 +611,7 @@ class TaskQueueService:
 
     async def _mirror_progress(
         self,
+        task_id: str,
         job: asyncio.Task,
         getter: Callable[[], Optional[Dict[str, Any]]],
         update: Callable[[int, str], Any],
@@ -581,6 +619,8 @@ class TaskQueueService:
         while not job.done():
             snapshot = getter()
             if snapshot:
+                if snapshot.get("stream_log"):
+                    self._set_task_log(task_id, snapshot.get("stream_log", ""))
                 progress = snapshot.get("progress", 0)
                 message = snapshot.get("message") or snapshot.get("status") or "正在处理"
                 await update(progress, message)

@@ -43,14 +43,26 @@ def _init_task(task_id: str) -> None:
         "progress": 0,
         "message": "初始化...",
         "details": [],
+        "stream_log": "[init] 任务已创建",
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
     }
 
 
+def _append_log(task_id: str, message: str) -> None:
+    if task_id not in _task_progress:
+        return
+    text = (message or "").strip()
+    if not text:
+        return
+    current = _task_progress[task_id].get("stream_log", "")
+    _task_progress[task_id]["stream_log"] = f"{current}\n{text}" if current else text
+
+
 def _update_task(task_id: str, message: str, progress: int = 0, details: Optional[list] = None) -> None:
     if task_id not in _task_progress:
         return
+    _append_log(task_id, f"[{min(100, progress):>3}%] {message}")
     _task_progress[task_id].update(
         message=message,
         progress=min(100, progress),
@@ -62,6 +74,7 @@ def _update_task(task_id: str, message: str, progress: int = 0, details: Optiona
 def _complete_task(task_id: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:
     if task_id not in _task_progress:
         return
+    _append_log(task_id, "[done] 处理完成" if not error else f"[error] {error}")
     _task_progress[task_id].update(
         status="done" if not error else "failed",
         progress=100,

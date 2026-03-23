@@ -16,11 +16,11 @@ DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_GOOGLE
 
 GEMINI_ROUTE_OPTIONS: Dict[str, Dict[str, str]] = {
     GEMINI_ROUTE_GOOGLE: {
-        "label": "线路1 Google 官方",
+        "label": "线路1",
         "description": "默认主线路，直连 Google 官方 Gemini API。",
     },
     GEMINI_ROUTE_OPENROUTER: {
-        "label": "线路2 OpenRouter",
+        "label": "线路2",
         "description": "备用线路，通过 OpenRouter 转发 Gemini 模型。",
     },
 }
@@ -39,6 +39,15 @@ def normalize_gemini_route(route: Optional[str]) -> str:
 def normalize_google_model(model: str) -> str:
     if model.startswith("google/"):
         return model.split("/", 1)[1]
+    return model
+
+
+def resolve_model_for_route(model: str, route: Optional[str]) -> str:
+    normalized_route = normalize_gemini_route(route)
+    if normalized_route == GEMINI_ROUTE_GOOGLE:
+        return normalize_google_model(model)
+    if "/" not in model:
+        return f"google/{model}"
     return model
 
 
@@ -80,13 +89,14 @@ def generate_text(
     log_callback: GeminiLogCallback = None,
 ) -> str:
     normalized = ensure_gemini_route_configured(route)
+    resolved_model = resolve_model_for_route(model, normalized)
     if log_callback:
-        log_callback(f"[gemini] route={normalized}, model={model}")
+        log_callback(f"[gemini] route={normalized}, model={resolved_model}")
 
     if normalized == GEMINI_ROUTE_GOOGLE:
         client = genai.Client(api_key=settings.GOOGLE_API_KEY)
         response = client.models.generate_content(
-            model=normalize_google_model(model),
+            model=resolved_model,
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
@@ -98,7 +108,7 @@ def generate_text(
 
     client = OpenAI(base_url=settings.OPENROUTER_BASE_URL, api_key=settings.OPENROUTER_API_KEY, timeout=timeout)
     response = client.chat.completions.create(
-        model=model,
+        model=resolved_model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -124,13 +134,14 @@ def generate_vision_html(
     log_callback: GeminiLogCallback = None,
 ) -> str:
     normalized = ensure_gemini_route_configured(route)
+    resolved_model = resolve_model_for_route(model, normalized)
     if log_callback:
-        log_callback(f"[gemini-vision] route={normalized}, model={model}, mime={mime_type}")
+        log_callback(f"[gemini-vision] route={normalized}, model={resolved_model}, mime={mime_type}")
 
     if normalized == GEMINI_ROUTE_GOOGLE:
         client = genai.Client(api_key=settings.GOOGLE_API_KEY)
         response = client.models.generate_content(
-            model=normalize_google_model(model),
+            model=resolved_model,
             contents=[
                 types.Content(
                     role="user",
@@ -156,7 +167,7 @@ def generate_vision_html(
         image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     response = client.chat.completions.create(
-        model=model,
+        model=resolved_model,
         messages=[
             {"role": "system", "content": system_prompt},
             {

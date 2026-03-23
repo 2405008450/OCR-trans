@@ -63,12 +63,7 @@ AVAILABLE_MODELS = {
         "description": "PPT推荐-增强，速度稍慢，100万上下文，65K输出",
         "max_output": 65536,
     },
-    "Google: Gemini 3 Pro Preview": {
-        "id": "google/gemini-3-pro-preview",
-        "description": "最强推理，100万上下文，65K输出",
-        "max_output": 65536,
-    },
-        "Google: google/gemini-3.1-pro-preview": {
+    "Google: google/gemini-3.1-pro-preview": {
         "id": "google/gemini-3.1-pro-preview",
         "description": "最强推理，100万上下文，65K输出",
         "max_output": 65536,

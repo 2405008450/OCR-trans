@@ -10,6 +10,10 @@ from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
 PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
+    "gemini-3.1-flash-lite-preview": {
+        "label": "极速版V2",
+        "description": "更轻量的极速 OCR 模型，适合追求速度的 PDF / 图片转 Word 场景。",
+    },
     "google/gemini-3-flash-preview": {
         "label": "Google Gemini 3 Flash Preview",
         "description": "速度更快，适合常规 PDF / 图片转 Word 场景。",

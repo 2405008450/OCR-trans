@@ -4,13 +4,12 @@ let modelConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultRoute = 'google';
+
 const MODEL_DISPLAY_NAMES = {
-    'google/gemini-2.5-flash': '快速版V1',
-    'google/gemini-2.5-pro': '增强版V1',
+    'gemini-3.1-flash-lite-preview': '极速版V2',
+    'google/gemini-3.1-flash-lite-preview': '极速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
     'google/gemini-3.1-pro-preview': '增强版V2',
-    'Google Gemini 2.5 Flash': '快速版V1',
-    'Google Gemini 2.5 Pro': '增强版V1',
     'Google Gemini 3 Flash Preview': '快速版V2',
     'Google Gemini 3.1 Pro Preview': '增强版V2',
 };
@@ -37,10 +36,15 @@ const progressText = document.getElementById('progressText');
 const resultStats = document.getElementById('resultStats');
 const resultGrid = document.getElementById('resultGrid');
 
+let streamLogWrap = null;
+let streamLogEl = null;
+let retryBtn = null;
+
 init();
 
 async function init() {
     ensureGeminiRouteSelect();
+    ensureLogPanel();
     bindEvents();
     await loadConfig();
     updateModelInfo();
@@ -51,24 +55,50 @@ function ensureGeminiRouteSelect() {
     const panel = document.querySelector('.options-panel');
     if (!panel) return;
     const wrapper = document.createElement('div');
-    wrapper.className = "option-group option-card";
-    wrapper.innerHTML = `<label for="geminiRouteSelect">Gemini Route</label><div class="field-wrap"><i class="fas fa-route"></i><select id="geminiRouteSelect"></select></div>`;
+    wrapper.className = 'option-group option-card';
+    wrapper.innerHTML = [
+        '<label for="geminiRouteSelect">路线切换</label>',
+        '<div class="field-wrap">',
+        '<i class="fas fa-route"></i>',
+        '<select id="geminiRouteSelect"></select>',
+        '</div>',
+    ].join('');
     panel.insertBefore(wrapper, panel.children[1] || null);
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 
+function ensureLogPanel() {
+    streamLogWrap = document.getElementById('streamLogWrap');
+    streamLogEl = document.getElementById('streamLog');
+    if (streamLogWrap && streamLogEl) return;
+
+    const card = processingSection?.querySelector('.processing-card');
+    if (!card) return;
+
+    streamLogWrap = document.createElement('div');
+    streamLogWrap.id = 'streamLogWrap';
+    streamLogWrap.className = 'stream-log-wrap';
+    streamLogWrap.style.display = 'none';
+    streamLogWrap.innerHTML = [
+        '<div class="stream-log-head"><i class="fas fa-terminal"></i><span>后端日志</span></div>',
+        '<pre id="streamLog" class="stream-log"></pre>',
+    ].join('');
+    card.appendChild(streamLogWrap);
+    streamLogEl = document.getElementById('streamLog');
+}
+
 function bindEvents() {
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', handleDragOver);
-    uploadArea.addEventListener('drop', handleDrop);
-    fileInput.addEventListener('change', handleFileSelect);
-    btnRemove.addEventListener('click', (event) => {
+    uploadArea?.addEventListener('click', () => fileInput?.click());
+    uploadArea?.addEventListener('dragover', handleDragOver);
+    uploadArea?.addEventListener('drop', handleDrop);
+    fileInput?.addEventListener('change', handleFileSelect);
+    btnRemove?.addEventListener('click', (event) => {
         event.stopPropagation();
         clearFile();
     });
-    btnProcess.addEventListener('click', processFile);
-    btnNewTask.addEventListener('click', resetPage);
-    modelSelect.addEventListener('change', updateModelInfo);
+    btnProcess?.addEventListener('click', processFile);
+    btnNewTask?.addEventListener('click', resetPage);
+    modelSelect?.addEventListener('change', updateModelInfo);
 }
 
 async function loadConfig() {
@@ -84,24 +114,39 @@ async function loadConfig() {
         defaultRoute = data.default_route || defaultRoute;
     } catch (error) {
         console.error(error);
-        routeConfig = { google: { label: '???1 Google ???' }, openrouter: { label: '???2 OpenRouter' } };
+        routeConfig = {
+            google: { label: '线路1' },
+            openrouter: { label: '线路2' },
+        };
         modelConfig = {
+            'gemini-3.1-flash-lite-preview': {
+                label: '极速版V2',
+                description: '更轻量的极速 OCR 模型，适合追求速度的 PDF / 图片转 Word 场景。',
+            },
             'google/gemini-3-flash-preview': {
-                label: getModelDisplayName('google/gemini-3-flash-preview'),
+                label: '快速版V2',
                 description: '速度更快，适合常规 PDF / 图片转 Word 场景。',
             },
             'google/gemini-3.1-pro-preview': {
-                label: getModelDisplayName('google/gemini-3.1-pro-preview'),
-                description: '更强调复杂版面与细节理解，适合高难度文档。',
+                label: '增强版V2',
+                description: '更强的复杂版面理解能力，适合高难度文档。',
             },
         };
     }
 
+    renderModels();
+    renderRoutes();
+}
+
+function renderModels() {
     modelSelect.innerHTML = '';
     Object.entries(modelConfig).forEach(([value, info]) => {
         modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
     });
     modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
+}
+
+function renderRoutes() {
     geminiRouteSelect.innerHTML = '';
     Object.entries(routeConfig).forEach(([value, info]) => {
         geminiRouteSelect.add(new Option(info.label || value, value));
@@ -164,12 +209,13 @@ function clearFile() {
 }
 
 async function processFile() {
-    if (!selectedFile) {
-        return;
-    }
+    if (!selectedFile) return;
 
     uploadSection.style.display = 'none';
+    resultSection.style.display = 'none';
     processingSection.style.display = 'block';
+    clearLog();
+    removeRetryButton();
     updateProgress(5, '正在提交任务...');
 
     try {
@@ -194,8 +240,7 @@ async function processFile() {
         const data = await response.json();
         startPolling(data.task_id);
     } catch (error) {
-        alert(`处理失败: ${error.message}`);
-        resetPage();
+        showFailure(error.message);
     }
 }
 
@@ -221,18 +266,18 @@ async function pollStatus(taskId) {
 
         const data = await response.json();
         updateProgress(data.progress || 0, data.message || '正在处理中...');
+        syncLog(data.stream_log || data.result?.stream_log || '');
 
         if (data.status === 'done') {
             stopPolling();
             showResult(data.result || {});
         } else if (data.status === 'failed') {
             stopPolling();
-            throw new Error(data.error || '转换失败');
+            showFailure(data.error || '转换失败', data.stream_log || '');
         }
     } catch (error) {
         stopPolling();
-        alert(`处理失败: ${error.message}`);
-        resetPage();
+        showFailure(error.message);
     }
 }
 
@@ -240,6 +285,41 @@ function updateProgress(percent, message) {
     progressFill.style.width = `${percent}%`;
     progressText.textContent = `${Math.round(percent)}%`;
     processingStatus.textContent = message;
+}
+
+function syncLog(logText) {
+    if (!streamLogWrap || !streamLogEl || !logText) return;
+    streamLogWrap.style.display = 'block';
+    streamLogEl.textContent = logText;
+    streamLogEl.scrollTop = streamLogEl.scrollHeight;
+}
+
+function clearLog() {
+    if (!streamLogWrap || !streamLogEl) return;
+    streamLogWrap.style.display = 'none';
+    streamLogEl.textContent = '';
+}
+
+function showFailure(message, logText = '') {
+    processingSection.style.display = 'block';
+    syncLog(logText);
+    updateProgress(100, message || '处理失败');
+    processingStatus.textContent = message || '处理失败';
+    removeRetryButton();
+
+    retryBtn = document.createElement('button');
+    retryBtn.className = 'btn-secondary';
+    retryBtn.style.marginTop = '18px';
+    retryBtn.innerHTML = '<i class="fas fa-rotate-right"></i> 重新开始';
+    retryBtn.addEventListener('click', resetPage);
+    processingSection.querySelector('.processing-card')?.appendChild(retryBtn);
+}
+
+function removeRetryButton() {
+    if (retryBtn) {
+        retryBtn.remove();
+        retryBtn = null;
+    }
 }
 
 function showResult(result) {
@@ -287,10 +367,12 @@ function showResult(result) {
 function resetPage() {
     clearFile();
     stopPolling();
+    clearLog();
+    removeRetryButton();
     uploadSection.style.display = 'block';
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';
-    updateProgress(0, '正在提交任务...');
+    updateProgress(0, '等待开始处理');
 }
 
 async function safeReadError(response) {
@@ -303,12 +385,8 @@ async function safeReadError(response) {
 }
 
 function formatFileSize(size) {
-    if (size < 1024) {
-        return `${size} B`;
-    }
-    if (size < 1024 * 1024) {
-        return `${(size / 1024).toFixed(1)} KB`;
-    }
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
     return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 

@@ -61,7 +61,7 @@ function ensureGeminiRouteSelect() {
     if (modelGroups.length < 2) return;
     const wrapper = document.createElement('div');
     wrapper.className = "option-group";
-    wrapper.innerHTML = `<label><i class="fas fa-route"></i> Gemini Route:</label><select id="geminiRouteSelect"></select><div class="model-desc" id="geminiRouteDesc"></div>`;
+    wrapper.innerHTML = `<label><i class="fas fa-route"></i> 路线切换:</label><select id="geminiRouteSelect"></select><div class="model-desc" id="geminiRouteDesc"></div>`;
     modelGroups[0].insertAdjacentElement('afterend', wrapper);
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
     geminiRouteDesc = document.getElementById('geminiRouteDesc');
@@ -127,7 +127,7 @@ function populateDefaults() {
     modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
-    geminiRouteSelect.innerHTML = '<option value="google">???1 Google ???</option><option value="openrouter">???2 OpenRouter</option>';
+    geminiRouteSelect.innerHTML = '<option value="google">线路1</option><option value="openrouter">线路2</option>';
     geminiRouteSelect.value = "google";
     updateRouteInfo();
     updateModelInfo();
