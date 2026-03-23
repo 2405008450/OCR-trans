@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import shutil
 import sys
 import threading
@@ -21,6 +22,32 @@ logger = logging.getLogger("app.number_check")
 
 # 专检模块导入锁：防止并发任务修改 sys.path / sys.modules 时互相干扰
 _specialist_import_lock = threading.Lock()
+
+# ── 客户端日志脱敏规则（服务器终端日志不受影响）────────────────────────────
+# 规则按顺序依次替换，(pattern, replacement) 格式
+_CLIENT_LOG_SANITIZE_RULES: List[tuple] = [
+    # [config] 整行：隐藏模型名和路线，仅保留结构标记
+    (re.compile(r'\[config\]\s+route=\S+,\s*model=\S+'), '[config] 任务已初始化'),
+    (re.compile(r'\[config\]\s+.*'), '[config] 任务已初始化'),
+    # LLM 对比行：路线= / 模型= 后面的值
+    (re.compile(r'(路线=)\S+'), r'\1***'),
+    (re.compile(r'(模型=)\S+'), r'\1***'),
+    # 英文 route= / model= 后面的值（不区分大小写）
+    (re.compile(r'(?i)(route=)\S+'), r'\1***'),
+    (re.compile(r'(?i)(model=)\S+'), r'\1***'),
+    # gemini 系列模型名（如 gemini-3-flash-preview、gemini-3.1-pro-preview 等）
+    (re.compile(r'(?i)gemini[-/][\w.\-]+'), '[AI模型]'),
+    # openrouter / google 作为路线标识
+    (re.compile(r'\bopenrouter\b', re.IGNORECASE), '[路线]'),
+    (re.compile(r'\bgoogle\b', re.IGNORECASE), '[路线]'),
+]
+
+
+def _sanitize_client_log(line: str) -> str:
+    """对即将写入客户端 stream_log 的单行内容进行脱敏。"""
+    for pattern, replacement in _CLIENT_LOG_SANITIZE_RULES:
+        line = pattern.sub(replacement, line)
+    return line
 
 NUMBER_CHECK_MODELS: Dict[str, Dict[str, str]] = {
     "gemini-3-flash-preview": {
@@ -58,7 +85,7 @@ def normalize_number_check_model(model_name: Optional[str]) -> str:
 def _append_stream_log(task_id: str, message: str) -> None:
     if task_id not in _task_progress:
         return
-    line = (message or "").strip()
+    line = _sanitize_client_log((message or "").strip())
     if not line:
         return
     current = _task_progress[task_id].get("stream_log", "")
