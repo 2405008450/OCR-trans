@@ -63,16 +63,41 @@ async def execute_pdf2docx_task_from_path(
     docx_output_path = task_output_dir / f"{input_file.stem}.docx"
 
     await _maybe_report(progress_callback, 5, "文件已入队，准备调用视觉模型")
+
+    _page_state: Dict[str, Any] = {"current": 0, "total": 0}
+
+    def _page_cb(current: int, total: int):
+        _page_state["current"] = current
+        _page_state["total"] = total
+        pct = 5 + int(current / max(total, 1) * 60)
+        pct = min(pct, 65)
+        if progress_callback:
+            import asyncio as _aio
+            try:
+                _loop = _aio.get_event_loop()
+                if _loop.is_running():
+                    _aio.run_coroutine_threadsafe(
+                        progress_callback(pct, f"正在 OCR 第 {current}/{total} 页"),
+                        _loop,
+                    )
+                else:
+                    _loop.run_until_complete(progress_callback(pct, f"正在 OCR 第 {current}/{total} 页"))
+            except Exception:
+                pass
+
     raw_text = await loop.run_in_executor(
         executor,
         lambda: ocr_file(
             file_path=input_path,
             model=model,
             gemini_route=gemini_route,
+            page_progress_callback=_page_cb,
         ),
     )
 
-    await _maybe_report(progress_callback, 70, "OCR 完成，正在整理中间文本")
+    total_pages = _page_state.get("total", 0)
+    pages_msg = f"OCR 完成（共 {total_pages} 页），正在整理中间文本" if total_pages else "OCR 完成，正在整理中间文本"
+    await _maybe_report(progress_callback, 70, pages_msg)
     raw_output_path.write_text(raw_text, encoding="utf-8")
 
     await _maybe_report(progress_callback, 85, "正在生成 Word 文档")

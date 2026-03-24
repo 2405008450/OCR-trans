@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
         case_sensitive = True
+        extra = "ignore"
 
     @property
     def DEBUG_ENABLED(self) -> bool:

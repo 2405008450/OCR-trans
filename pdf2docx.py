@@ -138,9 +138,11 @@ def ocr_file(
     api_key: str = "",
     model: str = "google/gemini-3.1-pro-preview",
     gemini_route: str = "google",
+    page_progress_callback=None,
 ) -> str:
     """调用 LLM 对图片或 PDF 进行 OCR，返回混合 HTML/Markdown 文本。
     PDF 会逐页渲染为图片后分页发送，避免大文件直传超限。
+    page_progress_callback(current_page, total_pages) 可选，用于报告逐页进度。
     """
     ext = Path(file_path).suffix.lower()
 
@@ -157,6 +159,11 @@ def ocr_file(
 
         for i, page in enumerate(doc):
             print(f"\n🔄 正在处理第 {i + 1}/{total} 页...")
+            if page_progress_callback:
+                try:
+                    page_progress_callback(i + 1, total)
+                except Exception:
+                    pass
             pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_b64 = base64.standard_b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode("utf-8")
             text = _ocr_single_image(img_b64, "image/jpeg", model, gemini_route=gemini_route)
