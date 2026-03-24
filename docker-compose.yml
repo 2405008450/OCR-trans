@@ -33,7 +33,9 @@ services:
       - ALLOWED_ORIGINS=*
     volumes:
       # Google ADC 凭据（Vertex AI 认证）
-      - /root/.config/gcloud:/root/.config/gcloud:ro
+      # Linux: GCLOUD_CONFIG_DIR=/root/.config/gcloud
+      # Windows: GCLOUD_CONFIG_DIR=C:\Users\你的用户名\AppData\Roaming\gcloud
+      - ${GCLOUD_CONFIG_DIR:-/root/.config/gcloud}:/root/.config/gcloud:ro
       # 持久化上传和输出文件（容器重启不丢失）
       - ./data:/app/data
       - ./uploads:/app/uploads
