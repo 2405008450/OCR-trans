@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import random
+import time
 from typing import Callable, Dict, Optional
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 from openai import OpenAI
 
 from app.core.config import settings
@@ -20,13 +23,13 @@ DEFAULT_GEMINI_ROUTE = (
 )
 
 GEMINI_ROUTE_OPTIONS: Dict[str, Dict[str, str]] = {
-    GEMINI_ROUTE_OPENROUTER: {
-        "label": "线路1（推荐）",
-        "description": "通过 OpenRouter 转发 Gemini 模型，推荐使用。",
-    },
     GEMINI_ROUTE_GOOGLE: {
-        "label": "线路2（直连）",
-        "description": "直连 Google 官方 Gemini API，需要网络支持。",
+        "label": "线路1 (推荐)",
+        "description": "主线路，直连官方 API，速度更快、更稳定。",
+    },
+    GEMINI_ROUTE_OPENROUTER: {
+        "label": "线路2",
+        "description": "备用线路，通过中转服务转发，适合主线路不可用时使用。",
     },
 }
 
@@ -59,12 +62,50 @@ def resolve_model_for_route(model: str, route: Optional[str]) -> str:
 def ensure_gemini_route_configured(route: Optional[str]) -> str:
     normalized = normalize_gemini_route(route)
     if normalized == GEMINI_ROUTE_GOOGLE:
-        if not settings.GOOGLE_API_KEY:
-            raise ValueError("未配置 GOOGLE_API_KEY，无法使用 Google 官方 Gemini 线路")
+        if not settings.VERTEX_PROJECT_ID:
+            raise ValueError("未配置 VERTEX_PROJECT_ID，无法使用 Google Vertex AI 线路")
         return normalized
     if not settings.OPENROUTER_API_KEY:
         raise ValueError("未配置 OPENROUTER_API_KEY，无法使用 OpenRouter Gemini 线路")
     return normalized
+
+
+def _get_vertex_client() -> genai.Client:
+    return genai.Client(
+        vertexai=True,
+        project=settings.VERTEX_PROJECT_ID,
+        location=settings.VERTEX_LOCATION,
+    )
+
+
+def _generate_with_retry(
+    model: str,
+    contents,
+    config=None,
+    max_retries: int = 6,
+    log_callback: GeminiLogCallback = None,
+):
+    client = _get_vertex_client()
+    delay = 2.0
+    for attempt in range(max_retries):
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except ClientError as e:
+            msg = str(e)
+            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                if attempt == max_retries - 1:
+                    raise
+                sleep_s = delay + random.uniform(0, 1.5)
+                if log_callback:
+                    log_callback(f"[vertex] 429 限流，等待 {sleep_s:.1f}s 后重试... ({attempt + 1}/{max_retries})")
+                time.sleep(sleep_s)
+                delay *= 2
+            else:
+                raise
 
 
 def _extract_google_text(response) -> str:
@@ -99,8 +140,7 @@ def generate_text(
         log_callback(f"[gemini] route={normalized}, model={resolved_model}")
 
     if normalized == GEMINI_ROUTE_GOOGLE:
-        client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-        response = client.models.generate_content(
+        response = _generate_with_retry(
             model=resolved_model,
             contents=user_prompt,
             config=types.GenerateContentConfig(
@@ -108,6 +148,7 @@ def generate_text(
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
             ),
+            log_callback=log_callback,
         )
         return (_extract_google_text(response) or "").strip()
 
@@ -158,8 +199,7 @@ def generate_vision_html(
         log_callback(f"[gemini-vision] route={normalized}, model={resolved_model}, mime={mime_type}")
 
     if normalized == GEMINI_ROUTE_GOOGLE:
-        client = genai.Client(api_key=settings.GOOGLE_API_KEY)
-        response = client.models.generate_content(
+        response = _generate_with_retry(
             model=resolved_model,
             contents=[
                 types.Content(
@@ -175,6 +215,7 @@ def generate_vision_html(
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
             ),
+            log_callback=log_callback,
         )
         return (_extract_google_text(response) or "").strip()
 

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY", "")
     GEMINI_DEFAULT_ROUTE: str = os.getenv("GEMINI_DEFAULT_ROUTE", "google")
 
+    VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", "gen-lang-client-0128671098")
+    VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "global")
+
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 
