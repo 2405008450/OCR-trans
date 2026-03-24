@@ -183,6 +183,46 @@ def fail_task(db: Session, task_id: str, error_message: str) -> Optional[Task]:
     return task
 
 
+def cancel_task(db: Session, task_id: str) -> Optional[Task]:
+    task = get_task_by_task_id(db, task_id)
+    if not task:
+        return None
+    if task.status in ("done", "failed", "cancelled"):
+        return task
+
+    now = _now()
+    task.cancel_requested = True
+    if task.status == "queued":
+        task.status = "cancelled"
+        task.message = "任务已取消"
+        task.finished_at = now
+    else:
+        task.message = "正在取消..."
+    task.updated_at = now
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def is_cancel_requested(db: Session, task_id: str) -> bool:
+    task = get_task_by_task_id(db, task_id)
+    return bool(task and task.cancel_requested)
+
+
+def mark_cancelled(db: Session, task_id: str) -> Optional[Task]:
+    task = get_task_by_task_id(db, task_id)
+    if not task:
+        return None
+    now = _now()
+    task.status = "cancelled"
+    task.message = "任务已被用户取消"
+    task.finished_at = now
+    task.updated_at = now
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def requeue_running_tasks(db: Session, *, task_type: Optional[str] = None) -> int:
     query = db.query(Task).filter(Task.status == "running")
     if task_type:
@@ -262,5 +302,6 @@ def count_by_status(db: Session) -> Dict[str, Any]:
         "running": counts.get("running", 0),
         "done": counts.get("done", 0),
         "failed": counts.get("failed", 0),
+        "cancelled": counts.get("cancelled", 0),
         "by_type": by_type,
     }

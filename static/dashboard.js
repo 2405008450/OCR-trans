@@ -11,10 +11,11 @@ let detailTimer = null;
 let openTaskId = null;
 
 const STATUS_BADGE = {
-  queued:  { cls: 'badge-queued',  icon: 'fa-clock',        text: '排队中' },
-  running: { cls: 'badge-running', icon: 'fa-spinner fa-spin', text: '处理中' },
-  done:    { cls: 'badge-done',    icon: 'fa-check',        text: '已完成' },
-  failed:  { cls: 'badge-failed',  icon: 'fa-xmark',        text: '失败' },
+  queued:    { cls: 'badge-queued',    icon: 'fa-clock',           text: '排队中' },
+  running:   { cls: 'badge-running',   icon: 'fa-spinner fa-spin', text: '处理中' },
+  done:      { cls: 'badge-done',      icon: 'fa-check',           text: '已完成' },
+  failed:    { cls: 'badge-failed',    icon: 'fa-xmark',           text: '失败' },
+  cancelled: { cls: 'badge-cancelled', icon: 'fa-ban',             text: '已取消' },
 };
 
 
@@ -73,6 +74,7 @@ async function loadStats(silent) {
     document.getElementById('statRunning').textContent = d.running ?? 0;
     document.getElementById('statDone').textContent = d.done ?? 0;
     document.getElementById('statFailed').textContent = d.failed ?? 0;
+    document.getElementById('statCancelled').textContent = d.cancelled ?? 0;
   } catch (e) { if (!silent) console.error('loadStats', e); }
 }
 
@@ -114,7 +116,11 @@ function renderTable(items) {
       <td><span class="badge ${badge.cls}"><i class="fas ${badge.icon}"></i> ${badge.text}</span></td>
       <td><div class="mini-progress"><div class="mini-progress-fill" style="width:${progress}%"></div></div> <span style="font-size:12px;color:var(--muted)">${progress}%</span></td>
       <td class="cell-time">${time}</td>
-      <td><button class="btn-detail" onclick="event.stopPropagation();openDetail('${t.task_id}')"><i class="fas fa-eye"></i> 详情</button></td>
+      <td>
+        <button class="btn-detail" onclick="event.stopPropagation();openDetail('${t.task_id}')"><i class="fas fa-eye"></i> 详情</button>
+        ${(t.status === 'queued' || t.status === 'running') && !t.cancel_requested ? `<button class="btn-cancel-table" onclick="event.stopPropagation();cancelTask('${t.task_id}')" title="取消任务"><i class="fas fa-ban"></i></button>` : ''}
+        ${t.cancel_requested && t.status === 'running' ? `<span style="font-size:11px;color:#94a3b8;margin-left:4px">取消中...</span>` : ''}
+      </td>
     </tr>`;
   }).join('');
 }
@@ -172,7 +178,7 @@ async function loadDetail(taskId, silent) {
     if (!resp.ok) return;
     const d = await resp.json();
     renderDetail(d);
-    if (d.status === 'done' || d.status === 'failed') stopDetailPolling();
+    if (d.status === 'done' || d.status === 'failed' || d.status === 'cancelled') stopDetailPolling();
   } catch (e) { if (!silent) console.error('loadDetail', e); }
 }
 
@@ -231,6 +237,8 @@ function renderDetail(d) {
         <span style="font-weight:700;min-width:40px">${progress}%</span>
       </div>
       <div style="color:var(--muted);font-size:13px;margin-top:6px">${escHtml(d.message || '')}</div>
+      ${(d.status === 'queued' || d.status === 'running') && !d.cancel_requested ? `<button class="btn-cancel" style="margin-top:10px" onclick="cancelTask('${d.task_id}')"><i class="fas fa-ban"></i> 取消任务</button>` : ''}
+      ${d.cancel_requested && d.status === 'running' ? `<div style="margin-top:10px;font-size:13px;color:#94a3b8"><i class="fas fa-spinner fa-spin"></i> 正在取消，等待当前步骤完成...</div>` : ''}
     </div>
 
     <div class="detail-section">
@@ -256,6 +264,20 @@ function downloadFile(taskId, filePath, friendlyName) {
   if (friendlyName) url += `&download_name=${encodeURIComponent(friendlyName)}`;
   const a = document.createElement('a');
   a.href = url; a.download = friendlyName || ''; a.click();
+}
+
+async function cancelTask(taskId) {
+  if (!confirm('确定要取消该任务吗？运行中的任务将在当前步骤完成后中止。')) return;
+  try {
+    const resp = await fetch(`/task/${taskId}/cancel`, { method: 'POST' });
+    const d = await resp.json();
+    if (!resp.ok) { alert(d.detail || '取消失败'); return; }
+    loadAll();
+    if (openTaskId === taskId) loadDetail(taskId);
+  } catch (e) {
+    console.error('cancelTask', e);
+    alert('取消请求失败，请重试');
+  }
 }
 
 // ── Helpers ──

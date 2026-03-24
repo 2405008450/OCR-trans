@@ -21,6 +21,10 @@ from app.service.number_check_service import run_number_check_task
 from app.service.pdf2docx_service import execute_pdf2docx_task_from_path
 
 
+class TaskCancelledError(Exception):
+    pass
+
+
 class TaskQueueService:
     def __init__(self):
         self._worker_task: Optional[asyncio.Task] = None
@@ -446,6 +450,11 @@ class TaskQueueService:
             display_no = task.display_no
 
         async def update(progress: int, message: str):
+            with SessionLocal() as db:
+                if task_repo.is_cancel_requested(db, task_id):
+                    task_repo.mark_cancelled(db, task_id)
+                    self._append_task_log(task_id, "[cancel] 用户取消了任务")
+                    raise TaskCancelledError("用户取消了任务")
             self._append_task_log(task_id, f"[{progress:>3}%] {message}")
             with SessionLocal() as db:
                 task_repo.update_task_progress(db, task_id, progress=progress, message=message, status="running")
@@ -491,6 +500,8 @@ class TaskQueueService:
                     output_files_json=json.dumps(output_files, ensure_ascii=False) if output_files else None,
                 )
             self._append_task_log(task_id, "[done] 任务处理完成")
+        except TaskCancelledError:
+            self._append_task_log(task_id, "[cancel] 任务已被用户取消")
         except Exception as exc:
             self._append_task_log(task_id, f"[error] {type(exc).__name__}: {exc}")
             brief_tb = traceback.format_exc(limit=5)

@@ -47,6 +47,7 @@ def _task_to_dict(t) -> dict:
         "progress": t.progress,
         "message": t.message or "",
         "error": t.error_message,
+        "cancel_requested": bool(t.cancel_requested),
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "started_at": t.started_at.isoformat() if t.started_at else None,
         "finished_at": t.finished_at.isoformat() if t.finished_at else None,
@@ -100,6 +101,18 @@ async def task_detail(task_id: str):
         info["result"] = json.loads(t.result_json or "null")
         info["stream_log"] = task_queue_service._task_logs.get(task_id, "")
     return info
+
+
+@router.post("/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    with SessionLocal() as db:
+        t = task_repo.get_task_by_task_id(db, task_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        if t.status in ("done", "failed", "cancelled"):
+            return {"status": t.status, "message": f"任务已处于终态: {t.status}"}
+        task_repo.cancel_task(db, task_id)
+    return {"status": "ok", "message": "取消请求已提交"}
 
 
 @router.get("/{task_id}/download")

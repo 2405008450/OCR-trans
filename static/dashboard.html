@@ -54,6 +54,7 @@
     .stat-pill.s-running .num{color:var(--cyan)}
     .stat-pill.s-done .num{color:var(--green)}
     .stat-pill.s-failed .num{color:var(--rose)}
+    .stat-pill.s-cancelled .num{color:#94a3b8}
 
     /* ── toolbar ── */
     .toolbar{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap;align-items:center}
@@ -85,6 +86,7 @@
     .badge-running{background:rgba(56,189,248,0.15);color:#7dd3fc}
     .badge-done{background:rgba(34,197,94,0.15);color:#86efac}
     .badge-failed{background:rgba(251,113,133,0.15);color:#fda4af}
+    .badge-cancelled{background:rgba(148,163,184,0.15);color:#94a3b8}
 
     .mini-progress{width:80px;height:6px;border-radius:99px;background:rgba(255,255,255,0.08);overflow:hidden}
     .mini-progress-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--cyan),var(--green));transition:width .3s}
@@ -148,6 +150,16 @@
     .detail-error{padding:14px;border-radius:14px;background:rgba(251,113,133,0.1);
       border:1px solid rgba(251,113,133,0.2);color:#fda4af;font-size:13px;word-break:break-all}
 
+    .btn-cancel{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;
+      border:1px solid rgba(251,113,133,0.4);background:rgba(251,113,133,0.12);color:#fda4af;
+      cursor:pointer;font-size:13px;font-weight:600;transition:background .2s,border-color .2s}
+    .btn-cancel:hover{background:rgba(251,113,133,0.22);border-color:rgba(251,113,133,0.6)}
+    .btn-cancel:disabled{opacity:.4;cursor:not-allowed}
+    .btn-cancel-table{padding:5px 10px;border-radius:8px;border:1px solid rgba(251,113,133,0.3);
+      background:rgba(251,113,133,0.1);color:#fda4af;cursor:pointer;font-size:12px;
+      transition:background .2s}
+    .btn-cancel-table:hover{background:rgba(251,113,133,0.2)}
+
     @media(max-width:768px){
       .stats-row{flex-direction:column}
       .detail-grid{grid-template-columns:1fr}
@@ -197,6 +209,10 @@
     <div class="stat-pill s-failed" data-filter="failed">
       <span class="num" id="statFailed">-</span>
       <span class="label">失败</span>
+    </div>
+    <div class="stat-pill s-cancelled" data-filter="cancelled">
+      <span class="num" id="statCancelled">-</span>
+      <span class="label">已取消</span>
     </div>
   </div>
 

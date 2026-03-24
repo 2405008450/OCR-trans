@@ -72,16 +72,12 @@ async def execute_pdf2docx_task_from_path(
         pct = 5 + int(current / max(total, 1) * 60)
         pct = min(pct, 65)
         if progress_callback:
-            import asyncio as _aio
             try:
-                _loop = _aio.get_event_loop()
-                if _loop.is_running():
-                    _aio.run_coroutine_threadsafe(
-                        progress_callback(pct, f"正在 OCR 第 {current}/{total} 页"),
-                        _loop,
-                    )
-                else:
-                    _loop.run_until_complete(progress_callback(pct, f"正在 OCR 第 {current}/{total} 页"))
+                fut = asyncio.run_coroutine_threadsafe(
+                    progress_callback(pct, f"正在 OCR 第 {current}/{total} 页"),
+                    loop,
+                )
+                fut.result(timeout=30)
             except Exception:
                 pass
 
