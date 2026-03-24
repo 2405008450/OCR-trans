@@ -481,12 +481,14 @@ class TaskQueueService:
             else:
                 raise ValueError(f"不支持的任务类型: {task_type}")
 
+            output_files = self._extract_output_files(task_type, result, output_path, filename)
             with SessionLocal() as db:
                 task_repo.complete_task(
                     db,
                     task_id,
                     result_json=json.dumps(result, ensure_ascii=False) if result is not None else None,
                     output_path=output_path,
+                    output_files_json=json.dumps(output_files, ensure_ascii=False) if output_files else None,
                 )
             self._append_task_log(task_id, "[done] 任务处理完成")
         except Exception as exc:
@@ -623,6 +625,76 @@ class TaskQueueService:
             progress_callback=update,
             executor=self._task_executor,
         )
+
+    @staticmethod
+    def _extract_output_files(
+        task_type: str,
+        result: Optional[Dict[str, Any]],
+        output_path: Optional[str],
+        original_filename: Optional[str] = None,
+    ) -> list:
+        from datetime import datetime as _dt
+
+        timestamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+        stem = Path(original_filename or "file").stem if original_filename else "file"
+        if " | " in stem:
+            stem = stem.split(" | ")[0]
+        stem = stem[:60]
+
+        TASK_SUFFIX = {
+            "ocr": "OCR翻译",
+            "number_check": "数字专检",
+            "zhongfanyi": "中翻译专检",
+            "alignment": "对照记忆",
+            "doc_translate": "证件翻译",
+            "pdf2docx": "文档预处理",
+        }
+        suffix = TASK_SUFFIX.get(task_type, task_type)
+
+        def _friendly(label: str, real_path: str) -> str:
+            ext = Path(real_path).suffix
+            return f"{stem}_{timestamp}_{suffix}_{label}{ext}"
+
+        files: list = []
+        if not result:
+            if output_path:
+                files.append({"name": _friendly("输出", output_path), "path": output_path, "type": "output"})
+            return files
+
+        def _add(key: str, label: str, ftype: str = "output"):
+            val = result.get(key)
+            if val and isinstance(val, str):
+                files.append({"name": _friendly(label, val), "path": val, "type": ftype})
+
+        if task_type == "ocr":
+            for r in result.get("results", []):
+                if isinstance(r, dict):
+                    if r.get("translated_image"):
+                        files.append({"name": _friendly("翻译结果", r["translated_image"]), "path": r["translated_image"], "type": "output"})
+                    if r.get("visualization_image"):
+                        files.append({"name": _friendly("OCR可视化", r["visualization_image"]), "path": r["visualization_image"], "type": "output"})
+        elif task_type == "number_check":
+            _add("corrected_docx", "修正译文")
+            for item in result.get("json_results", []):
+                if isinstance(item, dict) and item.get("path"):
+                    files.append({"name": _friendly("检查报告", item["path"]), "path": item["path"], "type": "report"})
+        elif task_type == "zhongfanyi":
+            _add("corrected_docx", "修正译文")
+            _add("report_path", "检查报告")
+        elif task_type == "alignment":
+            _add("output_excel", "对齐结果")
+        elif task_type == "doc_translate":
+            _add("raw_output_txt", "OCR原文")
+            for lang_result in result.get("translations", []):
+                if isinstance(lang_result, dict) and lang_result.get("output_docx"):
+                    lang = lang_result.get("lang", "")
+                    files.append({"name": _friendly(f"翻译_{lang}", lang_result["output_docx"]), "path": lang_result["output_docx"], "type": "output"})
+        elif task_type == "pdf2docx":
+            _add("output_docx", "Word文档")
+
+        if not files and output_path:
+            files.append({"name": _friendly("输出", output_path), "path": output_path, "type": "output"})
+        return files
 
     async def _mirror_progress(
         self,

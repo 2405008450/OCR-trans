@@ -1,10 +1,24 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.file_naming import build_display_no
 from app.model.entity import Task
+
+TASK_TYPE_LABELS = {
+    "ocr": "证件OCR翻译",
+    "number_check": "数字专检",
+    "zhongfanyi": "中翻译专检",
+    "alignment": "多语对照记忆",
+    "doc_translate": "通用证件翻译",
+    "pdf2docx": "不可编辑文档预处理V2",
+}
+
+
+def _now() -> datetime:
+    return datetime.utcnow()
 
 
 def create_task(
@@ -19,15 +33,19 @@ def create_task(
     params_json: Optional[str] = None,
     input_files_json: Optional[str] = None,
 ) -> Task:
+    now = _now()
     task = Task(
         task_id=task_id,
         task_type=task_type,
+        task_label=TASK_TYPE_LABELS.get(task_type, task_type),
         filename=filename,
         status=status,
         progress=progress,
         message=message,
         params_json=params_json,
         input_files_json=input_files_json,
+        created_at=now,
+        updated_at=now,
     )
     db.add(task)
     db.commit()
@@ -49,6 +67,7 @@ def update_task_input_files(db: Session, task_id: str, input_files_json: str) ->
         return None
 
     task.input_files_json = input_files_json
+    task.updated_at = _now()
     db.commit()
     db.refresh(task)
     return task
@@ -71,6 +90,7 @@ def claim_next_queued_task(db: Session, task_type: Optional[str] = None) -> Opti
     if not task:
         return None
 
+    now = _now()
     updated_rows = (
         db.query(Task)
         .filter(Task.id == task.id, Task.status == "queued")
@@ -79,7 +99,8 @@ def claim_next_queued_task(db: Session, task_type: Optional[str] = None) -> Opti
                 Task.status: "running",
                 Task.progress: 1,
                 Task.message: "任务已开始处理",
-                Task.started_at: datetime.utcnow(),
+                Task.started_at: now,
+                Task.updated_at: now,
                 Task.error_message: None,
             },
             synchronize_session=False,
@@ -111,6 +132,7 @@ def update_task_progress(
         task.message = message
     if status is not None:
         task.status = status
+    task.updated_at = _now()
 
     db.commit()
     db.refresh(task)
@@ -123,19 +145,23 @@ def complete_task(
     *,
     result_json: Optional[str] = None,
     output_path: Optional[str] = None,
+    output_files_json: Optional[str] = None,
     message: str = "处理完成",
 ) -> Optional[Task]:
     task = get_task_by_task_id(db, task_id)
     if not task:
         return None
 
+    now = _now()
     task.status = "done"
     task.progress = 100
     task.message = message
     task.result_json = result_json
     task.output_path = output_path
+    task.output_files_json = output_files_json
     task.error_message = None
-    task.finished_at = datetime.utcnow()
+    task.finished_at = now
+    task.updated_at = now
     db.commit()
     db.refresh(task)
     return task
@@ -146,10 +172,12 @@ def fail_task(db: Session, task_id: str, error_message: str) -> Optional[Task]:
     if not task:
         return None
 
+    now = _now()
     task.status = "failed"
     task.message = f"处理失败: {error_message}"
     task.error_message = error_message
-    task.finished_at = datetime.utcnow()
+    task.finished_at = now
+    task.updated_at = now
     db.commit()
     db.refresh(task)
     return task
@@ -171,9 +199,68 @@ def requeue_running_tasks(db: Session, *, task_type: Optional[str] = None) -> in
             Task.message: "服务启动后重新入队",
             Task.started_at: None,
             Task.finished_at: None,
+            Task.updated_at: _now(),
         },
         synchronize_session=False,
     )
     db.commit()
     return count
 
+
+# --------------- Dashboard queries ---------------
+
+def list_tasks(
+    db: Session,
+    *,
+    status: Optional[str] = None,
+    task_type: Optional[str] = None,
+    keyword: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> Tuple[List[Task], int]:
+    query = db.query(Task)
+
+    if status:
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if statuses:
+            query = query.filter(Task.status.in_(statuses))
+    if task_type:
+        query = query.filter(Task.task_type == task_type)
+    if keyword:
+        query = query.filter(Task.filename.ilike(f"%{keyword}%"))
+
+    total = query.count()
+
+    tasks = (
+        query.order_by(Task.created_at.desc(), Task.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return tasks, total
+
+
+def count_by_status(db: Session) -> Dict[str, Any]:
+    rows = (
+        db.query(Task.status, func.count(Task.id))
+        .group_by(Task.status)
+        .all()
+    )
+    counts: Dict[str, int] = {row[0]: row[1] for row in rows}
+    total = sum(counts.values())
+
+    type_rows = (
+        db.query(Task.task_type, func.count(Task.id))
+        .group_by(Task.task_type)
+        .all()
+    )
+    by_type: Dict[str, int] = {row[0]: row[1] for row in type_rows}
+
+    return {
+        "total": total,
+        "queued": counts.get("queued", 0),
+        "running": counts.get("running", 0),
+        "done": counts.get("done", 0),
+        "failed": counts.get("failed", 0),
+        "by_type": by_type,
+    }

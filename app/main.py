@@ -67,6 +67,11 @@ async def root():
     return _read_page("nav.html")
 
 
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page():
+    return _read_page("dashboard.html")
+
+
 @app.get("/ocr", response_class=HTMLResponse)
 async def ocr_page():
     return _read_page("index.html")

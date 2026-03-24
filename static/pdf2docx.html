@@ -163,6 +163,33 @@
         </main>
     </div>
 
+    <!-- 页数超限弹窗 -->
+    <div id="pagelimitModal" style="display:none; position:fixed; inset:0; z-index:9999;
+         background:rgba(6,17,29,0.72); backdrop-filter:blur(4px);
+         display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--card-strong); border-radius:16px; padding:40px 36px 32px;
+                    max-width:440px; width:90%; box-shadow:var(--shadow-lg);
+                    text-align:center; position:relative;">
+            <div style="width:56px; height:56px; border-radius:50%;
+                        background:rgba(245,158,11,0.12); margin:0 auto 18px;
+                        display:flex; align-items:center; justify-content:center;">
+                <i class="fas fa-triangle-exclamation" style="font-size:26px; color:var(--warning-color);"></i>
+            </div>
+            <h3 style="font-size:17px; font-weight:700; color:var(--text-primary); margin-bottom:12px;">
+                页面数超出限制
+            </h3>
+            <p id="pageLimit-msg" style="font-size:14px; color:var(--text-secondary);
+               line-height:1.75; margin-bottom:28px;"></p>
+            <button id="pageLimit-close" style="
+                display:inline-flex; align-items:center; gap:8px;
+                padding:10px 28px; border-radius:8px; border:none; cursor:pointer;
+                background:var(--warning-color); color:#fff;
+                font-size:14px; font-weight:600; transition:opacity .15s;">
+                <i class="fas fa-check"></i> 我知道了
+            </button>
+        </div>
+    </div>
+
     <script src="/static/pdf2docx.js"></script>
 </body>
 

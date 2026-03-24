@@ -1,12 +1,15 @@
+import json
 import os
 import traceback
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from app.db.session import SessionLocal
+from app.repository import task_repo
 from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
 from app.service.gemini_service import DEFAULT_GEMINI_ROUTE, get_gemini_routes
 from app.service import zhongfanyi_service as zf_service
@@ -18,6 +21,106 @@ from app.service.pdf2docx_service import get_pdf2docx_models
 from app.service.task_queue_service import task_queue_service
 
 router = APIRouter(prefix="/task", tags=["Task"])
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+
+def _safe_resolve(file_path: str) -> Path:
+    """Resolve a file path and verify it lives under the project directory."""
+    p = Path(file_path)
+    if not p.is_absolute():
+        p = BASE_DIR / p
+    resolved = p.resolve()
+    if not str(resolved).startswith(str(BASE_DIR.resolve())):
+        raise HTTPException(status_code=403, detail="路径不允许访问")
+    return resolved
+
+
+def _task_to_dict(t) -> dict:
+    return {
+        "task_id": t.task_id,
+        "display_no": t.display_no,
+        "task_type": t.task_type,
+        "task_label": t.task_label or t.task_type,
+        "filename": t.filename,
+        "status": t.status,
+        "progress": t.progress,
+        "message": t.message or "",
+        "error": t.error_message,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "started_at": t.started_at.isoformat() if t.started_at else None,
+        "finished_at": t.finished_at.isoformat() if t.finished_at else None,
+    }
+
+
+# ── Dashboard API ────────────────────────────────────────────
+
+
+@router.get("/list")
+async def list_tasks(
+    status: Optional[str] = Query(None, description="逗号分隔的状态筛选，如 queued,running"),
+    task_type: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    with SessionLocal() as db:
+        tasks, total = task_repo.list_tasks(
+            db,
+            status=status,
+            task_type=task_type,
+            keyword=keyword,
+            page=page,
+            page_size=page_size,
+        )
+        return {
+            "items": [_task_to_dict(t) for t in tasks],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+
+@router.get("/dashboard/stats")
+async def dashboard_stats():
+    with SessionLocal() as db:
+        return task_repo.count_by_status(db)
+
+
+@router.get("/{task_id}/detail")
+async def task_detail(task_id: str):
+    with SessionLocal() as db:
+        t = task_repo.get_task_by_task_id(db, task_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        info = _task_to_dict(t)
+        info["params"] = json.loads(t.params_json or "{}")
+        info["input_files"] = json.loads(t.input_files_json or "{}")
+        info["output_files"] = json.loads(t.output_files_json or "[]")
+        info["result"] = json.loads(t.result_json or "null")
+        info["stream_log"] = task_queue_service._task_logs.get(task_id, "")
+    return info
+
+
+@router.get("/{task_id}/download")
+async def task_download(
+    task_id: str,
+    file_path: str = Query(..., description="要下载的文件路径"),
+    download_name: Optional[str] = Query(None, description="下载时使用的文件名"),
+):
+    with SessionLocal() as db:
+        t = task_repo.get_task_by_task_id(db, task_id)
+        if not t:
+            raise HTTPException(status_code=404, detail="任务不存在")
+    resolved = _safe_resolve(file_path)
+    if not resolved.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    friendly_name = download_name or resolved.name
+    return FileResponse(
+        str(resolved),
+        filename=friendly_name,
+        media_type="application/octet-stream",
+    )
 
 
 @router.post("/run")
@@ -350,6 +453,25 @@ async def run_pdf2docx(
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
+
+    if ext == ".pdf":
+        try:
+            import fitz  # PyMuPDF
+
+            content = await file.read()
+            pdf_doc = fitz.open(stream=content, filetype="pdf")
+            page_count = len(pdf_doc)
+            pdf_doc.close()
+            if page_count > 100:
+                raise HTTPException(
+                    status_code=400,
+                    detail="页面数过多，请使用ABBYY处理或分批多次处理",
+                )
+            await file.seek(0)
+        except HTTPException:
+            raise
+        except Exception:
+            await file.seek(0)
 
     task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
     return {"status": "ACCEPTED", "task_id": task_id, "message": "任务已提交"}

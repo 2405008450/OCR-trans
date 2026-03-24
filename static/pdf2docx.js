@@ -211,6 +211,31 @@ function clearFile() {
 async function processFile() {
     if (!selectedFile) return;
 
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    const params = new URLSearchParams({
+        model: modelSelect.value,
+        gemini_route: geminiRouteSelect.value,
+    });
+
+    let response;
+    try {
+        response = await fetch(`/task/pdf2docx?${params.toString()}`, {
+            method: 'POST',
+            body: formData,
+        });
+    } catch (networkErr) {
+        showFailure(networkErr.message);
+        return;
+    }
+
+    if (!response.ok) {
+        const errorDetail = await safeReadError(response);
+        showPageLimitModal(errorDetail || `提交失败: ${response.status}`);
+        return;
+    }
+
     uploadSection.style.display = 'none';
     resultSection.style.display = 'none';
     processingSection.style.display = 'block';
@@ -219,29 +244,25 @@ async function processFile() {
     updateProgress(5, '正在提交任务...');
 
     try {
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-
-        const params = new URLSearchParams({
-            model: modelSelect.value,
-            gemini_route: geminiRouteSelect.value,
-        });
-
-        const response = await fetch(`/task/pdf2docx?${params.toString()}`, {
-            method: 'POST',
-            body: formData,
-        });
-
-        if (!response.ok) {
-            const errorText = await safeReadError(response);
-            throw new Error(errorText || `提交失败: ${response.status}`);
-        }
-
         const data = await response.json();
         startPolling(data.task_id);
     } catch (error) {
         showFailure(error.message);
     }
+}
+
+function showPageLimitModal(message) {
+    const modal = document.getElementById('pagelimitModal');
+    const msgEl = document.getElementById('pageLimit-msg');
+    const closeBtn = document.getElementById('pageLimit-close');
+    if (!modal || !msgEl || !closeBtn) return;
+    msgEl.textContent = message;
+    modal.style.display = 'flex';
+    const close = () => {
+        modal.style.display = 'none';
+        closeBtn.removeEventListener('click', close);
+    };
+    closeBtn.addEventListener('click', close);
 }
 
 function startPolling(taskId) {
