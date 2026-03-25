@@ -56,7 +56,7 @@ pdfminer.six==20251230
 pdfplumber==0.11.9
 Pillow==9.5.0
 prettytable==3.17.0
-protobuf==3.20.2
+protobuf==3.20.3
 psutil==7.2.2
 py-cpuinfo==9.0.0
 pyclipper==1.4.0
@@ -116,4 +116,5 @@ mtcnn==0.1.1
 tensorflow==2.15.0
 zhipuai==2.1.5.20250825
 zai-sdk==0.2.2
+
 
