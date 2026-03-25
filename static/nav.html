@@ -1,494 +1,61 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>文档处理工作台</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <style>
-    :root {
-      --bg: #07111f;
-      --panel: rgba(11, 24, 40, 0.88);
-      --card: rgba(255, 255, 255, 0.07);
-      --line: rgba(255, 255, 255, 0.1);
-      --text: #f6f8fb;
-      --muted: rgba(246, 248, 251, 0.72);
-      --cyan: #38bdf8;
-      --green: #22c55e;
-      --amber: #f59e0b;
-      --rose: #fb7185;
-      --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      color: var(--text);
-      font-family: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei", sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(56, 189, 248, 0.24), transparent 26%),
-        radial-gradient(circle at 86% 14%, rgba(34, 197, 94, 0.15), transparent 22%),
-        linear-gradient(145deg, #040812 0%, #091829 46%, #0d2138 100%);
-    }
-
-    .page {
-      width: min(1220px, calc(100% - 32px));
-      margin: 0 auto;
-      padding: 28px 0 48px;
-    }
-
-    .topbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-      margin-bottom: 24px;
-    }
-
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 14px;
-      font-weight: 700;
-    }
-
-    .brand-mark {
-      width: 48px;
-      height: 48px;
-      border-radius: 16px;
-      display: grid;
-      place-items: center;
-      background: linear-gradient(135deg, rgba(56, 189, 248, 0.28), rgba(56, 189, 248, 0.62));
-    }
-
-    .topbar-note {
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .hero {
-      border: 1px solid var(--line);
-      border-radius: 28px;
-      padding: 34px;
-      background: linear-gradient(145deg, rgba(9, 22, 38, 0.94), rgba(15, 35, 58, 0.88));
-      box-shadow: var(--shadow);
-      margin-bottom: 24px;
-    }
-
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.9fr);
-      gap: 22px;
-      align-items: end;
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 999px;
-      font-size: 13px;
-      color: #d7f3ff;
-      background: rgba(56, 189, 248, 0.12);
-      border: 1px solid rgba(56, 189, 248, 0.22);
-      margin-bottom: 18px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: clamp(36px, 7vw, 62px);
-      line-height: 1.04;
-      letter-spacing: -0.04em;
-    }
-
-    .hero-copy p {
-      margin: 16px 0 0;
-      max-width: 640px;
-      color: var(--muted);
-      line-height: 1.8;
-      font-size: 17px;
-    }
-
-    .hero-actions {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 26px;
-    }
-
-    .action-btn {
-      min-height: 46px;
-      padding: 0 18px;
-      border-radius: 14px;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-      font-weight: 600;
-    }
-
-    .action-btn.primary {
-      color: #082032;
-      background: linear-gradient(135deg, #9be7ff, var(--cyan));
-    }
-
-    .action-btn.secondary {
-      color: var(--text);
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    .hero-panel {
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 22px;
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    .hero-panel h2 {
-      margin: 0 0 14px;
-      font-size: 17px;
-    }
-
-    .signal-list {
-      display: grid;
-      gap: 12px;
-    }
-
-    .signal-item {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    .signal-item strong {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 14px;
-    }
-
-    .signal-item small,
-    .signal-item span {
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .section-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: end;
-      margin-bottom: 18px;
-    }
-
-    .section-head h2 {
-      margin: 0;
-      font-size: 28px;
-    }
-
-    .section-head p {
-      margin: 6px 0 0;
-      color: var(--muted);
-      line-height: 1.7;
-    }
-
-    .module-grid {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      gap: 18px;
-    }
-
-    .module-card {
-      grid-column: span 4;
-      min-height: 260px;
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      padding: 24px;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
-      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.2);
-    }
-
-    .module-card.featured {
-      grid-column: span 6;
-    }
-
-    .module-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: start;
-      margin-bottom: 18px;
-    }
-
-    .module-icon {
-      width: 52px;
-      height: 52px;
-      border-radius: 16px;
-      display: grid;
-      place-items: center;
-      font-size: 20px;
-      color: #fff;
-    }
-
-    .theme-cyan {
-      background: linear-gradient(135deg, #0ea5e9, #38bdf8);
-    }
-
-    .theme-green {
-      background: linear-gradient(135deg, #16a34a, #4ade80);
-    }
-
-    .theme-amber {
-      background: linear-gradient(135deg, #d97706, #fbbf24);
-    }
-
-    .theme-rose {
-      background: linear-gradient(135deg, #e11d48, #fb7185);
-    }
-
-    .theme-indigo {
-      background: linear-gradient(135deg, #4f46e5, #818cf8);
-    }
-
-    .tag {
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: rgba(255, 255, 255, 0.82);
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    .module-card h3 {
-      margin: 0 0 10px;
-      font-size: 22px;
-    }
-
-    .module-card p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.8;
-      min-height: 88px;
-    }
-
-    .module-meta {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin: 18px 0 22px;
-    }
-
-    .meta-pill {
-      padding: 8px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.78);
-      background: rgba(255, 255, 255, 0.07);
-    }
-
-    .module-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--text);
-      text-decoration: none;
-      font-weight: 600;
-    }
-
-    @media (max-width: 980px) {
-      .hero-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .module-card,
-      .module-card.featured {
-        grid-column: span 12;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .page {
-        width: min(100% - 20px, 1220px);
-        padding-top: 18px;
-      }
-
-      .topbar {
-        align-items: start;
-        flex-direction: column;
-      }
-
-      .hero,
-      .module-card {
-        border-radius: 20px;
-      }
-    }
+    :root { --line: rgba(255,255,255,0.1); --text:#f6f8fb; --muted:rgba(246,248,251,0.72); --cyan:#38bdf8; --green:#22c55e; --shadow:0 24px 80px rgba(0,0,0,0.32); }
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;color:var(--text);font-family:"Segoe UI Variable","PingFang SC","Microsoft YaHei",sans-serif;background:radial-gradient(circle at top left,rgba(56,189,248,0.24),transparent 26%),radial-gradient(circle at 86% 14%,rgba(34,197,94,0.15),transparent 22%),linear-gradient(145deg,#040812 0%,#091829 46%,#0d2138 100%)}
+    .page{width:min(1220px,calc(100% - 32px));margin:0 auto;padding:28px 0 48px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:24px}.brand{display:inline-flex;align-items:center;gap:14px;font-weight:700}.brand-mark{width:48px;height:48px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,rgba(56,189,248,0.28),rgba(56,189,248,0.62))}.topbar-note{color:var(--muted);font-size:14px}
+    .hero{border:1px solid var(--line);border-radius:28px;padding:34px;background:linear-gradient(145deg,rgba(9,22,38,0.94),rgba(15,35,58,0.88));box-shadow:var(--shadow);margin-bottom:24px}.hero-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,0.9fr);gap:22px;align-items:end}.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;font-size:13px;color:#d7f3ff;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.22);margin-bottom:18px}h1{margin:0;font-size:clamp(36px,7vw,62px);line-height:1.04;letter-spacing:-0.04em}.hero-copy p{margin:16px 0 0;max-width:640px;color:var(--muted);line-height:1.8;font-size:17px}.hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}.action-btn{min-height:46px;padding:0 18px;border-radius:14px;display:inline-flex;align-items:center;gap:10px;text-decoration:none;font-weight:600}.action-btn.primary{color:#082032;background:linear-gradient(135deg,#9be7ff,var(--cyan))}.action-btn.secondary{color:var(--text);border:1px solid var(--line);background:rgba(255,255,255,0.05)}
+    .hero-panel{border:1px solid var(--line);border-radius:22px;padding:22px;background:rgba(255,255,255,0.05)}.hero-panel h2{margin:0 0 14px;font-size:17px}.signal-list{display:grid;gap:12px}.signal-item{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(255,255,255,0.05)}.signal-item strong{display:block;margin-bottom:4px;font-size:14px}.signal-item small,.signal-item span{color:var(--muted);font-size:13px}
+    .section-head{display:flex;justify-content:space-between;align-items:end;margin-bottom:18px}.section-head h2{margin:0;font-size:28px}.section-head p{margin:6px 0 0;color:var(--muted);line-height:1.7}.module-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}.module-card{grid-column:span 4;min-height:260px;border:1px solid var(--line);border-radius:24px;padding:24px;background:linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.04));box-shadow:0 18px 44px rgba(0,0,0,0.2)}.module-card.featured{grid-column:span 6}.module-top{display:flex;justify-content:space-between;align-items:start;margin-bottom:18px}.module-icon{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;font-size:20px;color:#fff}.theme-cyan{background:linear-gradient(135deg,#0ea5e9,#38bdf8)}.theme-green{background:linear-gradient(135deg,#16a34a,#4ade80)}.theme-amber{background:linear-gradient(135deg,#d97706,#fbbf24)}.theme-rose{background:linear-gradient(135deg,#e11d48,#fb7185)}.theme-indigo{background:linear-gradient(135deg,#4f46e5,#818cf8)}.tag{padding:7px 10px;border-radius:999px;font-size:12px;border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.82);background:rgba(255,255,255,0.06)}.module-card h3{margin:0 0 10px;font-size:22px}.module-card p{margin:0;color:var(--muted);line-height:1.8;min-height:88px}.module-meta{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 22px}.meta-pill{padding:8px 10px;border-radius:999px;font-size:12px;color:rgba(255,255,255,0.78);background:rgba(255,255,255,0.07)}.module-link{display:inline-flex;align-items:center;gap:10px;color:var(--text);text-decoration:none;font-weight:600}
+    @media (max-width:980px){.hero-grid{grid-template-columns:1fr}.module-card,.module-card.featured{grid-column:span 12}} @media (max-width:640px){.page{width:min(100% - 20px,1220px);padding-top:18px}.topbar{align-items:start;flex-direction:column}.hero,.module-card{border-radius:20px}}
   </style>
 </head>
-
 <body>
   <div class="page">
     <header class="topbar">
-      <div class="brand">
-        <div class="brand-mark"><i class="fas fa-wave-square"></i></div>
-        <div>文档处理工作台</div>
-      </div>
-      <div class="topbar-note">统一入口：OCR、专检、对照记忆、通用证件翻译（不含人像）、不可编辑文档预处理V2</div>
+      <div class="brand"><div class="brand-mark"><i class="fas fa-wave-square"></i></div><div>文档处理工作台</div></div>
+      <div class="topbar-note">统一入口：OCR、数字专检、对照记忆、驾驶证翻译、通用证件翻译与文档预处理V2</div>
     </header>
-
     <section class="hero">
       <div class="hero-grid">
         <div class="hero-copy">
           <div class="eyebrow"><i class="fas fa-sparkles"></i> AI Document Tools</div>
-          <h1>一套入口，覆盖常用文档处理流程</h1>
-          <p>把 OCR 翻译、数字专检、多语对照记忆、通用证件翻译（不含人像）和新的不可编辑文档预处理V2 模块集中到同一个工作台，减少来回切换。</p>
+          <h1>一个入口，覆盖常用文档处理流程</h1>
+          <p>把 OCR 翻译、数字专检、多语对照记忆、驾驶证翻译、通用证件翻译和文档预处理 V2 集中到同一个工作台，减少页面切换与重复配置。</p>
           <div class="hero-actions">
             <a class="action-btn primary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
-            <a class="action-btn secondary" href="/pdf2docx"><i class="fas fa-file-word"></i> 不可编辑文档预处理V2</a>
+            <a class="action-btn secondary" href="/drivers-license"><i class="fas fa-id-card"></i> 驾驶证翻译</a>
             <a class="action-btn secondary" href="/ocr"><i class="fas fa-language"></i> OCR 翻译</a>
           </div>
         </div>
-
         <aside class="hero-panel">
           <h2>当前可用模块</h2>
           <div class="signal-list">
-            <div class="signal-item">
-              <div>
-                <strong>证件 OCR 翻译</strong>
-                <small>身份证 / 结婚证 / 常规证件图像处理</small>
-              </div>
-              <span>OCR</span>
-            </div>
-            <div class="signal-item">
-              <div>
-                <strong>数字专检</strong>
-                <small>原文与译文数字一致性检查与修复</small>
-              </div>
-              <span>DOCX</span>
-            </div>
-            <div class="signal-item">
-              <div>
-                <strong>多语对照记忆</strong>
-                <small>段落对齐、Excel 输出、记忆资产沉淀</small>
-              </div>
-              <span>LLM</span>
-            </div>
-            <div class="signal-item">
-              <div>
-                <strong>不可编辑文档预处理V2</strong>
-                <small>PDF / 图片 OCR 后导出 DOCX，可选快速版 / 增强版</small>
-              </div>
-              <span>NEW</span>
-            </div>
+            <div class="signal-item"><div><strong>证件 OCR 翻译</strong><small>身份证 / 结婚证 / 常规证件图片处理</small></div><span>OCR</span></div>
+            <div class="signal-item"><div><strong>驾驶证翻译</strong><small>单图、多图合并、批量输出 Word 译文</small></div><span>NEW</span></div>
+            <div class="signal-item"><div><strong>数字专检</strong><small>原文与译文数字一致性检查与修复</small></div><span>DOCX</span></div>
+            <div class="signal-item"><div><strong>文档预处理V2</strong><small>PDF / 图片 OCR 后导出 DOCX，可选快速版 / 增强版</small></div><span>V2</span></div>
           </div>
         </aside>
       </div>
     </section>
-
     <section>
-      <div class="section-head">
-        <div>
-          <h2>处理模块</h2>
-          <p>按你的工作流直接进入对应页面。</p>
-        </div>
-      </div>
-
+      <div class="section-head"><div><h2>处理模块</h2><p>按你的工作流直接进入对应页面。</p></div></div>
       <div class="module-grid">
-        <article class="module-card featured">
-          <div class="module-top">
-            <div class="module-icon theme-cyan"><i class="fas fa-file-word"></i></div>
-            <div class="tag">新模块</div>
-          </div>
-          <h3>不可编辑文档预处理V2</h3>
-          <p>上传 PDF 或图片，调用视觉模型 OCR 提取内容，再生成可下载的 Word 文档，适合扫描件、表格页和复杂版式场景。</p>
-          <div class="module-meta">
-            <span class="meta-pill">PDF / 图片</span>
-            <span class="meta-pill">DOCX 输出</span>
-            <span class="meta-pill">快速版 / 增强版切换</span>
-          </div>
-          <a class="module-link" href="/pdf2docx">进入模块 <i class="fas fa-arrow-right"></i></a>
-        </article>
-
-        <article class="module-card featured">
-          <div class="module-top">
-            <div class="module-icon theme-amber"><i class="fas fa-language"></i></div>
-            <div class="tag">高频入口</div>
-          </div>
-          <h3>证件 OCR 翻译</h3>
-          <p>上传身份证、结婚证等图片，自动完成识别、翻译与结果图生成，适合作为主流程入口。</p>
-          <div class="module-meta">
-            <span class="meta-pill">图片上传</span>
-            <span class="meta-pill">模板参数</span>
-            <span class="meta-pill">可视化输出</span>
-          </div>
-          <a class="module-link" href="/ocr">进入模块 <i class="fas fa-arrow-right"></i></a>
-        </article>
-
-        <article class="module-card">
-          <div class="module-top">
-            <div class="module-icon theme-green"><i class="fas fa-check-double"></i></div>
-            <div class="tag">校验</div>
-          </div>
-          <h3>数字专检</h3>
-          <p>用于原文与译文 DOCX 的数字一致性检查，可输出修复结果与检查报告，适合交付前复核。</p>
-          <div class="module-meta">
-            <span class="meta-pill">原译对比</span>
-            <span class="meta-pill">自动批注</span>
-          </div>
-          <a class="module-link" href="/number-check">进入模块 <i class="fas fa-arrow-right"></i></a>
-        </article>
-
-        <article class="module-card">
-          <div class="module-top">
-            <div class="module-icon theme-indigo"><i class="fas fa-object-group"></i></div>
-            <div class="tag">记忆</div>
-          </div>
-          <h3>多语对照记忆</h3>
-          <p>将原文和译文自动对齐成可复用语料，适合术语整理、项目复盘和后续翻译记忆库沉淀。</p>
-          <div class="module-meta">
-            <span class="meta-pill">段落对齐</span>
-            <span class="meta-pill">Excel 输出</span>
-          </div>
-          <a class="module-link" href="/alignment">进入模块 <i class="fas fa-arrow-right"></i></a>
-        </article>
-
-        <article class="module-card">
-          <div class="module-top">
-            <div class="module-icon theme-rose"><i class="fas fa-file-signature"></i></div>
-            <div class="tag">审校</div>
-          </div>
-          <h3>中翻译专检</h3>
-          <p>针对原文与译文做规则化比对和 AI 审阅，更偏向后置质检场景，适合交付前深度审查。</p>
-          <div class="module-meta">
-            <span class="meta-pill">规则文件</span>
-            <span class="meta-pill">AI 检查</span>
-          </div>
-          <a class="module-link" href="/zhongfanyi">进入模块 <i class="fas fa-arrow-right"></i></a>
-        </article>
-
-        <article class="module-card">
-          <div class="module-top">
-            <div class="module-icon theme-green"><i class="fas fa-language"></i></div>
-            <div class="tag">翻译</div>
-          </div>
-          <h3>通用证件翻译（不含人像）</h3>
-          <p>上传 PDF 或图片，OCR 提取内容后通过 DeepSeek AI 翻译为多种目标语言，导出 Word 文档。支持一对多翻译。</p>
-          <div class="module-meta">
-            <span class="meta-pill">PDF / 图片</span>
-            <span class="meta-pill">多语种</span>
-            <span class="meta-pill">Word 输出</span>
-          </div>
-          <a class="module-link" href="/doc-translate">进入模块 <i class="fas fa-arrow-right"></i></a>
-        </article>
+        <article class="module-card featured"><div class="module-top"><div class="module-icon theme-cyan"><i class="fas fa-file-word"></i></div><div class="tag">新模块</div></div><h3>文档预处理V2</h3><p>上传 PDF 或图片，调用视觉模型 OCR 提取内容，再生成可下载的 Word 文档，适合扫描件、表格页和复杂版式场景。</p><div class="module-meta"><span class="meta-pill">PDF / 图片</span><span class="meta-pill">DOCX 输出</span><span class="meta-pill">快速版 / 增强版切换</span></div><a class="module-link" href="/pdf2docx">进入模块 <i class="fas fa-arrow-right"></i></a></article>
+        <article class="module-card featured"><div class="module-top"><div class="module-icon theme-amber"><i class="fas fa-language"></i></div><div class="tag">高频入口</div></div><h3>证件 OCR 翻译</h3><p>上传身份证、结婚证等图片，自动完成识别、翻译与结果图生成，适合作为主流程入口。</p><div class="module-meta"><span class="meta-pill">图片上传</span><span class="meta-pill">模板参数</span><span class="meta-pill">可视化输出</span></div><a class="module-link" href="/ocr">进入模块 <i class="fas fa-arrow-right"></i></a></article>
+        <article class="module-card"><div class="module-top"><div class="module-icon theme-indigo"><i class="fas fa-id-card"></i></div><div class="tag">新增</div></div><h3>驾驶证翻译</h3><p>接入 `Driver's_License/run.py` 对应主流程，支持单图处理、多图合并和批量输出，统一生成 Word 译文并纳入任务中心。</p><div class="module-meta"><span class="meta-pill">图片上传</span><span class="meta-pill">单图 / 合并 / 批量</span><span class="meta-pill">DOCX 输出</span></div><a class="module-link" href="/drivers-license">进入模块 <i class="fas fa-arrow-right"></i></a></article>
+        <article class="module-card"><div class="module-top"><div class="module-icon theme-green"><i class="fas fa-check-double"></i></div><div class="tag">校验</div></div><h3>数字专检</h3><p>用于原文与译文 DOCX 的数字一致性检查，可输出修复结果与检查报告，适合交付前复核。</p><div class="module-meta"><span class="meta-pill">原译对比</span><span class="meta-pill">自动批注</span></div><a class="module-link" href="/number-check">进入模块 <i class="fas fa-arrow-right"></i></a></article>
+        <article class="module-card"><div class="module-top"><div class="module-icon theme-indigo"><i class="fas fa-object-group"></i></div><div class="tag">记忆</div></div><h3>多语对照记忆</h3><p>将原文和译文自动对齐成可复用语料，适合术语整理、项目复盘和后续翻译记忆库沉淀。</p><div class="module-meta"><span class="meta-pill">段落对齐</span><span class="meta-pill">Excel 输出</span></div><a class="module-link" href="/alignment">进入模块 <i class="fas fa-arrow-right"></i></a></article>
+        <article class="module-card"><div class="module-top"><div class="module-icon theme-rose"><i class="fas fa-file-signature"></i></div><div class="tag">审校</div></div><h3>中翻译专检</h3><p>针对原文与译文做规则化比对和 AI 审阅，更偏向后置质检场景，适合交付前深度审查。</p><div class="module-meta"><span class="meta-pill">规则文件</span><span class="meta-pill">AI 检查</span></div><a class="module-link" href="/zhongfanyi">进入模块 <i class="fas fa-arrow-right"></i></a></article>
+        <article class="module-card"><div class="module-top"><div class="module-icon theme-green"><i class="fas fa-language"></i></div><div class="tag">翻译</div></div><h3>通用证件翻译</h3><p>上传 PDF 或图片，OCR 提取内容后通过 DeepSeek AI 翻译为多种目标语言，导出 Word 文档，支持一对多翻译。</p><div class="module-meta"><span class="meta-pill">PDF / 图片</span><span class="meta-pill">多语种</span><span class="meta-pill">Word 输出</span></div><a class="module-link" href="/doc-translate">进入模块 <i class="fas fa-arrow-right"></i></a></article>
       </div>
     </section>
   </div>
 </body>
-
 </html>

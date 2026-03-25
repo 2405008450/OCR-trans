@@ -1,4 +1,4 @@
-import os
+﻿import os
 from pathlib import Path
 
 try:
@@ -26,6 +26,7 @@ if load_dotenv and _ENV_FILE.exists():
 
 
 class Settings(BaseSettings):
+    GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "sk-f2a71209abd64087a69147ab6a0bb2ec")
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 

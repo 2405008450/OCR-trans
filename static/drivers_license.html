@@ -1,0 +1,230 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>驾驶证翻译</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .file-list-preview {
+            display: grid;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .file-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .file-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-radius: 999px;
+            background: rgba(14, 165, 233, 0.08);
+            border: 1px solid rgba(14, 165, 233, 0.18);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .mode-tip {
+            margin-top: 12px;
+            color: var(--text-secondary);
+            line-height: 1.8;
+            font-size: 14px;
+        }
+
+        .result-file-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .result-file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 16px 18px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid var(--border-color);
+        }
+
+        .result-file-meta {
+            display: grid;
+            gap: 4px;
+        }
+
+        .result-file-meta strong {
+            font-size: 15px;
+        }
+
+        .result-file-meta span {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <div class="logo-mark"><i class="fas fa-id-card"></i></div>
+                <div>
+                    <h1>驾驶证翻译</h1>
+                    <p class="subtitle">将单张或多张驾驶证图片接入统一任务平台，自动识别字段、翻译内容并输出 Word 文档。</p>
+                </div>
+            </div>
+            <nav class="header-nav">
+                <a href="/"><i class="fas fa-home"></i> 返回首页</a>
+                <a href="/dashboard"><i class="fas fa-gauge-high"></i> 任务看板</a>
+                <a href="/ocr"><i class="fas fa-language"></i> OCR 翻译</a>
+                <a href="/doc-translate"><i class="fas fa-file-signature"></i> 通用证件翻译</a>
+                <a href="/pdf2docx"><i class="fas fa-file-word"></i> 文档预处理V2</a>
+            </nav>
+        </header>
+
+        <section class="hero-banner">
+            <div>
+                <span class="section-kicker">Driver License</span>
+                <h2>单图、合并、批量三种模式统一接入</h2>
+                <p>复用 `Driver's_License/run.py` 的主处理逻辑，API 密钥改为读取项目根目录全局 `.env`。适合驾驶证首页、副页、图例页的单次合并输出，也支持一批图片分别生成多份译文。</p>
+            </div>
+            <div class="hero-metrics">
+                <div class="metric-card">
+                    <strong>多图合并</strong>
+                    <span>多张同证件图片可合并为一个 Word，适合主页 + 副页 + 图例页。</span>
+                </div>
+                <div class="metric-card">
+                    <strong>统一任务体系</strong>
+                    <span>提交后进入统一队列、统一状态查询、统一结果下载，不影响现有模块。</span>
+                </div>
+            </div>
+        </section>
+
+        <main class="main-content">
+            <section class="workspace-grid">
+                <section class="upload-section" id="uploadSection">
+                    <div class="upload-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Step 1</span>
+                                <h2>上传驾驶证图片</h2>
+                            </div>
+                            <div class="section-chip">Image Only</div>
+                        </div>
+                        <p class="upload-desc">支持 PNG、JPG、JPEG、BMP、TIF、TIFF、WEBP。单图模式上传 1 张，多图合并和批量模式可上传多张。</p>
+
+                        <div class="upload-area" id="uploadArea">
+                            <input type="file" id="fileInput" accept="image/*,.png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp" multiple hidden>
+                            <div class="upload-placeholder" id="uploadPlaceholder">
+                                <i class="fas fa-cloud-arrow-up"></i>
+                                <p>拖拽图片到这里，或点击选择驾驶证图片</p>
+                                <span>支持多选，建议按证件页顺序上传</span>
+                            </div>
+                            <div class="file-preview" id="filePreview" style="display:none; align-items:flex-start;">
+                                <div class="file-info" style="width:100%;">
+                                    <p id="fileSummary"></p>
+                                    <span class="file-status">文件已就绪</span>
+                                    <div class="file-list-preview">
+                                        <div class="file-chip-row" id="fileChipRow"></div>
+                                    </div>
+                                    <button class="btn-remove" id="btnRemove" style="margin-top:14px;">
+                                        <i class="fas fa-times"></i> 清空文件
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="options-panel">
+                            <div class="option-group option-card">
+                                <label for="processingMode">处理模式</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-layer-group"></i>
+                                    <select id="processingMode"></select>
+                                </div>
+                                <div class="mode-tip" id="modeTip"></div>
+                            </div>
+                        </div>
+
+                        <button class="btn-primary" id="btnProcess" disabled>
+                            <i class="fas fa-play"></i> 开始处理
+                        </button>
+                    </div>
+                </section>
+
+                <aside class="info-rail">
+                    <div class="info-card">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Guide</span>
+                                <h3>模式说明</h3>
+                            </div>
+                        </div>
+                        <div class="flow-steps">
+                            <span>单图处理：1 张图片输出 1 份驾驶证译文。</span>
+                            <span>多图合并：多张属于同一驾驶证的图片合并成 1 份 Word。</span>
+                            <span>多图批量：多张图片分别输出多份 Word。</span>
+                        </div>
+                    </div>
+                    <div class="info-card emphasis">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="section-kicker">Env</span>
+                                <h3>配置来源</h3>
+                            </div>
+                        </div>
+                        <div class="stacked-stats">
+                            <div><strong>GLM OCR</strong><span>读取项目根目录 `.env` 中的 `GLM_API_KEY`</span></div>
+                            <div><strong>DeepSeek 翻译</strong><span>读取项目根目录 `.env` 中的 `DEEPSEEK_API_KEY`</span></div>
+                            <div><strong>任务输出</strong><span>统一保存到 `outputs/drivers_license/`</span></div>
+                        </div>
+                    </div>
+                </aside>
+            </section>
+
+            <section class="processing-section" id="processingSection" style="display:none;">
+                <div class="processing-card">
+                    <div class="spinner"></div>
+                    <h2>处理中</h2>
+                    <p id="processingStatus">正在提交任务...</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">0%</p>
+                    <div class="stream-log-wrap" id="streamLogWrap" style="display:none;">
+                        <div class="stream-log-head"><i class="fas fa-terminal"></i><span>后端日志</span></div>
+                        <pre class="stream-log" id="streamLog"></pre>
+                    </div>
+                </div>
+            </section>
+
+            <section class="result-section" id="resultSection" style="display:none;">
+                <div class="result-header">
+                    <h2><i class="fas fa-check-circle"></i> 处理完成</h2>
+                    <button class="btn-secondary" id="btnNewTask">
+                        <i class="fas fa-plus"></i> 新建任务
+                    </button>
+                </div>
+                <div class="result-stats" id="resultStats"></div>
+                <div class="result-grid">
+                    <div class="result-item">
+                        <h3>输出文件</h3>
+                        <div class="result-file-list" id="resultFileList"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/drivers_license.js"></script>
+</body>
+
+</html>

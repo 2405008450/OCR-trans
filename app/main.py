@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,6 +85,11 @@ async def number_check_page():
 @app.get("/alignment", response_class=HTMLResponse)
 async def alignment_page():
     return _read_page("alignment.html")
+
+
+@app.get("/drivers-license", response_class=HTMLResponse)
+async def drivers_license_page():
+    return _read_page("drivers_license.html")
 
 
 @app.get("/doc-translate", response_class=HTMLResponse)

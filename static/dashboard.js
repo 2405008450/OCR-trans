@@ -1,4 +1,4 @@
-const POLL_INTERVAL = 2000;
+﻿const POLL_INTERVAL = 2000;
 const DETAIL_POLL_INTERVAL = 1500;
 
 let currentPage = 1;
@@ -11,35 +11,34 @@ let detailTimer = null;
 let openTaskId = null;
 
 const STATUS_BADGE = {
-  queued:    { cls: 'badge-queued',    icon: 'fa-clock',           text: '排队中' },
-  running:   { cls: 'badge-running',   icon: 'fa-spinner fa-spin', text: '处理中' },
-  done:      { cls: 'badge-done',      icon: 'fa-check',           text: '已完成' },
-  failed:    { cls: 'badge-failed',    icon: 'fa-xmark',           text: '失败' },
-  cancelled: { cls: 'badge-cancelled', icon: 'fa-ban',             text: '已取消' },
+  queued: { cls: 'badge-queued', icon: 'fa-clock', text: '排队中' },
+  running: { cls: 'badge-running', icon: 'fa-spinner fa-spin', text: '处理中' },
+  done: { cls: 'badge-done', icon: 'fa-check', text: '已完成' },
+  failed: { cls: 'badge-failed', icon: 'fa-xmark', text: '失败' },
+  cancelled: { cls: 'badge-cancelled', icon: 'fa-ban', text: '已取消' },
 };
-
 
 function init() {
   document.getElementById('btnRefresh').addEventListener('click', () => loadAll());
-  document.getElementById('filterType').addEventListener('change', e => {
-    currentTypeFilter = e.target.value;
+  document.getElementById('filterType').addEventListener('change', (event) => {
+    currentTypeFilter = event.target.value;
     currentPage = 1;
     loadList();
   });
 
   let searchDebounce = null;
-  document.getElementById('searchInput').addEventListener('input', e => {
+  document.getElementById('searchInput').addEventListener('input', (event) => {
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => {
-      currentKeyword = e.target.value.trim();
+      currentKeyword = event.target.value.trim();
       currentPage = 1;
       loadList();
     }, 400);
   });
 
-  document.querySelectorAll('.stat-pill').forEach(pill => {
+  document.querySelectorAll('.stat-pill').forEach((pill) => {
     pill.addEventListener('click', () => {
-      document.querySelectorAll('.stat-pill').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.stat-pill').forEach((item) => item.classList.remove('active'));
       pill.classList.add('active');
       currentStatusFilter = pill.dataset.filter;
       currentPage = 1;
@@ -58,7 +57,13 @@ function startListPolling() {
   stopListPolling();
   listTimer = setInterval(() => loadAll(true), POLL_INTERVAL);
 }
-function stopListPolling() { if (listTimer) { clearInterval(listTimer); listTimer = null; } }
+
+function stopListPolling() {
+  if (listTimer) {
+    clearInterval(listTimer);
+    listTimer = null;
+  }
+}
 
 async function loadAll(silent) {
   await Promise.all([loadStats(silent), loadList(silent)]);
@@ -66,16 +71,18 @@ async function loadAll(silent) {
 
 async function loadStats(silent) {
   try {
-    const resp = await fetch('/task/dashboard/stats');
-    if (!resp.ok) return;
-    const d = await resp.json();
-    document.getElementById('statTotal').textContent = d.total ?? 0;
-    document.getElementById('statQueued').textContent = d.queued ?? 0;
-    document.getElementById('statRunning').textContent = d.running ?? 0;
-    document.getElementById('statDone').textContent = d.done ?? 0;
-    document.getElementById('statFailed').textContent = d.failed ?? 0;
-    document.getElementById('statCancelled').textContent = d.cancelled ?? 0;
-  } catch (e) { if (!silent) console.error('loadStats', e); }
+    const response = await fetch('/task/dashboard/stats');
+    if (!response.ok) return;
+    const data = await response.json();
+    document.getElementById('statTotal').textContent = data.total ?? 0;
+    document.getElementById('statQueued').textContent = data.queued ?? 0;
+    document.getElementById('statRunning').textContent = data.running ?? 0;
+    document.getElementById('statDone').textContent = data.done ?? 0;
+    document.getElementById('statFailed').textContent = data.failed ?? 0;
+    document.getElementById('statCancelled').textContent = data.cancelled ?? 0;
+  } catch (error) {
+    if (!silent) console.error('loadStats', error);
+  }
 }
 
 async function loadList(silent) {
@@ -85,12 +92,14 @@ async function loadList(silent) {
     if (currentTypeFilter) params.set('task_type', currentTypeFilter);
     if (currentKeyword) params.set('keyword', currentKeyword);
 
-    const resp = await fetch('/task/list?' + params);
-    if (!resp.ok) return;
-    const d = await resp.json();
-    renderTable(d.items || []);
-    renderPagination(d.total || 0, d.page || 1, d.page_size || 20);
-  } catch (e) { if (!silent) console.error('loadList', e); }
+    const response = await fetch(`/task/list?${params.toString()}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    renderTable(data.items || []);
+    renderPagination(data.total || 0, data.page || 1, data.page_size || 20);
+  } catch (error) {
+    if (!silent) console.error('loadList', error);
+  }
 }
 
 function renderTable(items) {
@@ -103,23 +112,23 @@ function renderTable(items) {
   }
   empty.style.display = 'none';
 
-  body.innerHTML = items.map(t => {
-    const badge = STATUS_BADGE[t.status] || STATUS_BADGE.queued;
-    const progress = t.progress ?? 0;
-    const time = t.created_at ? formatTime(t.created_at) : '-';
-    const fname = escHtml(t.filename || '-');
-    const displayFname = fname.length > 40 ? fname.slice(0, 37) + '...' : fname;
-    return `<tr data-id="${t.task_id}" onclick="openDetail('${t.task_id}')">
-      <td>${escHtml(t.display_no || '-')}</td>
-      <td>${escHtml(t.task_label || t.task_type)}</td>
-      <td class="cell-filename" title="${fname}">${displayFname}</td>
+  body.innerHTML = items.map((task) => {
+    const badge = STATUS_BADGE[task.status] || STATUS_BADGE.queued;
+    const progress = task.progress ?? 0;
+    const createdAt = task.created_at ? formatTime(task.created_at) : '-';
+    const fileName = escHtml(task.filename || '-');
+    const shortName = fileName.length > 40 ? `${fileName.slice(0, 37)}...` : fileName;
+    return `<tr data-id="${task.task_id}" onclick="openDetail('${task.task_id}')">
+      <td>${escHtml(task.display_no || '-')}</td>
+      <td>${escHtml(task.task_label || task.task_type)}</td>
+      <td class="cell-filename" title="${fileName}">${shortName}</td>
       <td><span class="badge ${badge.cls}"><i class="fas ${badge.icon}"></i> ${badge.text}</span></td>
       <td><div class="mini-progress"><div class="mini-progress-fill" style="width:${progress}%"></div></div> <span style="font-size:12px;color:var(--muted)">${progress}%</span></td>
-      <td class="cell-time">${time}</td>
+      <td class="cell-time">${createdAt}</td>
       <td>
-        <button class="btn-detail" onclick="event.stopPropagation();openDetail('${t.task_id}')"><i class="fas fa-eye"></i> 详情</button>
-        ${(t.status === 'queued' || t.status === 'running') && !t.cancel_requested ? `<button class="btn-cancel-table" onclick="event.stopPropagation();cancelTask('${t.task_id}')" title="取消任务"><i class="fas fa-ban"></i></button>` : ''}
-        ${t.cancel_requested && t.status === 'running' ? `<span style="font-size:11px;color:#94a3b8;margin-left:4px">取消中...</span>` : ''}
+        <button class="btn-detail" onclick="event.stopPropagation();openDetail('${task.task_id}')"><i class="fas fa-eye"></i> 详情</button>
+        ${(task.status === 'queued' || task.status === 'running') && !task.cancel_requested ? `<button class="btn-cancel-table" onclick="event.stopPropagation();cancelTask('${task.task_id}')" title="取消任务"><i class="fas fa-ban"></i></button>` : ''}
+        ${task.cancel_requested && task.status === 'running' ? `<span style="font-size:11px;color:#94a3b8;margin-left:4px">取消中...</span>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -128,25 +137,29 @@ function renderTable(items) {
 function renderPagination(total, page, pageSize) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const container = document.getElementById('pagination');
-  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  if (totalPages <= 1) {
+    container.innerHTML = '';
+    return;
+  }
 
   let html = `<button ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})"><i class="fas fa-chevron-left"></i></button>`;
   const start = Math.max(1, page - 2);
   const end = Math.min(totalPages, page + 2);
-  if (start > 1) html += `<button onclick="goPage(1)">1</button>`;
-  if (start > 2) html += `<span>...</span>`;
-  for (let i = start; i <= end; i++) {
+  if (start > 1) html += '<button onclick="goPage(1)">1</button>';
+  if (start > 2) html += '<span>...</span>';
+  for (let i = start; i <= end; i += 1) {
     html += `<button class="${i === page ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
   }
-  if (end < totalPages - 1) html += `<span>...</span>`;
+  if (end < totalPages - 1) html += '<span>...</span>';
   if (end < totalPages) html += `<button onclick="goPage(${totalPages})">${totalPages}</button>`;
   html += `<button ${page >= totalPages ? 'disabled' : ''} onclick="goPage(${page + 1})"><i class="fas fa-chevron-right"></i></button>`;
   container.innerHTML = html;
 }
 
-function goPage(p) { currentPage = p; loadList(); }
-
-// ── Detail drawer ──
+function goPage(page) {
+  currentPage = page;
+  loadList();
+}
 
 function openDetail(taskId) {
   openTaskId = taskId;
@@ -166,69 +179,62 @@ function closeDrawer() {
 function startDetailPolling(taskId) {
   stopDetailPolling();
   detailTimer = setInterval(() => {
-    if (openTaskId !== taskId) { stopDetailPolling(); return; }
+    if (openTaskId !== taskId) {
+      stopDetailPolling();
+      return;
+    }
     loadDetail(taskId, true);
   }, DETAIL_POLL_INTERVAL);
 }
-function stopDetailPolling() { if (detailTimer) { clearInterval(detailTimer); detailTimer = null; } }
+
+function stopDetailPolling() {
+  if (detailTimer) {
+    clearInterval(detailTimer);
+    detailTimer = null;
+  }
+}
 
 async function loadDetail(taskId, silent) {
   try {
-    const resp = await fetch(`/task/${taskId}/detail`);
-    if (!resp.ok) return;
-    const d = await resp.json();
-    renderDetail(d);
-    if (d.status === 'done' || d.status === 'failed' || d.status === 'cancelled') stopDetailPolling();
-  } catch (e) { if (!silent) console.error('loadDetail', e); }
+    const response = await fetch(`/task/${taskId}/detail`);
+    if (!response.ok) return;
+    const data = await response.json();
+    renderDetail(data);
+    if (['done', 'failed', 'cancelled'].includes(data.status)) {
+      stopDetailPolling();
+    }
+  } catch (error) {
+    if (!silent) console.error('loadDetail', error);
+  }
 }
 
-function renderDetail(d) {
-  const badge = STATUS_BADGE[d.status] || STATUS_BADGE.queued;
-  const progress = d.progress ?? 0;
+function renderDetail(task) {
+  const badge = STATUS_BADGE[task.status] || STATUS_BADGE.queued;
+  const progress = task.progress ?? 0;
+  const createdAt = task.created_at ? formatTime(task.created_at) : '-';
+  const startedAt = task.started_at ? formatTime(task.started_at) : '-';
+  const finishedAt = task.finished_at ? formatTime(task.finished_at) : '-';
+  const duration = computeDuration(task.started_at, task.finished_at);
 
-  const startedStr = d.started_at ? formatTime(d.started_at) : '-';
-  const finishedStr = d.finished_at ? formatTime(d.finished_at) : '-';
-  const createdStr = d.created_at ? formatTime(d.created_at) : '-';
-  const duration = computeDuration(d.started_at, d.finished_at);
+  const inputItems = normalizeInputFiles(task.input_files);
+  const outputItems = Array.isArray(task.output_files) ? task.output_files : [];
 
-  let inputHtml = '';
-  if (d.input_files && typeof d.input_files === 'object') {
-    const entries = Object.entries(d.input_files).filter(([k, v]) => v && typeof v === 'string' && (k.endsWith('_path') || k === 'input_path'));
-    if (entries.length) {
-      inputHtml = entries.map(([k, v]) => {
-        const name = v.split('/').pop() || v;
-        return `<div class="file-item">
-          <span class="fi-name" title="${escHtml(v)}"><i class="fas fa-file-import" style="color:var(--amber);margin-right:6px"></i>${escHtml(name)}</span>
-          <button class="fi-dl" onclick="downloadFile('${d.task_id}','${escAttr(v)}')"><i class="fas fa-download"></i></button>
-        </div>`;
-      }).join('');
-    }
-  }
+  const inputHtml = inputItems.length ? `<div class="detail-section"><h3><i class="fas fa-file-import"></i> 输入文件</h3><div class="file-list">${inputItems.map((item) => {
+    const name = item.name || (item.path || '').split('/').pop() || '输入文件';
+    return `<div class="file-item"><span class="fi-name" title="${escHtml(item.path || '')}"><i class="fas fa-file-import" style="color:var(--amber);margin-right:6px"></i>${escHtml(name)}</span><button class="fi-dl" onclick="downloadFile('${task.task_id}','${escAttr(item.path || '')}','${escAttr(name)}')"><i class="fas fa-download"></i></button></div>`;
+  }).join('')}</div></div>` : '';
 
-  let outputHtml = '';
-  if (Array.isArray(d.output_files) && d.output_files.length) {
-    outputHtml = d.output_files.map(f => {
-      const displayName = f.name || f.path.split('/').pop();
-      return `<div class="file-item">
-        <span class="fi-name" title="${escHtml(f.path)}"><i class="fas fa-file-export" style="color:var(--green);margin-right:6px"></i>${escHtml(displayName)}</span>
-        <button class="fi-dl" onclick="downloadFile('${d.task_id}','${escAttr(f.path)}','${escAttr(displayName)}')"><i class="fas fa-download"></i></button>
-      </div>`;
-    }).join('');
-  }
+  const outputHtml = outputItems.length ? `<div class="detail-section"><h3><i class="fas fa-file-export"></i> 输出文件</h3><div class="file-list">${outputItems.map((item) => {
+    const displayName = item.name || (item.path || '').split('/').pop() || '输出文件';
+    return `<div class="file-item"><span class="fi-name" title="${escHtml(item.path || '')}"><i class="fas fa-file-export" style="color:var(--green);margin-right:6px"></i>${escHtml(displayName)}</span><button class="fi-dl" onclick="downloadFile('${task.task_id}','${escAttr(item.path || '')}','${escAttr(displayName)}')"><i class="fas fa-download"></i></button></div>`;
+  }).join('')}</div></div>` : '';
 
-  let errorHtml = '';
-  if (d.status === 'failed' && d.error) {
-    errorHtml = `<div class="detail-section"><h3><i class="fas fa-exclamation-triangle"></i> 错误信息</h3><div class="detail-error">${escHtml(d.error)}</div></div>`;
-  }
-
-  let logHtml = '';
-  if (d.stream_log) {
-    logHtml = `<div class="detail-section"><h3><i class="fas fa-terminal"></i> 运行日志</h3><pre class="detail-log">${escHtml(d.stream_log)}</pre></div>`;
-  }
+  const errorHtml = task.status === 'failed' && task.error ? `<div class="detail-section"><h3><i class="fas fa-exclamation-triangle"></i> 错误信息</h3><div class="detail-error">${escHtml(task.error)}</div></div>` : '';
+  const logHtml = task.stream_log ? `<div class="detail-section"><h3><i class="fas fa-terminal"></i> 运行日志</h3><pre class="detail-log">${escHtml(task.stream_log)}</pre></div>` : '';
 
   document.getElementById('drawerContent').innerHTML = `
-    <h2>${escHtml(d.display_no || '-')}</h2>
-    <div class="drawer-subtitle">${escHtml(d.task_label || d.task_type)} &middot; <span class="badge ${badge.cls}" style="font-size:12px"><i class="fas ${badge.icon}"></i> ${badge.text}</span></div>
+    <h2>${escHtml(task.display_no || '-')}</h2>
+    <div class="drawer-subtitle">${escHtml(task.task_label || task.task_type || '-')} &middot; <span class="badge ${badge.cls}" style="font-size:12px"><i class="fas ${badge.icon}"></i> ${badge.text}</span></div>
 
     <div class="detail-section">
       <h3><i class="fas fa-chart-simple"></i> 进度</h3>
@@ -236,78 +242,110 @@ function renderDetail(d) {
         <div class="detail-progress-bar" style="flex:1"><div class="detail-progress-fill" style="width:${progress}%"></div></div>
         <span style="font-weight:700;min-width:40px">${progress}%</span>
       </div>
-      <div style="color:var(--muted);font-size:13px;margin-top:6px">${escHtml(d.message || '')}</div>
-      ${(d.status === 'queued' || d.status === 'running') && !d.cancel_requested ? `<button class="btn-cancel" style="margin-top:10px" onclick="cancelTask('${d.task_id}')"><i class="fas fa-ban"></i> 取消任务</button>` : ''}
-      ${d.cancel_requested && d.status === 'running' ? `<div style="margin-top:10px;font-size:13px;color:#94a3b8"><i class="fas fa-spinner fa-spin"></i> 正在取消，等待当前步骤完成...</div>` : ''}
+      <div style="color:var(--muted);font-size:13px;margin-top:6px">${escHtml(task.message || '')}</div>
+      ${(task.status === 'queued' || task.status === 'running') && !task.cancel_requested ? `<button class="btn-cancel" style="margin-top:10px" onclick="cancelTask('${task.task_id}')"><i class="fas fa-ban"></i> 取消任务</button>` : ''}
+      ${task.cancel_requested && task.status === 'running' ? `<div style="margin-top:10px;font-size:13px;color:#94a3b8"><i class="fas fa-spinner fa-spin"></i> 正在取消，等待当前步骤结束...</div>` : ''}
     </div>
 
     <div class="detail-section">
       <h3><i class="fas fa-info-circle"></i> 基本信息</h3>
       <div class="detail-grid">
-        <div class="detail-item"><div class="dl">文件名</div><div class="dv">${escHtml(d.filename || '-')}</div></div>
+        <div class="detail-item"><div class="dl">文件名</div><div class="dv">${escHtml(task.filename || '-')}</div></div>
         <div class="detail-item"><div class="dl">耗时</div><div class="dv">${duration}</div></div>
-        <div class="detail-item"><div class="dl">提交时间</div><div class="dv">${createdStr}</div></div>
-        <div class="detail-item"><div class="dl">开始时间</div><div class="dv">${startedStr}</div></div>
-        <div class="detail-item"><div class="dl">完成时间</div><div class="dv">${finishedStr}</div></div>
+        <div class="detail-item"><div class="dl">提交时间</div><div class="dv">${createdAt}</div></div>
+        <div class="detail-item"><div class="dl">开始时间</div><div class="dv">${startedAt}</div></div>
+        <div class="detail-item"><div class="dl">完成时间</div><div class="dv">${finishedAt}</div></div>
       </div>
     </div>
 
-    ${inputHtml ? `<div class="detail-section"><h3><i class="fas fa-file-import"></i> 输入文件</h3><div class="file-list">${inputHtml}</div></div>` : ''}
-    ${outputHtml ? `<div class="detail-section"><h3><i class="fas fa-file-export"></i> 输出文件</h3><div class="file-list">${outputHtml}</div></div>` : ''}
+    ${inputHtml}
+    ${outputHtml}
     ${errorHtml}
     ${logHtml}
   `;
 }
 
+function normalizeInputFiles(inputFiles) {
+  if (!inputFiles || typeof inputFiles !== 'object') return [];
+  if (Array.isArray(inputFiles.files)) {
+    return inputFiles.files
+      .filter((item) => item && item.path)
+      .map((item) => ({ path: item.path, name: item.original_filename || item.path.split('/').pop() }));
+  }
+
+  return Object.entries(inputFiles)
+    .filter(([, value]) => typeof value === 'string' && value)
+    .filter(([key]) => key.endsWith('_path') || key === 'input_path')
+    .map(([key, value]) => ({
+      path: value,
+      name: key.endsWith('_path') ? key.replace(/_path$/, '') : value.split('/').pop(),
+    }));
+}
+
 function downloadFile(taskId, filePath, friendlyName) {
   let url = `/task/${taskId}/download?file_path=${encodeURIComponent(filePath)}`;
-  if (friendlyName) url += `&download_name=${encodeURIComponent(friendlyName)}`;
-  const a = document.createElement('a');
-  a.href = url; a.download = friendlyName || ''; a.click();
+  if (friendlyName) {
+    url += `&download_name=${encodeURIComponent(friendlyName)}`;
+  }
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = friendlyName || '';
+  link.click();
 }
 
 async function cancelTask(taskId) {
-  if (!confirm('确定要取消该任务吗？运行中的任务将在当前步骤完成后中止。')) return;
+  if (!confirm('确定要取消该任务吗？运行中的任务会在当前步骤结束后停止。')) {
+    return;
+  }
   try {
-    const resp = await fetch(`/task/${taskId}/cancel`, { method: 'POST' });
-    const d = await resp.json();
-    if (!resp.ok) { alert(d.detail || '取消失败'); return; }
+    const response = await fetch(`/task/${taskId}/cancel`, { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) {
+      alert(data.detail || '取消失败');
+      return;
+    }
     loadAll();
-    if (openTaskId === taskId) loadDetail(taskId);
-  } catch (e) {
-    console.error('cancelTask', e);
+    if (openTaskId === taskId) {
+      loadDetail(taskId);
+    }
+  } catch (error) {
+    console.error('cancelTask', error);
     alert('取消请求失败，请重试');
   }
 }
 
-// ── Helpers ──
-
-function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s ?? '';
-  return d.innerHTML;
+function escHtml(value) {
+  const div = document.createElement('div');
+  div.textContent = value ?? '';
+  return div.innerHTML;
 }
-function escAttr(s) { return (s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+function escAttr(value) {
+  return String(value || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
 
 function formatTime(iso) {
   if (!iso) return '-';
   try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    const pad = n => String(n).padStart(2, '0');
-    return `${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  } catch { return iso; }
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    const pad = (num) => String(num).padStart(2, '0');
+    return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  } catch {
+    return iso;
+  }
 }
 
 function computeDuration(start, end) {
   if (!start) return '-';
-  const s = new Date(start);
-  const e = end ? new Date(end) : new Date();
-  if (isNaN(s.getTime())) return '-';
-  let diff = Math.max(0, Math.floor((e - s) / 1000));
+  const startTime = new Date(start);
+  const endTime = end ? new Date(end) : new Date();
+  if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) return '-';
+
+  const diff = Math.max(0, Math.floor((endTime - startTime) / 1000));
   if (diff < 60) return `${diff}秒`;
-  if (diff < 3600) return `${Math.floor(diff/60)}分${diff%60}秒`;
-  return `${Math.floor(diff/3600)}时${Math.floor((diff%3600)/60)}分`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}分${diff % 60}秒`;
+  return `${Math.floor(diff / 3600)}小时${Math.floor((diff % 3600) / 60)}分`;
 }
 
 init();
