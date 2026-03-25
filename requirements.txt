@@ -115,3 +115,4 @@ xlsxwriter==3.2.9
 mtcnn==0.1.1
 tensorflow>=2.10.0,<2.16.0
 zhipuai==2.1.5.20250825
+zai-sdk==0.2.2
