@@ -38,8 +38,7 @@ RUN pip install paddlepaddle==3.2.2 \
     -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt \
-    && pip install zai-sdk==0.2.2 --no-deps
+RUN pip install -r requirements.txt
 
 COPY app/ ./app/
 COPY pdf2docx.py ./
