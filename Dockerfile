@@ -38,7 +38,8 @@ RUN pip install paddlepaddle==3.2.2 \
     -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install -r requirements.txt \
+    && pip install zai-sdk==0.2.2 --no-deps
 
 COPY app/ ./app/
 COPY pdf2docx.py ./
@@ -54,3 +55,4 @@ RUN mkdir -p uploads outputs temp_images \
 EXPOSE 8001
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+
