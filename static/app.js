@@ -1,4 +1,4 @@
-// ========== 全局变量 ==========
+﻿// ========== 全局变量 ==========
 let selectedFile = null;
 
 // ========== DOM 元素 ==========
@@ -200,6 +200,7 @@ async function processFile() {
     // 切换到处理界面
     uploadSection.style.display = 'none';
     processingSection.style.display = 'block';
+    ensureEtaHint();
 
     // 模拟进度
     let progress = 0;
@@ -455,3 +456,5 @@ function resetApp() {
     const queueOverlay = document.getElementById('queueOverlay');
     if (queueOverlay) queueOverlay.style.display = 'none';
 }
+
+

@@ -27,6 +27,79 @@ let selectedFiles = [];
 let pollingTimer = null;
 let config = { processing_modes: {} };
 
+const ETA_TIME_ZONE = 'Asia/Shanghai';
+let etaHint = null;
+
+function ensureEtaHint() {
+    if (etaHint && etaHint.isConnected) return etaHint;
+    const card = processingSection?.querySelector('.processing-card') || processingSection;
+    if (!card) return null;
+    etaHint = document.createElement('div');
+    etaHint.className = 'eta-hint';
+    etaHint.style.cssText = 'margin-top:10px;color:var(--text-secondary, var(--muted, #94a3b8));font-size:13px;';
+    etaHint.textContent = '预计完成时间：计算中...';
+    const anchor = processingStatus;
+    if (anchor?.parentNode) {
+        anchor.parentNode.insertBefore(etaHint, anchor.nextSibling);
+    } else {
+        card.appendChild(etaHint);
+    }
+    return etaHint;
+}
+
+function updateEtaHint(task) {
+    const el = ensureEtaHint();
+    if (!el) return;
+    const text = buildEtaText(task);
+    if (!text) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    el.style.display = 'block';
+    el.textContent = text;
+}
+
+function buildEtaText(task) {
+    if (!task) return '预计完成时间：计算中...';
+    if (task.status === 'failed' || task.status === 'cancelled') return '';
+    if (task.status === 'done' && task.finished_at) return `预计完成时间：${formatEtaMinute(task.finished_at)}`;
+    if (task.status === 'queued') return '预计完成时间：排队中，开始处理后计算';
+    const progress = Number(task.progress ?? 0);
+    if (!Number.isFinite(progress) || progress <= 0 || progress >= 100 || !task.created_at) return '预计完成时间：计算中...';
+    const createdAt = parseServerTime(task.created_at);
+    if (Number.isNaN(createdAt.getTime())) return '预计完成时间：计算中...';
+    const elapsedMs = Date.now() - createdAt.getTime();
+    if (elapsedMs <= 0) return '预计完成时间：计算中...';
+    const estimatedFinishedAt = new Date(createdAt.getTime() + (elapsedMs / (progress / 100)));
+    return `预计完成时间：${formatEtaDate(estimatedFinishedAt)}`;
+}
+
+function parseServerTime(iso) {
+    if (!iso) return new Date(NaN);
+    const normalized = /([zZ]|[+\-]\d{2}:\d{2})$/.test(iso) ? iso : `${iso}Z`;
+    return new Date(normalized);
+}
+
+function formatEtaMinute(iso) {
+    const date = parseServerTime(iso);
+    if (Number.isNaN(date.getTime())) return '-';
+    return formatEtaDate(date);
+}
+
+function formatEtaDate(date) {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: ETA_TIME_ZONE,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
+}
+
 const MODE_TIPS = {
     single: '单图处理只能上传 1 张图片。',
     merge: '多图合并会把多张属于同一驾驶证的图片合并成 1 份译文。',
@@ -186,7 +259,7 @@ async function pollStatus(taskId) {
         if (!response.ok) throw new Error(`状态查询失败: ${response.status}`);
         const data = await response.json();
 
-        updateProgress(data.progress || 0, data.message || '正在处理...');
+        updateProgress(data.progress || 0, data.message || '正在处理...', data);
         syncLog(data.stream_log || data.result?.stream_log || '');
 
         if (data.status === 'done') {
@@ -202,10 +275,11 @@ async function pollStatus(taskId) {
     }
 }
 
-function updateProgress(percent, message) {
+function updateProgress(percent, message, task = null) {
     progressFill.style.width = `${percent}%`;
     progressText.textContent = `${Math.round(percent)}%`;
     processingStatus.textContent = message;
+    updateEtaHint(task);
 }
 
 function syncLog(text) {
@@ -319,3 +393,7 @@ function escapeHtml(value) {
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
 }
+
+
+
+

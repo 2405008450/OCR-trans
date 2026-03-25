@@ -1,5 +1,6 @@
 ﻿const POLL_INTERVAL = 2000;
 const DETAIL_POLL_INTERVAL = 1500;
+const DASHBOARD_TIME_ZONE = 'Asia/Shanghai';
 
 let currentPage = 1;
 let currentPageSize = 20;
@@ -215,6 +216,7 @@ function renderDetail(task) {
   const startedAt = task.started_at ? formatTime(task.started_at) : '-';
   const finishedAt = task.finished_at ? formatTime(task.finished_at) : '-';
   const duration = computeDuration(task.started_at, task.finished_at);
+  const eta = estimateFinishTime(task);
 
   const inputItems = normalizeInputFiles(task.input_files);
   const outputItems = Array.isArray(task.output_files) ? task.output_files : [];
@@ -254,6 +256,7 @@ function renderDetail(task) {
         <div class="detail-item"><div class="dl">耗时</div><div class="dv">${duration}</div></div>
         <div class="detail-item"><div class="dl">提交时间</div><div class="dv">${createdAt}</div></div>
         <div class="detail-item"><div class="dl">开始时间</div><div class="dv">${startedAt}</div></div>
+        <div class="detail-item"><div class="dl">预计完成时间</div><div class="dv">${eta}</div></div>
         <div class="detail-item"><div class="dl">完成时间</div><div class="dv">${finishedAt}</div></div>
       </div>
     </div>
@@ -327,10 +330,9 @@ function escAttr(value) {
 function formatTime(iso) {
   if (!iso) return '-';
   try {
-    const date = new Date(iso);
+    const date = parseServerTime(iso);
     if (Number.isNaN(date.getTime())) return iso;
-    const pad = (num) => String(num).padStart(2, '0');
-    return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    return formatDateInEast8(date, true);
   } catch {
     return iso;
   }
@@ -338,8 +340,8 @@ function formatTime(iso) {
 
 function computeDuration(start, end) {
   if (!start) return '-';
-  const startTime = new Date(start);
-  const endTime = end ? new Date(end) : new Date();
+  const startTime = parseServerTime(start);
+  const endTime = end ? parseServerTime(end) : new Date();
   if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) return '-';
 
   const diff = Math.max(0, Math.floor((endTime - startTime) / 1000));
@@ -348,4 +350,67 @@ function computeDuration(start, end) {
   return `${Math.floor(diff / 3600)}小时${Math.floor((diff % 3600) / 60)}分`;
 }
 
+function estimateFinishTime(task) {
+  if (task.status === 'done' && task.finished_at) {
+    return formatTimeToMinute(task.finished_at);
+  }
+  if (task.status !== 'running') {
+    return '-';
+  }
+
+  const progress = Number(task.progress ?? 0);
+  if (!Number.isFinite(progress) || progress <= 0 || progress >= 100 || !task.created_at) {
+    return '-';
+  }
+
+  const createdAt = parseServerTime(task.created_at);
+  if (Number.isNaN(createdAt.getTime())) {
+    return '-';
+  }
+
+  const elapsedMs = Date.now() - createdAt.getTime();
+  if (elapsedMs <= 0) {
+    return '-';
+  }
+
+  const estimatedTotalMs = elapsedMs / (progress / 100);
+  const estimatedFinishedAt = new Date(createdAt.getTime() + estimatedTotalMs);
+  return formatDateInEast8(estimatedFinishedAt, false);
+}
+
+function formatTimeToMinute(iso) {
+  if (!iso) return '-';
+  try {
+    const date = parseServerTime(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return formatDateInEast8(date, false);
+  } catch {
+    return iso;
+  }
+}
+
+function parseServerTime(iso) {
+  if (!iso) return new Date(NaN);
+  const normalized = /([zZ]|[+\-]\d{2}:\d{2})$/.test(iso) ? iso : `${iso}Z`;
+  return new Date(normalized);
+}
+
+function formatDateInEast8(date, withSeconds) {
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: DASHBOARD_TIME_ZONE,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: withSeconds ? '2-digit' : undefined,
+    hour12: false,
+  }).formatToParts(date);
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return withSeconds
+    ? `${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`
+    : `${values.month}-${values.day} ${values.hour}:${values.minute}`;
+}
+
 init();
+

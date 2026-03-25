@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import traceback
 from pathlib import Path
@@ -56,6 +56,16 @@ def _task_to_dict(task) -> dict:
     }
 
 
+
+def _merge_queue_timestamps(payload: Optional[dict], queue_task: Optional[dict]) -> Optional[dict]:
+    if not payload:
+        return payload
+    merged = dict(payload)
+    if queue_task:
+        for key in ("task_id", "display_no", "created_at", "started_at", "finished_at"):
+            if key in queue_task and merged.get(key) is None:
+                merged[key] = queue_task.get(key)
+    return merged
 @router.get("/list")
 async def list_tasks(status: Optional[str] = Query(None), task_type: Optional[str] = Query(None), keyword: Optional[str] = Query(None), page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     with SessionLocal() as db:
@@ -127,14 +137,14 @@ async def get_run_task_status(task_id: str):
 
 
 @router.post("/number-check")
-async def run_number_check(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), gemini_route: str = Query(DEFAULT_GEMINI_ROUTE), model_name: str = Query("gemini-3-flash-preview")):
+async def run_number_check(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), gemini_route: str = Query("openrouter"), model_name: str = Query("gemini-3-flash-preview")):
     task_id = await task_queue_service.submit_number_check_task(original_file=original_file, translated_file=translated_file, gemini_route=gemini_route, model_name=model_name)
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
 
 @router.get("/number-check/config")
 async def get_number_check_config():
-    return {"models": get_number_check_models(), "default_model": "gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": DEFAULT_GEMINI_ROUTE}
+    return {"models": get_number_check_models(), "default_model": "gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "openrouter"}
 
 
 @router.get("/number-check/status/{task_id}")
@@ -148,7 +158,7 @@ async def get_number_check_status(task_id: str):
             queue_task["stream_log"] = progress.get("stream_log")
         return queue_task
     if progress and queue_task.get("status") != "queued":
-        return progress
+        return _merge_queue_timestamps(progress, queue_task)
     return queue_task
 
 
@@ -170,7 +180,7 @@ async def get_zhongfanyi_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     progress = zf_service.get_task_progress(task_id)
     if progress and queue_task.get("status") != "queued":
-        return progress
+        return _merge_queue_timestamps(progress, queue_task)
     return queue_task
 
 
@@ -198,11 +208,11 @@ async def update_zhongfanyi_rule(body: RuleUpdateBody):
 @router.get("/alignment/config")
 async def get_alignment_config():
     from app.service.alignment_service import AVAILABLE_MODELS as ALIGNMENT_MODELS, BUFFER_CHARS, SUPPORTED_LANGUAGES, THRESHOLD_MAP
-    return {"models": {name: {"description": info["description"], "id": info["id"], "max_output": info["max_output"]} for name, info in ALIGNMENT_MODELS.items()}, "routes": get_gemini_routes(), "default_route": DEFAULT_GEMINI_ROUTE, "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()}, "thresholds": THRESHOLD_MAP, "buffer_chars": BUFFER_CHARS}
+    return {"models": {name: {"description": info["description"], "id": info["id"], "max_output": info["max_output"]} for name, info in ALIGNMENT_MODELS.items()}, "routes": get_gemini_routes(), "default_route": "openrouter", "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()}, "thresholds": THRESHOLD_MAP, "buffer_chars": BUFFER_CHARS}
 
 
 @router.post("/alignment")
-async def run_alignment(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), source_lang: str = Query("zh"), target_lang: str = Query("en"), model_name: str = Query("Google gemini-3-flash-preview"), gemini_route: str = Query(DEFAULT_GEMINI_ROUTE), enable_post_split: bool = Query(True), threshold_2: int = Query(25000), threshold_3: int = Query(50000), threshold_4: int = Query(75000), threshold_5: int = Query(100000), threshold_6: int = Query(125000), threshold_7: int = Query(150000), threshold_8: int = Query(175000), buffer_chars: int = Query(2000)):
+async def run_alignment(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), source_lang: str = Query("zh"), target_lang: str = Query("en"), model_name: str = Query("Google gemini-3-flash-preview"), gemini_route: str = Query("openrouter"), enable_post_split: bool = Query(True), threshold_2: int = Query(25000), threshold_3: int = Query(50000), threshold_4: int = Query(75000), threshold_5: int = Query(100000), threshold_6: int = Query(125000), threshold_7: int = Query(150000), threshold_8: int = Query(175000), buffer_chars: int = Query(2000)):
     allowed_ext = {".docx", ".doc", ".pptx", ".xlsx", ".xls"}
     if os.path.splitext(original_file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported original file format")
@@ -226,7 +236,7 @@ async def get_alignment_status(task_id: str):
                 queue_task["result"]["stream_log"] = progress.get("stream_log")
         return queue_task
     if progress and queue_task.get("status") != "queued":
-        return progress
+        return _merge_queue_timestamps(progress, queue_task)
     return queue_task
 
 
@@ -259,11 +269,11 @@ async def get_drivers_license_status(task_id: str):
 
 @router.get("/doc-translate/config")
 async def get_doc_translate_config():
-    return {"models": get_doc_translate_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": DEFAULT_GEMINI_ROUTE, "languages": get_supported_languages()}
+    return {"models": get_doc_translate_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "openrouter", "languages": get_supported_languages()}
 
 
 @router.post("/doc-translate")
-async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query(DEFAULT_GEMINI_ROUTE)):
+async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("openrouter")):
     allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
     if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
@@ -281,11 +291,11 @@ async def get_doc_translate_status(task_id: str):
 
 @router.get("/pdf2docx/config")
 async def get_pdf2docx_config():
-    return {"models": get_pdf2docx_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": DEFAULT_GEMINI_ROUTE}
+    return {"models": get_pdf2docx_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "google"}
 
 
 @router.post("/pdf2docx")
-async def run_pdf2docx(file: UploadFile = File(...), model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query(DEFAULT_GEMINI_ROUTE)):
+async def run_pdf2docx(file: UploadFile = File(...), model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
     allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
@@ -313,3 +323,7 @@ async def get_pdf2docx_status(task_id: str):
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")
     return queue_task
+
+
+
+

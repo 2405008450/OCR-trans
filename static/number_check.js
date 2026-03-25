@@ -1,4 +1,4 @@
-const originalFileInput = document.getElementById('originalFile');
+﻿const originalFileInput = document.getElementById('originalFile');
 const translatedFileInput = document.getElementById('translatedFile');
 const btnRunCheck = document.getElementById('btnRunCheck');
 const btnReset = document.getElementById('btnReset');
@@ -17,6 +17,93 @@ const processingText = document.getElementById('processingText');
 
 const POLL_INTERVAL = 1000;
 
+const ETA_TIME_ZONE = 'Asia/Shanghai';
+let etaHint = null;
+
+function ensureEtaHint() {
+    if (etaHint && etaHint.isConnected) return etaHint;
+    const card = processingSection?.querySelector('.processing-card') || processingSection;
+    if (!card) return null;
+    etaHint = document.createElement('div');
+    etaHint.className = 'eta-hint';
+    etaHint.style.cssText = 'margin-top:10px;color:var(--text-secondary, var(--muted, #94a3b8));font-size:13px;';
+    etaHint.textContent = '预计完成时间：计算中...';
+    const anchor = typeof processingText !== 'undefined' && processingText ? processingText : null;
+    if (anchor?.parentNode) {
+        anchor.parentNode.insertBefore(etaHint, anchor.nextSibling);
+    } else {
+        card.appendChild(etaHint);
+    }
+    return etaHint;
+}
+
+function updateEtaHint(task) {
+    const el = ensureEtaHint();
+    if (!el) return;
+    const text = buildEtaText(task);
+    if (!text) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    el.style.display = 'block';
+    el.textContent = text;
+}
+
+function buildEtaText(task) {
+    if (!task) return '预计完成时间：计算中...';
+    if (task.status === 'failed' || task.status === 'cancelled') return '';
+    if (task.status === 'done' && task.finished_at) {
+        return `预计完成时间：${formatEtaMinute(task.finished_at)}`;
+    }
+    if (task.status === 'queued') {
+        return '预计完成时间：排队中，开始处理后计算';
+    }
+
+    const progress = Number(task.progress ?? 0);
+    if (!Number.isFinite(progress) || progress <= 0 || progress >= 100 || !task.created_at) {
+        return '预计完成时间：计算中...';
+    }
+
+    const createdAt = parseServerTime(task.created_at);
+    if (Number.isNaN(createdAt.getTime())) {
+        return '预计完成时间：计算中...';
+    }
+
+    const elapsedMs = Date.now() - createdAt.getTime();
+    if (elapsedMs <= 0) {
+        return '预计完成时间：计算中...';
+    }
+
+    const estimatedTotalMs = elapsedMs / (progress / 100);
+    const estimatedFinishedAt = new Date(createdAt.getTime() + estimatedTotalMs);
+    return `预计完成时间：${formatEtaDate(estimatedFinishedAt)}`;
+}
+
+function parseServerTime(iso) {
+    if (!iso) return new Date(NaN);
+    const normalized = /([zZ]|[+\-]\d{2}:\d{2})$/.test(iso) ? iso : `${iso}Z`;
+    return new Date(normalized);
+}
+
+function formatEtaMinute(iso) {
+    const date = parseServerTime(iso);
+    if (Number.isNaN(date.getTime())) return '-';
+    return formatEtaDate(date);
+}
+
+function formatEtaDate(date) {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: ETA_TIME_ZONE,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
+}
 const MODEL_DISPLAY_NAMES = {
     'gemini-3-flash-preview': '快速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
@@ -40,6 +127,7 @@ init();
 async function init() {
     ensureOptionControls();
     ensureLogPanel();
+    ensureEtaHint();
     bindEvents();
     await loadConfig();
 }
@@ -83,6 +171,8 @@ function ensureOptionControls() {
     }
 
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
+    const routeGroup = geminiRouteSelect?.closest('.option-group');
+    if (routeGroup) routeGroup.style.display = 'none';
     modelSelect = document.getElementById('numberCheckModelSelect');
     modelSelect?.addEventListener('change', updateModelHint);
 }
@@ -184,7 +274,7 @@ async function runNumberCheck() {
         formData.append('translated_file', translatedFile);
 
         const params = new URLSearchParams({
-            gemini_route: geminiRouteSelect?.value || defaultRoute,
+            gemini_route: 'openrouter',
             model_name: modelSelect?.value || defaultModel,
         });
 
@@ -211,11 +301,13 @@ async function runNumberCheck() {
     }
 }
 
-function updateProgressUI(progress, message, details = []) {
+function updateProgressUI(progress, message, details = [], task = null) {
     progressBar.style.setProperty('--progress', `${progress}%`);
     progressPercent.textContent = `${progress}%`;
     processingTitle.textContent = message || '数字专检处理中...';
     processingText.textContent = message || '正在处理...';
+
+    updateEtaHint(task);
 
     if (details?.length) {
         progressDetails.innerHTML = details.map((item) => `<div class="detail-item">${escapeHtml(item)}</div>`).join('');
@@ -232,7 +324,7 @@ async function pollTaskStatus(taskId) {
         }
 
         const status = await resp.json();
-        updateProgressUI(status.progress || 0, status.message || '正在处理...', status.details || []);
+        updateProgressUI(status.progress || 0, status.message || '正在处理...', status.details || [], status);
         syncLog(status.stream_log || status.result?.stream_log || '');
 
         if (status.status === 'done') {
@@ -363,3 +455,5 @@ function escapeHtml(value) {
 function getModelDisplayName(name) {
     return MODEL_DISPLAY_NAMES[name] || name;
 }
+
+

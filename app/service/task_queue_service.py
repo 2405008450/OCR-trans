@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import io
 import json
 import traceback
@@ -177,7 +177,7 @@ class TaskQueueService:
                 return None
             result = json.loads(task.result_json) if task.result_json else None
             tasks_ahead = task_repo.count_tasks_ahead(db, task) if task.status == 'queued' else 0
-            payload = {'display_no': task.display_no, 'status': {'queued': 'queued', 'running': 'processing', 'done': 'done', 'failed': 'failed', 'cancelled': 'cancelled'}.get(task.status, task.status), 'progress': task.progress, 'message': task.message or '', 'details': [], 'result': result, 'error': task.error_message, 'stream_log': self._task_logs.get(task_id, '')}
+            payload = {'display_no': task.display_no, 'task_id': task.task_id, 'status': {'queued': 'queued', 'running': 'processing', 'done': 'done', 'failed': 'failed', 'cancelled': 'cancelled'}.get(task.status, task.status), 'progress': task.progress, 'message': task.message or '', 'details': [], 'result': result, 'error': task.error_message, 'stream_log': self._task_logs.get(task_id, ''), 'created_at': task.created_at.isoformat() if task.created_at else None, 'started_at': task.started_at.isoformat() if task.started_at else None, 'finished_at': task.finished_at.isoformat() if task.finished_at else None}
             if task.status == 'queued':
                 payload['queue_position'] = tasks_ahead + 1
                 payload['tasks_ahead'] = tasks_ahead
@@ -302,7 +302,7 @@ class TaskQueueService:
         await update(5, 'number check started')
         original_upload = UploadFile(filename=input_files.get('original_filename') or 'original.docx', file=io.BytesIO(Path(input_files['original_path']).read_bytes()))
         translated_upload = UploadFile(filename=input_files.get('translated_filename') or 'translated.docx', file=io.BytesIO(Path(input_files['translated_path']).read_bytes()))
-        job = asyncio.create_task(run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no, gemini_route=params.get('gemini_route', 'google'), model_name=params.get('model_name', 'gemini-3-flash-preview')))
+        job = asyncio.create_task(run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no, gemini_route=params.get('gemini_route', 'openrouter'), model_name=params.get('model_name', 'gemini-3-flash-preview')))
         await self._mirror_progress(task_id, job, lambda: get_number_check_progress(task_id), update)
         return await job
 
@@ -331,7 +331,7 @@ class TaskQueueService:
     async def _execute_doc_translate(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'doc translate started')
         target_langs = [lang.strip() for lang in params.get('target_langs', 'en').split(',') if lang.strip()]
-        return await execute_doc_translate_task(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', source_lang=params.get('source_lang', 'zh'), target_langs=target_langs, ocr_model=params.get('ocr_model', 'google/gemini-3-flash-preview'), gemini_route=params.get('gemini_route', 'google'), progress_callback=update, executor=self._task_executor)
+        return await execute_doc_translate_task(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', source_lang=params.get('source_lang', 'zh'), target_langs=target_langs, ocr_model=params.get('ocr_model', 'google/gemini-3-flash-preview'), gemini_route=params.get('gemini_route', 'openrouter'), progress_callback=update, executor=self._task_executor)
 
     async def _execute_pdf2docx(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'pdf2docx started')
@@ -406,3 +406,4 @@ class TaskQueueService:
 
 task_queue_service = TaskQueueService()
 ocr_task_queue = task_queue_service
+

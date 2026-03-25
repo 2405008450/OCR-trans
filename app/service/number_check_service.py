@@ -1,10 +1,12 @@
-import asyncio
+﻿import asyncio
+import importlib.machinery
 import logging
 import os
 import re
 import shutil
 import sys
 import threading
+import types
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +21,95 @@ from app.service.gemini_service import ensure_gemini_route_configured
 
 _task_progress: Dict[str, Dict[str, Any]] = {}
 logger = logging.getLogger("app.number_check")
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+NUMBER_CHECK_V2_ROOT = REPO_ROOT / "专检" / "数值检查V2"
+NUMBER_CHECK_V2_PROJECT_ROOT = NUMBER_CHECK_V2_ROOT / "llm" / "llm_project"
+
+
+def _specialized_output_dir(section: str, folder: str = "output_json") -> Path:
+    return NUMBER_CHECK_V2_PROJECT_ROOT / section / folder
+
+
+def _patch_v2_replace_helper(fix_replace_docx_module) -> None:
+    def _safe_replace_and_add_comment_in_paragraph(
+        paragraph,
+        pattern: str,
+        old_value: str,
+        new_value: str,
+        comment_manager,
+        reason: str = "",
+        anchor_pattern: str = None,
+    ) -> bool:
+        runs = list(paragraph.runs)
+        if not runs:
+            return False
+
+        full_text = "".join(r.text or "" for r in runs)
+        flags = re.IGNORECASE | re.DOTALL
+        if anchor_pattern and not re.search(anchor_pattern, full_text, flags=flags):
+            return False
+
+        match = re.search(pattern, full_text, flags=flags)
+        if not match:
+            return False
+
+        start, end = match.span()
+        if start == end:
+            return False
+
+        spans = []
+        cursor = 0
+        for run in runs:
+            text = run.text or ""
+            spans.append((run, cursor, cursor + len(text)))
+            cursor += len(text)
+
+        hit = [(run, s, e) for run, s, e in spans if start < e and end > s]
+        if not hit:
+            return False
+
+        first_run, fs, _ = hit[0]
+        last_run, ls, _ = hit[-1]
+        prefix = first_run.text[: max(0, start - fs)]
+        suffix = last_run.text[max(0, end - ls):]
+
+        for run, _, _ in hit:
+            run.text = ""
+
+        parent = first_run._element.getparent()
+        insert_pos = parent.index(first_run._element)
+
+        if prefix:
+            prefix_run = paragraph.add_run(prefix)
+            parent.remove(prefix_run._element)
+            parent.insert(insert_pos, prefix_run._element)
+            insert_pos += 1
+
+        new_run = paragraph.add_run(new_value)
+        parent.remove(new_run._element)
+        parent.insert(insert_pos, new_run._element)
+        insert_pos += 1
+
+        new_run.bold = first_run.bold
+        new_run.italic = first_run.italic
+        new_run.font.name = first_run.font.name
+        new_run.font.size = first_run.font.size
+
+        if suffix:
+            suffix_run = paragraph.add_run(suffix)
+            parent.remove(suffix_run._element)
+            parent.insert(insert_pos, suffix_run._element)
+
+        comment_text = (
+            f"【修改建议】\n"
+            f"原值: {old_value}\n"
+            f"新值: {new_value}\n"
+            f"修改理由: {reason or ''}"
+        )
+        return comment_manager.add_comment_to_run(new_run, comment_text)
+
+    fix_replace_docx_module.replace_and_add_comment_in_paragraph = _safe_replace_and_add_comment_in_paragraph
 
 # 专检模块导入锁：防止并发任务修改 sys.path / sys.modules 时互相干扰
 _specialist_import_lock = threading.Lock()
@@ -186,12 +277,12 @@ def _validate_docx(file: UploadFile, label: str) -> None:
 
 def _prepare_specialized_import_path() -> None:
     """
-    将 专检/数值检查/ 目录加入 sys.path，并清理可能由其他专检模块（如 zhongfanyi）
+    将 专检/数值检查V2/ 目录加入 sys.path，并清理可能由其他专检模块（如 zhongfanyi）
     遗留的同名 'llm.*' 缓存，避免 sys.modules 命名空间污染。
     """
     repo_root = Path(__file__).resolve().parents[2]
     # 硬编码精确路径，避免 rglob 误匹配 zhongfanyi 同名 llm_project
-    specialized_root = repo_root / "专检" / "数值检查"
+    specialized_root = NUMBER_CHECK_V2_ROOT
     if not specialized_root.exists():
         # 兼容：如果目录名编码不同（Windows 中文路径），也用 rglob 兜底
         for candidate in repo_root.glob("专检/*/llm/llm_project"):
@@ -204,6 +295,9 @@ def _prepare_specialized_import_path() -> None:
                     break
     if not specialized_root.exists():
         raise FileNotFoundError(f"未找到数字专检依赖目录: {specialized_root}")
+    specialized_llm_root = specialized_root / "llm"
+    if not specialized_llm_root.exists():
+        raise FileNotFoundError(f"未找到数字专检 llm 目录: {specialized_llm_root}")
 
     specialized_root_str = str(specialized_root)
 
@@ -237,6 +331,13 @@ def _prepare_specialized_import_path() -> None:
             if stale:
                 logger.info(f"[import] 清除了 {len(stale)} 个来自其他目录的 llm.* 污染缓存")
 
+    # 显式注册 llm 命名空间包，避免被第三方同名包或其他专检目录抢占
+    llm_module = types.ModuleType("llm")
+    llm_module.__path__ = [str(specialized_llm_root)]
+    llm_module.__package__ = "llm"
+    llm_module.__spec__ = importlib.machinery.ModuleSpec("llm", loader=None, is_package=True)
+    llm_module.__spec__.submodule_search_locations = [str(specialized_llm_root)]
+    sys.modules["llm"] = llm_module
     if specialized_root_str not in sys.path:
         sys.path.insert(0, specialized_root_str)
 
@@ -245,8 +346,9 @@ def _apply_all_fixes(
     doc: Document,
     errors: List[Dict[str, Any]],
     label: str,
-    replace_and_comment_in_docx,
-    comment_manager,
+    region: str,
+    replace_func,
+    processor,
     task_id: Optional[str] = None,
     progress_callback: Optional[Callable[[int, int, str, List[str]], None]] = None,
 ) -> Dict[str, int]:
@@ -274,14 +376,15 @@ def _apply_all_fixes(
             if task_id:
                 _emit_log(task_id, f"[fix]   [{idx}/{total}] 跳过: 缺少【译文数值】或【译文修改建议值】", level="warning")
         else:
-            ok, strategy = replace_and_comment_in_docx(
+            ok, strategy = replace_func(
                 doc,
                 old,
                 new,
                 reason,
-                comment_manager,
+                processor,
                 context=context,
                 anchor_text=anchor,
+                region=region,
             )
             if ok:
                 success += 1
@@ -333,19 +436,26 @@ def _run_number_check_sync(
         if settings.OPENROUTER_API_KEY:
             os.environ["OPENROUTER_API_KEY"] = settings.OPENROUTER_API_KEY
             os.environ["OPENAI_API_KEY"] = settings.OPENROUTER_API_KEY
+            # 数值检查 V2 的 llm_check/check.py 仍读取 API_KEY/BASE_URL
+            os.environ["API_KEY"] = settings.OPENROUTER_API_KEY
         if settings.OPENROUTER_BASE_URL:
             os.environ["OPENROUTER_BASE_URL"] = settings.OPENROUTER_BASE_URL
+            os.environ["BASE_URL"] = settings.OPENROUTER_BASE_URL
         os.environ["GEMINI_ROUTE"] = gemini_route
+        os.environ["NUMBER_CHECK_MODEL"] = model_name
 
         _update_progress(task_id, 2, 7, "正在加载处理模块...")
         from llm.llm_project.llm_check.check import Match
-        from llm.llm_project.parsers.body_extractor import extract_body_text
-        from llm.llm_project.parsers.footer_extractor import extract_footers
-        from llm.llm_project.parsers.header_extractor import extract_headers
+        from llm.llm_project.parsers.word.body_extractor import extract_body_text
+        from llm.llm_project.parsers.word.footer_extractor import extract_footers
+        from llm.llm_project.parsers.word.header_extractor import extract_headers
+        import llm.llm_project.replace.fix_replace_docx as fix_replace_docx_module
         from llm.llm_project.replace.fix_replace_docx import ensure_backup_copy
-        from llm.llm_project.replace.fix_replace_json import CommentManager, replace_and_comment_in_docx
-        from llm.utils.clean_json import load_json_file
-        from llm.utils.json_files import write_json_with_timestamp
+        from llm.llm_project.replace.replace_revision import replace_and_revise_in_docx
+        from llm.llm_project.revise.revision import RevisionManager
+        from llm.llm_project.parsers.json.clean_json import extract_and_parse
+        from llm.llm_project.utils.json_files import write_json_with_timestamp
+        _patch_v2_replace_helper(fix_replace_docx_module)
 
     # ── 阶段 1：逐步提取文本 ─────────────────────────────────────
     _update_progress(task_id, 3, 7, "正在提取文档文本...")
@@ -359,13 +469,17 @@ def _run_number_check_sync(
     _emit_log(task_id, f"[extract]   译文正文长度: {len(translated_body)} 字符")
 
     _emit_log(task_id, "[extract] 正在提取页眉...")
-    original_header = extract_headers(str(original_path))
-    translated_header = extract_headers(str(translated_path))
+    original_header_raw = extract_headers(str(original_path))
+    translated_header_raw = extract_headers(str(translated_path))
+    original_header = "\n".join(original_header_raw) if isinstance(original_header_raw, list) else (original_header_raw or "")
+    translated_header = "\n".join(translated_header_raw) if isinstance(translated_header_raw, list) else (translated_header_raw or "")
     _emit_log(task_id, f"[extract]   原文页眉: {len(original_header)} 字符 / 译文页眉: {len(translated_header)} 字符")
 
     _emit_log(task_id, "[extract] 正在提取页脚...")
-    original_footer = extract_footers(str(original_path))
-    translated_footer = extract_footers(str(translated_path))
+    original_footer_raw = extract_footers(str(original_path))
+    translated_footer_raw = extract_footers(str(translated_path))
+    original_footer = "\n".join(original_footer_raw) if isinstance(original_footer_raw, list) else (original_footer_raw or "")
+    translated_footer = "\n".join(translated_footer_raw) if isinstance(translated_footer_raw, list) else (translated_footer_raw or "")
     _emit_log(task_id, f"[extract]   原文页脚: {len(original_footer)} 字符 / 译文页脚: {len(translated_footer)} 字符")
 
     def _preview(text: str, limit: int = 200) -> str:
@@ -385,11 +499,11 @@ def _run_number_check_sync(
     _update_progress(task_id, 4, 7, "正在对比数值差异...")
     _emit_log(task_id, f"[compare] === LLM 对比  路线={gemini_route}  模型={model_name} ===")
 
-    matcher = Match(model_name=model_name, task_logger=lambda message: _emit_log(task_id, message))
+    matcher = Match()
     parts = [
-        ("正文", original_body, translated_body, report_dir / "body"),
-        ("页眉", original_header, translated_header, report_dir / "header"),
-        ("页脚", original_footer, translated_footer, report_dir / "footer"),
+        ("正文", original_body, translated_body, _specialized_output_dir("zhengwen")),
+        ("页眉", original_header, translated_header, _specialized_output_dir("yemei")),
+        ("页脚", original_footer, translated_footer, _specialized_output_dir("yejiao")),
     ]
 
     report_paths: Dict[str, str] = {}
@@ -416,9 +530,9 @@ def _run_number_check_sync(
 
     # ── 阶段 3：加载报告 ─────────────────────────────────────────
     _update_progress(task_id, 5, 7, "正在加载检查报告...")
-    body_errors = load_json_file(report_paths.get("正文"))
-    header_errors = load_json_file(report_paths.get("页眉"))
-    footer_errors = load_json_file(report_paths.get("页脚"))
+    body_errors = extract_and_parse(report_paths.get("正文"))
+    header_errors = extract_and_parse(report_paths.get("页眉"))
+    footer_errors = extract_and_parse(report_paths.get("页脚"))
 
     def _log_errors_preview(label: str, errors: list) -> None:
         _emit_log(task_id, f"[report] 已加载 {label} 报告: {len(errors)} 条错误")
@@ -435,27 +549,26 @@ def _run_number_check_sync(
     _log_errors_preview("正文", body_errors)
     _log_errors_preview("页眉", header_errors)
     _log_errors_preview("页脚", footer_errors)
-
-    # ── 阶段 4：自动替换与批注 ────────────────────────────────────
-    _emit_log(task_id, "[fix] === 阶段 3：自动替换与批注 ===")
+    # ── 阶段 4：自动替换与修订 ────────────────────────────────────
+    _emit_log(task_id, "[fix] === 阶段 3：自动替换与修订 ===")
     _emit_log(task_id, "[fix] 正在创建译文备份...")
     backup_copy_path = ensure_backup_copy(str(translated_path))
     _emit_log(task_id, f"[fix] 备份路径: {backup_copy_path}")
     doc = Document(backup_copy_path)
-    comment_manager = CommentManager(doc)
-    comment_manager.create_initial_comment()
+    revision_manager = RevisionManager(doc, author="翻译校对")
+    _emit_log(task_id, "[fix] 修订模式已启用（Track Changes）")
 
     def progress_callback(current: int, total: int, message: str, details: List[str]) -> None:
         _update_progress(task_id, 5, 7, message, details)
 
-    body_stat = _apply_all_fixes(doc, body_errors, "正文", replace_and_comment_in_docx, comment_manager,
+    body_stat = _apply_all_fixes(doc, body_errors, "正文", "body", replace_and_revise_in_docx, revision_manager,
                                   task_id=task_id, progress_callback=progress_callback)
-    header_stat = _apply_all_fixes(doc, header_errors, "页眉", replace_and_comment_in_docx, comment_manager,
+    header_stat = _apply_all_fixes(doc, header_errors, "页眉", "header", replace_and_revise_in_docx, revision_manager,
                                     task_id=task_id, progress_callback=progress_callback)
-    footer_stat = _apply_all_fixes(doc, footer_errors, "页脚", replace_and_comment_in_docx, comment_manager,
+    footer_stat = _apply_all_fixes(doc, footer_errors, "页脚", "footer", replace_and_revise_in_docx, revision_manager,
                                     task_id=task_id, progress_callback=progress_callback)
 
-    _update_progress(task_id, 6, 7, "正在保存修复后的文档...")
+    _update_progress(task_id, 6, 7, "正在保存修订后的文档...")
     doc.save(backup_copy_path)
 
     final_doc_path = output_dir / "corrected.docx"
@@ -553,3 +666,10 @@ async def run_number_check_task(
         _emit_log(task_id, f"[error] 任务失败: {type(exc).__name__}: {exc}", level="error")
         _complete_task(task_id, error=str(exc))
         raise
+
+
+
+
+
+
+

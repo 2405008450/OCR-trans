@@ -21,7 +21,6 @@ Word 转 PDF + 完整内容提取（模块化版本）
 import os
 import sys
 import argparse
-import win32com.client
 from pathlib import Path
 import pdfplumber
 from typing import List, Dict, Tuple, Optional, Any
@@ -116,6 +115,18 @@ class WordToPDFService:
         """
         word_path = str(Path(word_path).resolve())
         pdf_path = str(Path(pdf_path).resolve())
+
+        if sys.platform != "win32":
+            if verbose:
+                print("[Word->PDF] 当前平台不支持 win32com，Word 转 PDF 仅支持 Windows。")
+            return False
+
+        try:
+            import win32com.client
+        except ImportError:
+            if verbose:
+                print("[Word->PDF] 未安装 win32com/pywin32，无法执行 Word 转 PDF。")
+            return False
 
         word = win32com.client.Dispatch("Word.Application")
         word.Visible = False
@@ -666,3 +677,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

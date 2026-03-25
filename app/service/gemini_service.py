@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
 import random
 import time
 from typing import Callable, Dict, Optional
 
+import requests.exceptions
+import urllib3.exceptions
 from google import genai
 from google.genai import types
 from google.genai.errors import ClientError
@@ -11,11 +14,38 @@ from openai import OpenAI
 
 from app.core.config import settings
 
+_RETRYABLE_NETWORK_ERRORS = (
+    ConnectionError,
+    TimeoutError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+    urllib3.exceptions.ProtocolError,
+    urllib3.exceptions.TimeoutError,
+    OSError,
+)
+
+_VERTEX_RETRYABLE_ERROR_MARKERS = (
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "resource_exhausted",
+    "internal",
+    "unavailable",
+    "deadline_exceeded",
+    "connection reset",
+    "connection aborted",
+    "timed out",
+    "goaway",
+)
+
 GeminiLogCallback = Optional[Callable[[str], None]]
 
 GEMINI_ROUTE_GOOGLE = "google"
 GEMINI_ROUTE_OPENROUTER = "openrouter"
-# 读取 .env 中的 GEMINI_DEFAULT_ROUTE，fallback 到 google
+
 DEFAULT_GEMINI_ROUTE = (
     settings.GEMINI_DEFAULT_ROUTE
     if settings.GEMINI_DEFAULT_ROUTE in (GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_OPENROUTER)
@@ -25,11 +55,11 @@ DEFAULT_GEMINI_ROUTE = (
 GEMINI_ROUTE_OPTIONS: Dict[str, Dict[str, str]] = {
     GEMINI_ROUTE_GOOGLE: {
         "label": "线路1 (推荐)",
-        "description": "主线路，直连官方 API，速度更快、更稳定。",
+        "description": "直连 Google Vertex AI，速度快；失败时会自动回退到 OpenRouter。",
     },
     GEMINI_ROUTE_OPENROUTER: {
         "label": "线路2",
-        "description": "备用线路，通过中转服务转发，适合主线路不可用时使用。",
+        "description": "经 OpenRouter 中转，通常更宽松，适合作为备选线路。",
     },
 }
 
@@ -41,7 +71,9 @@ def get_gemini_routes() -> Dict[str, Dict[str, str]]:
 def normalize_gemini_route(route: Optional[str]) -> str:
     if route in GEMINI_ROUTE_OPTIONS:
         return route
-    return settings.GEMINI_DEFAULT_ROUTE if settings.GEMINI_DEFAULT_ROUTE in GEMINI_ROUTE_OPTIONS else DEFAULT_GEMINI_ROUTE
+    if settings.GEMINI_DEFAULT_ROUTE in GEMINI_ROUTE_OPTIONS:
+        return settings.GEMINI_DEFAULT_ROUTE
+    return DEFAULT_GEMINI_ROUTE
 
 
 def normalize_google_model(model: str) -> str:
@@ -70,22 +102,29 @@ def ensure_gemini_route_configured(route: Optional[str]) -> str:
     return normalized
 
 
-def _get_vertex_client() -> genai.Client:
+def _get_vertex_client(timeout: float = 600.0) -> genai.Client:
     return genai.Client(
         vertexai=True,
         project=settings.VERTEX_PROJECT_ID,
         location=settings.VERTEX_LOCATION,
+        http_options=types.HttpOptions(timeout=int(timeout * 1000)),
     )
+
+
+def _is_retryable_vertex_client_error(exc: ClientError) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _VERTEX_RETRYABLE_ERROR_MARKERS)
 
 
 def _generate_with_retry(
     model: str,
     contents,
     config=None,
-    max_retries: int = 6,
+    max_retries: int = 2,
+    timeout: float = 600.0,
     log_callback: GeminiLogCallback = None,
 ):
-    client = _get_vertex_client()
+    client = _get_vertex_client(timeout=timeout)
     delay = 2.0
     for attempt in range(max_retries):
         try:
@@ -94,18 +133,28 @@ def _generate_with_retry(
                 contents=contents,
                 config=config,
             )
-        except ClientError as e:
-            msg = str(e)
-            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                if attempt == max_retries - 1:
-                    raise
-                sleep_s = delay + random.uniform(0, 1.5)
-                if log_callback:
-                    log_callback(f"[vertex] 429 限流，等待 {sleep_s:.1f}s 后重试... ({attempt + 1}/{max_retries})")
-                time.sleep(sleep_s)
-                delay *= 2
-            else:
+        except ClientError as exc:
+            if attempt == max_retries - 1 or not _is_retryable_vertex_client_error(exc):
                 raise
+            sleep_s = delay + random.uniform(0, 1.5)
+            if log_callback:
+                log_callback(
+                    f"[vertex] 可重试错误 ({type(exc).__name__})，等待 {sleep_s:.1f}s 后重试... ({attempt + 1}/{max_retries})"
+                )
+            time.sleep(sleep_s)
+            delay = min(delay * 2, 30)
+            client = _get_vertex_client(timeout=timeout)
+        except _RETRYABLE_NETWORK_ERRORS as exc:
+            if attempt == max_retries - 1:
+                raise
+            sleep_s = delay + random.uniform(0, 2.0)
+            if log_callback:
+                log_callback(
+                    f"[vertex] 网络异常 ({type(exc).__name__})，等待 {sleep_s:.1f}s 后重试... ({attempt + 1}/{max_retries})"
+                )
+            time.sleep(sleep_s)
+            delay = min(delay * 2, 30)
+            client = _get_vertex_client(timeout=timeout)
 
 
 def _extract_google_text(response) -> str:
@@ -121,6 +170,92 @@ def _extract_google_text(response) -> str:
             if part_text:
                 parts.append(part_text)
     return "".join(parts)
+
+
+def _should_fallback_to_openrouter(route: str) -> bool:
+    return route == GEMINI_ROUTE_GOOGLE and bool(settings.OPENROUTER_API_KEY)
+
+
+def _generate_openrouter_text(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    temperature: float,
+    max_output_tokens: int,
+    timeout: float,
+    log_callback: GeminiLogCallback = None,
+) -> str:
+    client = OpenAI(
+        base_url=settings.OPENROUTER_BASE_URL,
+        api_key=settings.OPENROUTER_API_KEY,
+        timeout=timeout,
+    )
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        extra_headers={"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
+        stream=True,
+    )
+    full_text = ""
+    char_count = 0
+    last_log_at = 0
+    for chunk in stream:
+        delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+        if not delta:
+            continue
+        full_text += delta
+        char_count += len(delta)
+        if log_callback and char_count - last_log_at >= 200:
+            log_callback(f"[openrouter] 正在生成... 已收到约 {char_count} 字符")
+            last_log_at = char_count
+    if log_callback:
+        log_callback(f"[openrouter] 生成完成，共 {char_count} 字符")
+    return full_text.strip()
+
+
+def _generate_openrouter_vision(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    image_bytes: bytes,
+    mime_type: str,
+    model: str,
+    temperature: float,
+    max_output_tokens: int,
+    timeout: float,
+) -> str:
+    client = OpenAI(
+        base_url=settings.OPENROUTER_BASE_URL,
+        api_key=settings.OPENROUTER_API_KEY,
+        timeout=timeout,
+    )
+    image_b64 = image_bytes.decode("utf-8") if mime_type == "text/plain-base64" else None
+    if image_b64 is None:
+        image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
+                ],
+            },
+        ],
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        extra_headers={"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
+    )
+    return (response.choices[0].message.content or "").strip()
 
 
 def generate_text(
@@ -140,44 +275,44 @@ def generate_text(
         log_callback(f"[gemini] route={normalized}, model={resolved_model}")
 
     if normalized == GEMINI_ROUTE_GOOGLE:
-        response = _generate_with_retry(
-            model=resolved_model,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
+        try:
+            response = _generate_with_retry(
+                model=resolved_model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                ),
+                timeout=timeout,
+                log_callback=log_callback,
+            )
+            return (_extract_google_text(response) or "").strip()
+        except Exception as exc:
+            if not _should_fallback_to_openrouter(normalized):
+                raise
+            fallback_model = resolve_model_for_route(model, GEMINI_ROUTE_OPENROUTER)
+            if log_callback:
+                log_callback(f"[gemini] Vertex 失败，自动回退 OpenRouter: {type(exc).__name__}: {exc}")
+            return _generate_openrouter_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=fallback_model,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
-            ),
-            log_callback=log_callback,
-        )
-        return (_extract_google_text(response) or "").strip()
+                timeout=timeout,
+                log_callback=log_callback,
+            )
 
-    client = OpenAI(base_url=settings.OPENROUTER_BASE_URL, api_key=settings.OPENROUTER_API_KEY, timeout=timeout)
-    stream = client.chat.completions.create(
+    return _generate_openrouter_text(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         model=resolved_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
         temperature=temperature,
-        max_tokens=max_output_tokens,
-        extra_headers={"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
-        stream=True,
+        max_output_tokens=max_output_tokens,
+        timeout=timeout,
+        log_callback=log_callback,
     )
-    full_text = ""
-    token_count = 0
-    last_log_at = 0
-    for chunk in stream:
-        delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
-        if delta:
-            full_text += delta
-            token_count += len(delta)
-            if log_callback and token_count - last_log_at >= 200:
-                log_callback(f"[stream] 正在生成... 已收到约 {token_count} 字符")
-                last_log_at = token_count
-    if log_callback:
-        log_callback(f"[stream] 生成完成，共 {token_count} 字符")
-    return full_text.strip()
 
 
 def generate_vision_html(
@@ -187,7 +322,7 @@ def generate_vision_html(
     mime_type: str,
     model: str,
     route: Optional[str] = None,
-    user_prompt: str = "请严格根据图片内容执行OCR并输出HTML。",
+    user_prompt: str = "请严格根据图片内容执行 OCR 并输出 HTML。",
     temperature: float = 0.0,
     max_output_tokens: int = 65536,
     timeout: float = 600.0,
@@ -199,47 +334,51 @@ def generate_vision_html(
         log_callback(f"[gemini-vision] route={normalized}, model={resolved_model}, mime={mime_type}")
 
     if normalized == GEMINI_ROUTE_GOOGLE:
-        response = _generate_with_retry(
-            model=resolved_model,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text=user_prompt),
-                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                    ],
-                )
-            ],
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
+        try:
+            response = _generate_with_retry(
+                model=resolved_model,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_text(text=user_prompt),
+                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                        ],
+                    )
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                ),
+                timeout=timeout,
+                log_callback=log_callback,
+            )
+            return (_extract_google_text(response) or "").strip()
+        except Exception as exc:
+            if not _should_fallback_to_openrouter(normalized):
+                raise
+            fallback_model = resolve_model_for_route(model, GEMINI_ROUTE_OPENROUTER)
+            if log_callback:
+                log_callback(f"[gemini-vision] Vertex 失败，自动回退 OpenRouter: {type(exc).__name__}: {exc}")
+            return _generate_openrouter_vision(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                model=fallback_model,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
-            ),
-            log_callback=log_callback,
-        )
-        return (_extract_google_text(response) or "").strip()
+                timeout=timeout,
+            )
 
-    client = OpenAI(base_url=settings.OPENROUTER_BASE_URL, api_key=settings.OPENROUTER_API_KEY, timeout=timeout)
-    image_b64 = image_bytes.decode("utf-8") if mime_type == "text/plain-base64" else None
-    if image_b64 is None:
-        import base64
-
-        image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-
-    response = client.chat.completions.create(
+    return _generate_openrouter_vision(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        image_bytes=image_bytes,
+        mime_type=mime_type,
         model=resolved_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}},
-                ],
-            },
-        ],
         temperature=temperature,
-        max_tokens=max_output_tokens,
-        extra_headers={"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
+        max_output_tokens=max_output_tokens,
+        timeout=timeout,
     )
-    return (response.choices[0].message.content or "").strip()

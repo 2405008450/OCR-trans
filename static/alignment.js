@@ -1,4 +1,4 @@
-const originalFileInput = document.getElementById('originalFile');
+﻿const originalFileInput = document.getElementById('originalFile');
 const translatedFileInput = document.getElementById('translatedFile');
 const sourceLangSelect = document.getElementById('sourceLang');
 const targetLangSelect = document.getElementById('targetLang');
@@ -27,9 +27,95 @@ const progressDetails = document.getElementById('progressDetails');
 const processingTitle = document.getElementById('processingTitle');
 const processingText = document.getElementById('processingText');
 const streamLogWrap = document.getElementById('streamLogWrap');
-const streamLogEl = document.getElementById('streamLog');
-
+const streamLogEl = document.getElementById('streamLog');
 const POLL_INTERVAL = 1500;
+const ETA_TIME_ZONE = 'Asia/Shanghai';
+let etaHint = null;
+
+function ensureEtaHint() {
+    if (etaHint && etaHint.isConnected) return etaHint;
+    const card = processingSection?.querySelector('.processing-card') || processingSection;
+    if (!card) return null;
+    etaHint = document.createElement('div');
+    etaHint.className = 'eta-hint';
+    etaHint.style.cssText = 'margin-top:10px;color:var(--text-secondary, var(--muted, #94a3b8));font-size:13px;';
+    etaHint.textContent = '预计完成时间：计算中...';
+    const anchor = typeof processingText !== 'undefined' && processingText ? processingText : null;
+    if (anchor?.parentNode) {
+        anchor.parentNode.insertBefore(etaHint, anchor.nextSibling);
+    } else {
+        card.appendChild(etaHint);
+    }
+    return etaHint;
+}
+
+function updateEtaHint(task) {
+    const el = ensureEtaHint();
+    if (!el) return;
+    const text = buildEtaText(task);
+    if (!text) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    el.style.display = 'block';
+    el.textContent = text;
+}
+
+function buildEtaText(task) {
+    if (!task) return '预计完成时间：计算中...';
+    if (task.status === 'failed' || task.status === 'cancelled') return '';
+    if (task.status === 'done' && task.finished_at) {
+        return `预计完成时间：${formatEtaMinute(task.finished_at)}`;
+    }
+    if (task.status === 'queued') {
+        return '预计完成时间：排队中，开始处理后计算';
+    }
+
+    const progress = Number(task.progress ?? 0);
+    if (!Number.isFinite(progress) || progress <= 0 || progress >= 100 || !task.created_at) {
+        return '预计完成时间：计算中...';
+    }
+
+    const createdAt = parseServerTime(task.created_at);
+    if (Number.isNaN(createdAt.getTime())) {
+        return '预计完成时间：计算中...';
+    }
+
+    const elapsedMs = Date.now() - createdAt.getTime();
+    if (elapsedMs <= 0) {
+        return '预计完成时间：计算中...';
+    }
+
+    const estimatedTotalMs = elapsedMs / (progress / 100);
+    const estimatedFinishedAt = new Date(createdAt.getTime() + estimatedTotalMs);
+    return `预计完成时间：${formatEtaDate(estimatedFinishedAt)}`;
+}
+
+function parseServerTime(iso) {
+    if (!iso) return new Date(NaN);
+    const normalized = /([zZ]|[+\-]\d{2}:\d{2})$/.test(iso) ? iso : `${iso}Z`;
+    return new Date(normalized);
+}
+
+function formatEtaMinute(iso) {
+    const date = parseServerTime(iso);
+    if (Number.isNaN(date.getTime())) return '-';
+    return formatEtaDate(date);
+}
+
+function formatEtaDate(date) {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: ETA_TIME_ZONE,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
+}
 const DEFAULT_MODEL_NAME = 'Google gemini-3-flash-preview';
 let pollingTimer = null;
 let configData = null;
@@ -56,13 +142,8 @@ const MODEL_DISPLAY_NAMES = {
 })();
 
 function ensureGeminiRouteSelect() {
-    if (geminiRouteSelect && geminiRouteDesc) return;
-    const modelGroups = document.querySelectorAll('.options-panel .option-group');
-    if (modelGroups.length < 2) return;
-    const wrapper = document.createElement('div');
-    wrapper.className = "option-group";
-    wrapper.innerHTML = `<label><i class="fas fa-route"></i> 路线切换:</label><select id="geminiRouteSelect"></select><div class="model-desc" id="geminiRouteDesc"></div>`;
-    modelGroups[0].insertAdjacentElement('afterend', wrapper);
+    const routeGroup = document.getElementById('geminiRouteGroup');
+    if (routeGroup) routeGroup.style.display = 'none';
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
     geminiRouteDesc = document.getElementById('geminiRouteDesc');
 }
@@ -88,7 +169,7 @@ function populateSelects() {
         modelSelect.value = DEFAULT_MODEL_NAME;
     }
     const routes = configData?.routes || {};
-    const defaultRoute = configData?.default_route || "google";
+    const defaultRoute = configData?.default_route || "openrouter";
     geminiRouteSelect.innerHTML = '';
     Object.entries(routes).forEach(([value, info]) => {
         geminiRouteSelect.add(new Option(info.label || value, value));
@@ -128,7 +209,7 @@ function populateDefaults() {
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
     geminiRouteSelect.innerHTML = '<option value="google">线路1</option><option value="openrouter">线路2</option>';
-    geminiRouteSelect.value = "google";
+    geminiRouteSelect.value = "openrouter";
     updateRouteInfo();
     updateModelInfo();
 }
@@ -168,7 +249,7 @@ function getModelDisplayName(name) {
 }
 
 modelSelect.addEventListener('change', updateModelInfo);
-geminiRouteSelect.addEventListener('change', updateRouteInfo);
+geminiRouteSelect?.addEventListener('change', updateRouteInfo);
 sourceLangSelect.addEventListener('change', updateLangLabels);
 targetLangSelect.addEventListener('change', updateLangLabels);
 btnStart.addEventListener('click', startAlignment);
@@ -209,7 +290,7 @@ async function startAlignment() {
             source_lang: sourceLangSelect.value,
             target_lang: targetLangSelect.value,
             model_name: modelSelect.value,
-            gemini_route: geminiRouteSelect.value,
+            gemini_route: 'openrouter',
             enable_post_split: enablePostSplit.checked,
             threshold_2: document.getElementById('threshold2').value,
             threshold_3: document.getElementById('threshold3').value,
@@ -246,11 +327,12 @@ async function startAlignment() {
     }
 }
 
-function updateProgressUI(progress, message) {
+function updateProgressUI(progress, message, task = null) {
     progressBar.style.setProperty('--progress', `${progress}%`);
     progressPercent.textContent = `${progress}%`;
     processingTitle.textContent = message || '文档对齐处理中...';
     processingText.textContent = message || '正在处理...';
+    updateEtaHint(task);
     progressDetails.innerHTML = `<div class="detail-item">${message}</div>`;
 }
 
@@ -272,7 +354,7 @@ async function pollStatus(taskId) {
         if (!resp.ok) return;
         const status = await resp.json();
 
-        updateProgressUI(status.progress || 0, status.message || '正在处理...');
+        updateProgressUI(status.progress || 0, status.message || '正在处理...', status);
 
         const logText = status.stream_log || '';
         if (logText) {
@@ -411,3 +493,5 @@ function escapeHtml(value) {
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
 }
+
+

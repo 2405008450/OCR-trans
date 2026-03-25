@@ -200,7 +200,7 @@ async def execute_doc_translate_task(
     source_lang: str = "zh",
     target_langs: List[str],
     ocr_model: str = "google/gemini-3-flash-preview",
-    gemini_route: str = "google",
+    gemini_route: str = "openrouter",
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:

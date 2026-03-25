@@ -1822,7 +1822,7 @@ async def run_alignment_task(
     source_lang: str = "中文",
     target_lang: str = "英语",
     model_name: str = DEFAULT_MODEL,
-    gemini_route: str = settings.GEMINI_DEFAULT_ROUTE,
+    gemini_route: str = "openrouter",
     enable_post_split: bool = True,
     threshold_2: int = 25000,
     threshold_3: int = 50000,

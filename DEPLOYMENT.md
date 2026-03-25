@@ -40,7 +40,7 @@ chmod +x start_server.sh
 source .venv/bin/activate
 
 # 启动服务
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 ### 2. 配置防火墙
