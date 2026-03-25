@@ -273,7 +273,14 @@ async function processFile() {
         });
 
         if (!submitResp.ok) {
-            throw new Error(`提交失败: ${submitResp.status}`);
+            let errorMessage = `提交失败: ${submitResp.status}`;
+            try {
+                const errorData = await submitResp.json();
+                errorMessage = errorData?.detail?.error || errorData?.detail || errorData?.message || errorMessage;
+            } catch (_) {
+                // ignore non-json error body
+            }
+            throw new Error(errorMessage);
         }
 
         const submitData = await submitResp.json();
@@ -455,6 +462,10 @@ function resetApp() {
     progressText.textContent = '0%';
     const queueOverlay = document.getElementById('queueOverlay');
     if (queueOverlay) queueOverlay.style.display = 'none';
+}
+
+function ensureEtaHint() {
+    // OCR page has no ETA widget yet; avoid breaking submit flow.
 }
 
 
