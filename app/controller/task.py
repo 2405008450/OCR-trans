@@ -13,7 +13,7 @@ from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
 from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
 from app.service.drivers_license_service import get_drivers_license_config
-from app.service.gemini_service import DEFAULT_GEMINI_ROUTE, get_gemini_routes
+from app.service.gemini_service import get_gemini_routes
 from app.service.number_check_service import _get_task_progress as get_number_check_progress, get_number_check_models
 from app.service.pdf2docx_service import get_pdf2docx_models
 from app.service.task_queue_service import task_queue_service
@@ -137,14 +137,14 @@ async def get_run_task_status(task_id: str):
 
 
 @router.post("/number-check")
-async def run_number_check(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), gemini_route: str = Query("openrouter"), model_name: str = Query("gemini-3-flash-preview")):
+async def run_number_check(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), gemini_route: str = Query("openrouter"), model_name: str = Query("gemini-3.1-pro-preview")):
     task_id = await task_queue_service.submit_number_check_task(original_file=original_file, translated_file=translated_file, gemini_route=gemini_route, model_name=model_name)
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
 
 @router.get("/number-check/config")
 async def get_number_check_config():
-    return {"models": get_number_check_models(), "default_model": "gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "openrouter"}
+    return {"models": get_number_check_models(), "default_model": "gemini-3.1-pro-preview", "routes": get_gemini_routes(), "default_route": "openrouter"}
 
 
 @router.get("/number-check/status/{task_id}")
@@ -163,7 +163,7 @@ async def get_number_check_status(task_id: str):
 
 
 @router.post("/zhongfanyi")
-async def run_zhongfanyi(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), use_ai_rule: bool = Query(False), gemini_route: str = Query(DEFAULT_GEMINI_ROUTE), rule_file: Optional[UploadFile] = File(None), session_rule_content: Optional[str] = Form(None)):
+async def run_zhongfanyi(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), use_ai_rule: bool = Query(False), gemini_route: str = Query("openrouter"), rule_file: Optional[UploadFile] = File(None), session_rule_content: Optional[str] = Form(None)):
     allowed = {".docx", ".doc", ".pdf"}
     if os.path.splitext(original_file.filename or "")[1].lower() not in allowed:
         raise HTTPException(status_code=400, detail="Unsupported original file format")
@@ -323,7 +323,4 @@ async def get_pdf2docx_status(task_id: str):
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")
     return queue_task
-
-
-
 

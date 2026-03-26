@@ -36,7 +36,7 @@ INPUT_DIR = "jsz"                    # 输入目录路径
 # 合并处理配置（PROCESSING_MODE = "merge"）
 # 多张图片合并为一个驾驶证文档
 INPUT_IMAGE_PATHS = [
-    "jsz/1.png",
+    r"E:\Documents\a_test\驾驶证.png",
 
 
   

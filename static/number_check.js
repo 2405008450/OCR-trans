@@ -116,9 +116,8 @@ let pollingTimer = null;
 let routeConfig = {};
 let modelConfig = {};
 let defaultRoute = 'openrouter';
-let defaultModel = 'gemini-3-flash-preview';
+let defaultModel = 'gemini-3.1-pro-preview';
 let geminiRouteSelect = null;
-let modelSelect = null;
 let streamLogWrap = null;
 let streamLogEl = null;
 
@@ -155,26 +154,9 @@ function ensureOptionControls() {
         panel.appendChild(routeGroup);
     }
 
-    if (!document.getElementById('numberCheckModelSelect')) {
-        const modelGroup = document.createElement('div');
-        modelGroup.className = 'option-group option-card';
-        modelGroup.style.gridColumn = '1 / -1';
-        modelGroup.innerHTML = [
-            '<label for="numberCheckModelSelect">模型选择</label>',
-            '<div class="field-wrap">',
-            '<i class="fas fa-robot"></i>',
-            '<select id="numberCheckModelSelect"></select>',
-            '</div>',
-            '<p id="numberCheckModelDesc" class="option-hint"></p>',
-        ].join('');
-        panel.appendChild(modelGroup);
-    }
-
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
     const routeGroup = geminiRouteSelect?.closest('.option-group');
     if (routeGroup) routeGroup.style.display = 'none';
-    modelSelect = document.getElementById('numberCheckModelSelect');
-    modelSelect?.addEventListener('change', updateModelHint);
 }
 
 function ensureLogPanel() {
@@ -213,10 +195,6 @@ async function loadConfig() {
             google: { label: '线路2（直连）' },
         };
         modelConfig = {
-            'gemini-3-flash-preview': {
-                label: '快速版V2',
-                description: '速度更快，适合常规数字核对场景。',
-            },
             'gemini-3.1-pro-preview': {
                 label: '增强版V2',
                 description: '推理更强，适合复杂编号和上下文判断场景。',
@@ -225,8 +203,9 @@ async function loadConfig() {
     }
 
     renderRouteOptions();
-    renderModelOptions();
-    updateModelHint();
+    defaultModel = modelConfig['gemini-3.1-pro-preview']
+        ? 'gemini-3.1-pro-preview'
+        : (Object.keys(modelConfig)[0] || defaultModel);
 }
 
 function renderRouteOptions() {
@@ -236,22 +215,6 @@ function renderRouteOptions() {
         geminiRouteSelect.add(new Option(info.label || value, value));
     });
     geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
-}
-
-function renderModelOptions() {
-    if (!modelSelect) return;
-    modelSelect.innerHTML = '';
-    Object.entries(modelConfig).forEach(([value, info]) => {
-        modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
-    });
-    modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
-}
-
-function updateModelHint() {
-    const hintEl = document.getElementById('numberCheckModelDesc');
-    if (!hintEl || !modelSelect) return;
-    const info = modelConfig[modelSelect.value] || {};
-    hintEl.textContent = info.description || '';
 }
 
 async function runNumberCheck() {
@@ -275,7 +238,7 @@ async function runNumberCheck() {
 
         const params = new URLSearchParams({
             gemini_route: 'openrouter',
-            model_name: modelSelect?.value || defaultModel,
+            model_name: 'gemini-3.1-pro-preview',
         });
 
         const resp = await fetch(`/task/number-check?${params.toString()}`, {
@@ -455,5 +418,3 @@ function escapeHtml(value) {
 function getModelDisplayName(name) {
     return MODEL_DISPLAY_NAMES[name] || name;
 }
-
-

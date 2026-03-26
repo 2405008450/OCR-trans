@@ -100,7 +100,6 @@ function initElements() {
     translatedFileInput = document.getElementById('translatedFile');
     ruleFileInput = document.getElementById('ruleFile');
     useAiRuleCheckbox = document.getElementById('useAiRule');
-    geminiRouteSelect = document.getElementById('geminiRouteSelect');
     btnRun = document.getElementById('btnRun');
     btnReset = document.getElementById('btnReset');
     uploadSection = document.getElementById('uploadSection');
@@ -116,7 +115,6 @@ function initElements() {
     ruleEditorModal = document.getElementById('ruleEditorModal');
     ruleContentArea = document.getElementById('ruleContent');
 
-    ensureGeminiRouteSelect();
     ensureLogPanel();
 
     btnRun?.addEventListener('click', runZhongfanyi);
@@ -128,27 +126,6 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initElements);
 } else {
     initElements();
-}
-
-function ensureGeminiRouteSelect() {
-    if (geminiRouteSelect) return;
-    const panel = document.querySelector('.options-panel');
-    if (!panel) return;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'option-group';
-    wrapper.style.gridColumn = '1 / -1';
-    wrapper.innerHTML = [
-        '<label style="width: 100%;">',
-        '<i class="fas fa-route"></i> 路线切换:',
-        '<select id="geminiRouteSelect" style="margin-left: 8px;">',
-        '<option value="google">线路1</option>',
-        '<option value="openrouter">线路2</option>',
-        '</select>',
-        '</label>',
-        '<span class="model-desc">默认走 Google 官方 Gemini，OpenRouter 作为备选线路。</span>',
-    ].join('');
-    panel.appendChild(wrapper);
-    geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 
 function ensureLogPanel() {
@@ -203,7 +180,7 @@ async function runZhongfanyi() {
             formData.append('session_rule_content', sessionRuleContent.trim());
         }
 
-        const url = `/task/zhongfanyi?use_ai_rule=${useAiRule ? 'true' : 'false'}&gemini_route=${encodeURIComponent(geminiRouteSelect.value)}`;
+        const url = `/task/zhongfanyi?use_ai_rule=${useAiRule ? 'true' : 'false'}&gemini_route=openrouter`;
         const resp = await fetch(url, { method: 'POST', body: formData });
 
         if (!resp.ok) {

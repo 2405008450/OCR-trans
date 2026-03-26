@@ -302,14 +302,14 @@ class TaskQueueService:
         await update(5, 'number check started')
         original_upload = UploadFile(filename=input_files.get('original_filename') or 'original.docx', file=io.BytesIO(Path(input_files['original_path']).read_bytes()))
         translated_upload = UploadFile(filename=input_files.get('translated_filename') or 'translated.docx', file=io.BytesIO(Path(input_files['translated_path']).read_bytes()))
-        job = asyncio.create_task(run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no, gemini_route=params.get('gemini_route', 'openrouter'), model_name=params.get('model_name', 'gemini-3-flash-preview')))
+        job = asyncio.create_task(run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no, gemini_route=params.get('gemini_route', 'openrouter'), model_name=params.get('model_name', 'gemini-3.1-pro-preview')))
         await self._mirror_progress(task_id, job, lambda: get_number_check_progress(task_id), update)
         return await job
 
     async def _execute_zhongfanyi(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'zhongfanyi started')
         loop = asyncio.get_running_loop()
-        job = loop.run_in_executor(self._task_executor, lambda: zf_service.run_zhongfanyi_task(input_files['original_path'], input_files['translated_path'], task_id, display_no=display_no, use_ai_rule=params.get('use_ai_rule', False), gemini_route=params.get('gemini_route', 'google'), ai_rule_file_path=params.get('ai_rule_file_path'), session_rule_text=params.get('session_rule_text')))
+        job = loop.run_in_executor(self._task_executor, lambda: zf_service.run_zhongfanyi_task(input_files['original_path'], input_files['translated_path'], task_id, display_no=display_no, use_ai_rule=params.get('use_ai_rule', False), gemini_route=params.get('gemini_route', 'openrouter'), ai_rule_file_path=params.get('ai_rule_file_path'), session_rule_text=params.get('session_rule_text')))
         await self._mirror_progress(task_id, job, lambda: zf_service.get_task_progress(task_id), update)
         return await job
 

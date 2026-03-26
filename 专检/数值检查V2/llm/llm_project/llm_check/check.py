@@ -19,6 +19,13 @@ def _create_client():
         raise RuntimeError(f"???? API_KEY????????? {_ENV_PATH} ??")
     return OpenAI(api_key=api_key, base_url=base_url)
 
+
+def _resolve_model_name():
+    model_name = (os.getenv("NUMBER_CHECK_MODEL") or "gemini-3.1-pro-preview").strip()
+    if model_name.startswith("google/"):
+        return model_name
+    return f"google/{model_name}"
+
 class Match:
     # 文本对比函数，利用OpenAI GPT对比原文和译文
     def compare_texts(self, original_text, translated_text):
@@ -69,7 +76,7 @@ class Match:
                     "HTTP-Referer": "<YOUR_SITE_URL>",  # Optional. Site URL for rankings on openrouter.ai.
                     "X-Title": "<YOUR_SITE_NAME>",  # Optional. Site title for rankings on openrouter.ai.
                 },
-                model="google/gemini-3-flash-preview",  # 使用 OpenAI 的 google/gemini-3-pro-preview 模型
+                model=_resolve_model_name(),
                 max_tokens=65532,
                 messages=[
                     {"role": "system",
