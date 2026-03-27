@@ -27,7 +27,8 @@ const progressDetails = document.getElementById('progressDetails');
 const processingTitle = document.getElementById('processingTitle');
 const processingText = document.getElementById('processingText');
 const streamLogWrap = document.getElementById('streamLogWrap');
-const streamLogEl = document.getElementById('streamLog');
+const streamLogEl = document.getElementById('streamLog');
+
 const POLL_INTERVAL = 1500;
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 let etaHint = null;
@@ -143,7 +144,7 @@ const MODEL_DISPLAY_NAMES = {
 
 function ensureGeminiRouteSelect() {
     const routeGroup = document.getElementById('geminiRouteGroup');
-    if (routeGroup) routeGroup.style.display = 'none';
+    if (routeGroup) routeGroup.style.display = ''; 
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
     geminiRouteDesc = document.getElementById('geminiRouteDesc');
 }
@@ -170,7 +171,6 @@ function populateSelects() {
     }
     const routes = configData?.routes || {};
     const defaultRoute = configData?.default_route || "openrouter";
-    geminiRouteSelect.innerHTML = '';
     Object.entries(routes).forEach(([value, info]) => {
         geminiRouteSelect.add(new Option(info.label || value, value));
     });
@@ -208,7 +208,7 @@ function populateDefaults() {
     modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
-    geminiRouteSelect.innerHTML = '<option value="google">线路1</option><option value="openrouter">线路2</option>';
+    geminiRouteSelect.innerHTML = '<option value="google">\u7ebf\u8def1</option><option value="openrouter">\u7ebf\u8def2</option><option value="google_ai_studio">\u7ebf\u8def3</option>';
     geminiRouteSelect.value = "openrouter";
     updateRouteInfo();
     updateModelInfo();
@@ -290,7 +290,7 @@ async function startAlignment() {
             source_lang: sourceLangSelect.value,
             target_lang: targetLangSelect.value,
             model_name: modelSelect.value,
-            gemini_route: 'openrouter',
+            gemini_route: geminiRouteSelect?.value || (configData?.default_route || 'openrouter'),
             enable_post_split: enablePostSplit.checked,
             threshold_2: document.getElementById('threshold2').value,
             threshold_3: document.getElementById('threshold3').value,

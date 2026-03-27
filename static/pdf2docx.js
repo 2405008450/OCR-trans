@@ -112,7 +112,7 @@ async function init() {
 
 function ensureGeminiRouteSelect() {
     const routeCard = document.getElementById('geminiRouteGroup');
-    if (routeCard) routeCard.style.display = 'none';
+    if (routeCard) routeCard.style.display = ''; 
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 
@@ -154,7 +154,7 @@ async function loadConfig() {
         defaultRoute = data.default_route || defaultRoute;
     } catch (error) {
         console.error(error);
-        routeConfig = { google: { label: '线路1' }, openrouter: { label: '线路2' } };
+        routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' }, google_ai_studio: { label: '\u7ebf\u8def3' } };
         modelConfig = {
             'gemini-3.1-flash-lite-preview': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规场景。' },
@@ -260,7 +260,7 @@ async function processFiles() {
 async function processSingleFile() {
     const formData = new FormData();
     formData.append('file', selectedFiles[0]);
-    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: 'google' });
+    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
 
     let response;
     try { response = await fetch(`/task/pdf2docx?${params.toString()}`, { method: 'POST', body: formData }); }
@@ -292,7 +292,7 @@ async function processBatchFiles() {
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
 
-    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: 'google' });
+    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append('files', file));
 

@@ -156,7 +156,7 @@ function ensureOptionControls() {
 
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
     const routeGroup = geminiRouteSelect?.closest('.option-group');
-    if (routeGroup) routeGroup.style.display = 'none';
+    if (routeGroup) routeGroup.style.display = ''; 
 }
 
 function ensureLogPanel() {
@@ -191,8 +191,9 @@ async function loadConfig() {
     } catch (error) {
         console.error(error);
         routeConfig = {
-            openrouter: { label: '线路1（推荐）' },
-            google: { label: '线路2（直连）' },
+            google: { label: '\u7ebf\u8def1' },
+            openrouter: { label: '\u7ebf\u8def2' },
+            google_ai_studio: { label: '\u7ebf\u8def3' },
         };
         modelConfig = {
             'gemini-3.1-pro-preview': {
@@ -237,7 +238,7 @@ async function runNumberCheck() {
         formData.append('translated_file', translatedFile);
 
         const params = new URLSearchParams({
-            gemini_route: 'openrouter',
+            gemini_route: geminiRouteSelect?.value || defaultRoute,
             model_name: 'gemini-3.1-pro-preview',
         });
 

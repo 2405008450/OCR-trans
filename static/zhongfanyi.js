@@ -94,6 +94,8 @@ let pollingTimer = null;
 let currentTaskId = null;
 let sessionRuleContent = null;
 let retryBtn = null;
+let routeConfig = {};
+let defaultRoute = 'openrouter';
 
 function initElements() {
     originalFileInput = document.getElementById('originalFile');
@@ -115,6 +117,7 @@ function initElements() {
     ruleEditorModal = document.getElementById('ruleEditorModal');
     ruleContentArea = document.getElementById('ruleContent');
 
+    ensureRouteControl();
     ensureLogPanel();
 
     btnRun?.addEventListener('click', runZhongfanyi);
@@ -123,9 +126,56 @@ function initElements() {
 }
 
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initElements);
+    document.addEventListener('DOMContentLoaded', async () => { initElements(); await loadRouteConfig(); });
 } else {
     initElements();
+    loadRouteConfig();
+}
+
+function ensureRouteControl() {
+    const panel = document.querySelector('.options-panel');
+    if (!panel) return;
+    if (!document.getElementById('geminiRouteSelect')) {
+        const routeGroup = document.createElement('div');
+        routeGroup.className = 'option-group option-card';
+        routeGroup.style.gridColumn = '1 / -1';
+        routeGroup.innerHTML = [
+            '<label for="geminiRouteSelect">\u8def\u7ebf\u5207\u6362</label>',
+            '<div class="field-wrap">',
+            '<i class="fas fa-route"></i>',
+            '<select id="geminiRouteSelect"></select>',
+            '</div>',
+        ].join('');
+        panel.appendChild(routeGroup);
+    }
+    geminiRouteSelect = document.getElementById('geminiRouteSelect');
+}
+
+async function loadRouteConfig() {
+    try {
+        const resp = await fetch('/task/zhongfanyi/config');
+        if (!resp.ok) throw new Error(`\u914d\u7f6e\u52a0\u8f7d\u5931\u8d25: ${resp.status}`);
+        const data = await resp.json();
+        routeConfig = data.routes || {};
+        defaultRoute = data.default_route || defaultRoute;
+    } catch (error) {
+        console.error(error);
+        routeConfig = {
+            google: { label: '\u7ebf\u8def1' },
+            openrouter: { label: '\u7ebf\u8def2' },
+            google_ai_studio: { label: '\u7ebf\u8def3' },
+        };
+    }
+    renderRouteOptions();
+}
+
+function renderRouteOptions() {
+    if (!geminiRouteSelect) return;
+    geminiRouteSelect.innerHTML = '';
+    Object.entries(routeConfig).forEach(([value, info]) => {
+        geminiRouteSelect.add(new Option(info.label || value, value));
+    });
+    geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
 }
 
 function ensureLogPanel() {
@@ -180,7 +230,7 @@ async function runZhongfanyi() {
             formData.append('session_rule_content', sessionRuleContent.trim());
         }
 
-        const url = `/task/zhongfanyi?use_ai_rule=${useAiRule ? 'true' : 'false'}&gemini_route=openrouter`;
+        const url = `/task/zhongfanyi?use_ai_rule=${useAiRule ? 'true' : 'false'}&gemini_route=${encodeURIComponent(geminiRouteSelect?.value || defaultRoute)}`;
         const resp = await fetch(url, { method: 'POST', body: formData });
 
         if (!resp.ok) {

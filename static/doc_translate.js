@@ -109,7 +109,7 @@ async function init() {
 
 function ensureGeminiRouteSelect() {
     const routeCard = document.getElementById('geminiRouteGroup');
-    if (routeCard) routeCard.style.display = 'none';
+    if (routeCard) routeCard.style.display = ''; 
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 
@@ -156,7 +156,7 @@ async function loadConfig() {
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规 OCR。' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '复杂版面表现更稳。' },
         };
-        routeConfig = { google: { label: '线路1' }, openrouter: { label: '线路2' } };
+        routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' }, google_ai_studio: { label: '\u7ebf\u8def3' } };
         languageConfig = { zh:{name:'中文'}, en:{name:'英文'}, ja:{name:'日文'}, ko:{name:'韩文'}, es:{name:'西班牙文'}, fr:{name:'法文'}, de:{name:'德文'}, ru:{name:'俄文'} };
     }
     renderModels();
@@ -285,7 +285,7 @@ async function processSingleFile(targetLangs) {
     try {
         const formData = new FormData();
         formData.append('file', selectedFiles[0]);
-        const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), ocr_model: modelSelect.value, gemini_route: 'openrouter' });
+        const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
         const response = await fetch(`/task/doc-translate?${params.toString()}`, { method: 'POST', body: formData });
         if (!response.ok) { const t = await safeReadError(response); throw new Error(t || `提交失败: ${response.status}`); }
         const data = await response.json();
@@ -299,7 +299,7 @@ async function processBatchFiles(targetLangs) {
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
 
-    const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), ocr_model: modelSelect.value, gemini_route: 'openrouter' });
+    const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append('files', file));
 

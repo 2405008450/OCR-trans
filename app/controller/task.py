@@ -15,7 +15,11 @@ from app.service.doc_translate_service import get_doc_translate_models, get_supp
 from app.service.drivers_license_service import get_drivers_license_config
 from app.service.gemini_service import get_gemini_routes
 from app.service.number_check_service import _get_task_progress as get_number_check_progress, get_number_check_models
-from app.service.pdf2docx_service import get_pdf2docx_models
+from app.service.pdf2docx_service import (
+    PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    PDF2DOCX_DEFAULT_MODEL,
+    get_pdf2docx_models,
+)
 from app.service.task_queue_service import task_queue_service
 
 router = APIRouter(prefix="/task", tags=["Task"])
@@ -189,6 +193,11 @@ async def run_zhongfanyi(original_file: UploadFile = File(...), translated_file:
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
 
+@router.get("/zhongfanyi/config")
+async def get_zhongfanyi_config():
+    return {"routes": get_gemini_routes(), "default_route": "openrouter"}
+
+
 @router.get("/zhongfanyi/status/{task_id}")
 async def get_zhongfanyi_status(task_id: str):
     queue_task = task_queue_service.get_task_status(task_id)
@@ -327,11 +336,11 @@ async def get_doc_translate_status(task_id: str):
 
 @router.get("/pdf2docx/config")
 async def get_pdf2docx_config():
-    return {"models": get_pdf2docx_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "google"}
+    return {"models": get_pdf2docx_models(), "default_model": PDF2DOCX_DEFAULT_MODEL, "routes": get_gemini_routes(), "default_route": PDF2DOCX_DEFAULT_GEMINI_ROUTE}
 
 
 @router.post("/pdf2docx")
-async def run_pdf2docx(file: UploadFile = File(...), model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
+async def run_pdf2docx(file: UploadFile = File(...), model: str = Query(PDF2DOCX_DEFAULT_MODEL), gemini_route: str = Query(PDF2DOCX_DEFAULT_GEMINI_ROUTE)):
     allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
@@ -354,7 +363,7 @@ async def run_pdf2docx(file: UploadFile = File(...), model: str = Query("google/
 
 
 @router.post("/pdf2docx/batch")
-async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
+async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Query(PDF2DOCX_DEFAULT_MODEL), gemini_route: str = Query(PDF2DOCX_DEFAULT_GEMINI_ROUTE)):
     allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")

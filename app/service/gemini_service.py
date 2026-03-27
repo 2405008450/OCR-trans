@@ -25,7 +25,7 @@ _RETRYABLE_NETWORK_ERRORS = (
     OSError,
 )
 
-_VERTEX_RETRYABLE_ERROR_MARKERS = (
+_GOOGLE_RETRYABLE_ERROR_MARKERS = (
     "429",
     "500",
     "502",
@@ -45,21 +45,30 @@ GeminiLogCallback = Optional[Callable[[str], None]]
 
 GEMINI_ROUTE_GOOGLE = "google"
 GEMINI_ROUTE_OPENROUTER = "openrouter"
+GEMINI_ROUTE_AI_STUDIO = "google_ai_studio"
+
+_ALL_GEMINI_ROUTES = (
+    GEMINI_ROUTE_GOOGLE,
+    GEMINI_ROUTE_OPENROUTER,
+    GEMINI_ROUTE_AI_STUDIO,
+)
 
 DEFAULT_GEMINI_ROUTE = (
-    settings.GEMINI_DEFAULT_ROUTE
-    if settings.GEMINI_DEFAULT_ROUTE in (GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_OPENROUTER)
-    else GEMINI_ROUTE_GOOGLE
+    settings.GEMINI_DEFAULT_ROUTE if settings.GEMINI_DEFAULT_ROUTE in _ALL_GEMINI_ROUTES else GEMINI_ROUTE_GOOGLE
 )
 
 GEMINI_ROUTE_OPTIONS: Dict[str, Dict[str, str]] = {
     GEMINI_ROUTE_GOOGLE: {
-        "label": "线路1 (推荐)",
-        "description": "直连 Google Vertex AI，速度快；失败时会自动回退到 OpenRouter。",
+        "label": "\u7ebf\u8def1",
+        "description": "\u8c37\u6b4c Vertex \u5b98\u65b9\u7ebf\u8def\uff0c\u901f\u5ea6\u5feb\uff0c\u9002\u5408\u5e38\u89c4\u4efb\u52a1\u3002",
     },
     GEMINI_ROUTE_OPENROUTER: {
-        "label": "线路2",
-        "description": "经 OpenRouter 中转，通常更宽松，适合作为备选线路。",
+        "label": "\u7ebf\u8def2",
+        "description": "OpenRouter \u4e2d\u8f6c\u7ebf\u8def\uff0c\u9002\u5408\u5f53\u524d\u5df2\u6709\u7684\u517c\u5bb9\u8c03\u7528\u3002",
+    },
+    GEMINI_ROUTE_AI_STUDIO: {
+        "label": "\u7ebf\u8def3",
+        "description": "Google AI Studio \u5b98\u65b9\u7ebf\u8def\uff0c\u9002\u5408\u8865\u5145\u5927\u6587\u4ef6\u6216 Vertex \u4e0d\u4fbf\u5904\u7406\u7684\u573a\u666f\u3002",
     },
 }
 
@@ -84,7 +93,7 @@ def normalize_google_model(model: str) -> str:
 
 def resolve_model_for_route(model: str, route: Optional[str]) -> str:
     normalized_route = normalize_gemini_route(route)
-    if normalized_route == GEMINI_ROUTE_GOOGLE:
+    if normalized_route in (GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_AI_STUDIO):
         return normalize_google_model(model)
     if "/" not in model:
         return f"google/{model}"
@@ -95,10 +104,14 @@ def ensure_gemini_route_configured(route: Optional[str]) -> str:
     normalized = normalize_gemini_route(route)
     if normalized == GEMINI_ROUTE_GOOGLE:
         if not settings.VERTEX_PROJECT_ID:
-            raise ValueError("未配置 VERTEX_PROJECT_ID，无法使用 Google Vertex AI 线路")
+            raise ValueError("??? VERTEX_PROJECT_ID????? Google Vertex AI ??")
+        return normalized
+    if normalized == GEMINI_ROUTE_AI_STUDIO:
+        if not settings.AI_STUDIO_API_KEY:
+            raise ValueError("??? AI_STUDIO_API_KEY ? GEMINI_API_KEY????? Google AI Studio ??")
         return normalized
     if not settings.OPENROUTER_API_KEY:
-        raise ValueError("未配置 OPENROUTER_API_KEY，无法使用 OpenRouter Gemini 线路")
+        raise ValueError("??? OPENROUTER_API_KEY????? OpenRouter Gemini ??")
     return normalized
 
 
@@ -111,12 +124,22 @@ def _get_vertex_client(timeout: float = 600.0) -> genai.Client:
     )
 
 
-def _is_retryable_vertex_client_error(exc: ClientError) -> bool:
+def _get_ai_studio_client(timeout: float = 600.0) -> genai.Client:
+    return genai.Client(
+        api_key=settings.AI_STUDIO_API_KEY,
+        http_options=types.HttpOptions(timeout=int(timeout * 1000)),
+    )
+
+
+def _is_retryable_google_client_error(exc: ClientError) -> bool:
     message = str(exc).lower()
-    return any(marker in message for marker in _VERTEX_RETRYABLE_ERROR_MARKERS)
+    return any(marker in message for marker in _GOOGLE_RETRYABLE_ERROR_MARKERS)
 
 
-def _generate_with_retry(
+def _generate_google_with_retry(
+    *,
+    route_name: str,
+    client_factory,
     model: str,
     contents,
     config=None,
@@ -124,37 +147,29 @@ def _generate_with_retry(
     timeout: float = 600.0,
     log_callback: GeminiLogCallback = None,
 ):
-    client = _get_vertex_client(timeout=timeout)
+    client = client_factory(timeout=timeout)
     delay = 2.0
     for attempt in range(max_retries):
         try:
-            return client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config,
-            )
+            return client.models.generate_content(model=model, contents=contents, config=config)
         except ClientError as exc:
-            if attempt == max_retries - 1 or not _is_retryable_vertex_client_error(exc):
+            if attempt == max_retries - 1 or not _is_retryable_google_client_error(exc):
                 raise
             sleep_s = delay + random.uniform(0, 1.5)
             if log_callback:
-                log_callback(
-                    f"[vertex] 可重试错误 ({type(exc).__name__})，等待 {sleep_s:.1f}s 后重试... ({attempt + 1}/{max_retries})"
-                )
+                log_callback(f"[{route_name}] ????? ({type(exc).__name__})??? {sleep_s:.1f}s ???... ({attempt + 1}/{max_retries})")
             time.sleep(sleep_s)
             delay = min(delay * 2, 30)
-            client = _get_vertex_client(timeout=timeout)
+            client = client_factory(timeout=timeout)
         except _RETRYABLE_NETWORK_ERRORS as exc:
             if attempt == max_retries - 1:
                 raise
             sleep_s = delay + random.uniform(0, 2.0)
             if log_callback:
-                log_callback(
-                    f"[vertex] 网络异常 ({type(exc).__name__})，等待 {sleep_s:.1f}s 后重试... ({attempt + 1}/{max_retries})"
-                )
+                log_callback(f"[{route_name}] ???? ({type(exc).__name__})??? {sleep_s:.1f}s ???... ({attempt + 1}/{max_retries})")
             time.sleep(sleep_s)
             delay = min(delay * 2, 30)
-            client = _get_vertex_client(timeout=timeout)
+            client = client_factory(timeout=timeout)
 
 
 def _extract_google_text(response) -> str:
@@ -212,10 +227,10 @@ def _generate_openrouter_text(
         full_text += delta
         char_count += len(delta)
         if log_callback and char_count - last_log_at >= 200:
-            log_callback(f"[openrouter] 正在生成... 已收到约 {char_count} 字符")
+            log_callback(f"[openrouter] ????... ???? {char_count} ??")
             last_log_at = char_count
     if log_callback:
-        log_callback(f"[openrouter] 生成完成，共 {char_count} 字符")
+        log_callback(f"[openrouter] ?????? {char_count} ??")
     return full_text.strip()
 
 
@@ -276,7 +291,9 @@ def generate_text(
 
     if normalized == GEMINI_ROUTE_GOOGLE:
         try:
-            response = _generate_with_retry(
+            response = _generate_google_with_retry(
+                route_name="vertex",
+                client_factory=_get_vertex_client,
                 model=resolved_model,
                 contents=user_prompt,
                 config=types.GenerateContentConfig(
@@ -293,7 +310,7 @@ def generate_text(
                 raise
             fallback_model = resolve_model_for_route(model, GEMINI_ROUTE_OPENROUTER)
             if log_callback:
-                log_callback(f"[gemini] Vertex 失败，自动回退 OpenRouter: {type(exc).__name__}: {exc}")
+                log_callback(f"[gemini] Vertex ??????? OpenRouter: {type(exc).__name__}: {exc}")
             return _generate_openrouter_text(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -303,6 +320,22 @@ def generate_text(
                 timeout=timeout,
                 log_callback=log_callback,
             )
+
+    if normalized == GEMINI_ROUTE_AI_STUDIO:
+        response = _generate_google_with_retry(
+            route_name="ai-studio",
+            client_factory=_get_ai_studio_client,
+            model=resolved_model,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+            ),
+            timeout=timeout,
+            log_callback=log_callback,
+        )
+        return (_extract_google_text(response) or "").strip()
 
     return _generate_openrouter_text(
         system_prompt=system_prompt,
@@ -322,7 +355,7 @@ def generate_vision_html(
     mime_type: str,
     model: str,
     route: Optional[str] = None,
-    user_prompt: str = "请严格根据图片内容执行 OCR 并输出 HTML。",
+    user_prompt: str = "??????????? OCR ??? HTML?",
     temperature: float = 0.0,
     max_output_tokens: int = 65536,
     timeout: float = 600.0,
@@ -335,7 +368,9 @@ def generate_vision_html(
 
     if normalized == GEMINI_ROUTE_GOOGLE:
         try:
-            response = _generate_with_retry(
+            response = _generate_google_with_retry(
+                route_name="vertex",
+                client_factory=_get_vertex_client,
                 model=resolved_model,
                 contents=[
                     types.Content(
@@ -360,7 +395,7 @@ def generate_vision_html(
                 raise
             fallback_model = resolve_model_for_route(model, GEMINI_ROUTE_OPENROUTER)
             if log_callback:
-                log_callback(f"[gemini-vision] Vertex 失败，自动回退 OpenRouter: {type(exc).__name__}: {exc}")
+                log_callback(f"[gemini-vision] Vertex ??????? OpenRouter: {type(exc).__name__}: {exc}")
             return _generate_openrouter_vision(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -371,6 +406,30 @@ def generate_vision_html(
                 max_output_tokens=max_output_tokens,
                 timeout=timeout,
             )
+
+    if normalized == GEMINI_ROUTE_AI_STUDIO:
+        response = _generate_google_with_retry(
+            route_name="ai-studio",
+            client_factory=_get_ai_studio_client,
+            model=resolved_model,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part.from_text(text=user_prompt),
+                        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    ],
+                )
+            ],
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+            ),
+            timeout=timeout,
+            log_callback=log_callback,
+        )
+        return (_extract_google_text(response) or "").strip()
 
     return _generate_openrouter_vision(
         system_prompt=system_prompt,

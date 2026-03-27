@@ -11,7 +11,7 @@ import subprocess
 import shutil
 from pathlib import Path
 
-from app.service.gemini_service import generate_vision_html
+from app.service.gemini_service import GEMINI_ROUTE_GOOGLE, generate_vision_html
 
 # ============================================================
 # 依赖检查与导入
@@ -108,7 +108,7 @@ def _ocr_single_image(
     img_b64: str,
     mime_type: str,
     model: str,
-    gemini_route: str = "google",
+    gemini_route: str = GEMINI_ROUTE_GOOGLE,
     retries: int = 3,
 ) -> str:
     """对单张图片（base64）调用 LLM OCR，失败自动重试"""
@@ -137,7 +137,7 @@ def ocr_file(
     file_path: str,
     api_key: str = "",
     model: str = "google/gemini-3.1-pro-preview",
-    gemini_route: str = "google",
+    gemini_route: str = GEMINI_ROUTE_GOOGLE,
     page_progress_callback=None,
 ) -> str:
     """调用 LLM 对图片或 PDF 进行 OCR，返回混合 HTML/Markdown 文本。
@@ -926,7 +926,7 @@ class HybridToDocxConverter:
 def main():
     # ========== 配置 ==========
     API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-    FILE_PATH = r"E:\Documents\发票报销\三月\无线鼠标.png"
+    FILE_PATH = r"E:\Pictures\营销用图\营业执照.jpg"
     OUTPUT_DOCX = r"C:\Users\Administrator\Desktop\ocr_output.docx"
     MODEL = "google/gemini-3-flash-preview"
     # ==========================

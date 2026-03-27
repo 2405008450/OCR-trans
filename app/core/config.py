@@ -1,4 +1,4 @@
-﻿import os
+import os
 from pathlib import Path
 
 try:
@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY", "")
+    AI_STUDIO_API_KEY: str = (
+        os.getenv("AI_STUDIO_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+        or os.getenv("GEMINI_API_KEY", "")
+    )
     GEMINI_DEFAULT_ROUTE: str = os.getenv("GEMINI_DEFAULT_ROUTE", "google")
 
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", "gen-lang-client-0128671098")

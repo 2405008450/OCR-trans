@@ -18,7 +18,11 @@ from app.service.doc_translate_service import execute_doc_translate_task
 from app.service.drivers_license_service import execute_drivers_license_task
 from app.service.llm_service import execute_ocr_task_from_path
 from app.service.number_check_service import _get_task_progress as get_number_check_progress, run_number_check_task
-from app.service.pdf2docx_service import execute_pdf2docx_task_from_path
+from app.service.pdf2docx_service import (
+    PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    PDF2DOCX_DEFAULT_MODEL,
+    execute_pdf2docx_task_from_path,
+)
 
 
 class TaskCancelledError(Exception):
@@ -335,7 +339,7 @@ class TaskQueueService:
 
     async def _execute_pdf2docx(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'pdf2docx started')
-        return await execute_pdf2docx_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', model=params.get('model', 'google/gemini-3-flash-preview'), gemini_route=params.get('gemini_route', 'google'), progress_callback=update, executor=self._task_executor)
+        return await execute_pdf2docx_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', model=params.get('model', PDF2DOCX_DEFAULT_MODEL), gemini_route=params.get('gemini_route', PDF2DOCX_DEFAULT_GEMINI_ROUTE), progress_callback=update, executor=self._task_executor)
 
     @staticmethod
     def _extract_output_files(task_type: str, result: Optional[Dict[str, Any]], output_path: Optional[str], original_filename: Optional[str] = None) -> list:
