@@ -926,7 +926,7 @@ class HybridToDocxConverter:
 def main():
     # ========== 配置 ==========
     API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-    FILE_PATH = r"C:\Users\Administrator\Desktop\医疗文件.pdf"
+    FILE_PATH = r"E:\Documents\发票报销\三月\无线鼠标.png"
     OUTPUT_DOCX = r"C:\Users\Administrator\Desktop\ocr_output.docx"
     MODEL = "google/gemini-3-flash-preview"
     # ==========================

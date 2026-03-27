@@ -60,21 +60,25 @@
                         <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试增强版。</p>
 
                         <div class="upload-area" id="uploadArea">
-                            <input type="file" id="fileInput" accept=".pdf,image/*" hidden>
+                            <input type="file" id="fileInput" accept=".pdf,image/*" multiple hidden>
                             <div class="upload-placeholder" id="uploadPlaceholder">
                                 <i class="fas fa-cloud-arrow-up"></i>
-                                <p>拖拽文件到这里，或点击选择 PDF / 图片</p>
+                                <p>拖拽文件到这里，或点击选择 PDF / 图片（支持多选）</p>
                                 <span>支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP</span>
                             </div>
                             <div class="file-preview" id="filePreview" style="display: none;">
                                 <div class="file-info">
                                     <p id="fileName"></p>
-                                    <span class="file-status">文件已就绪，可开始转换</span>
+                                    <span class="file-status" id="fileStatus">文件已就绪，可开始转换</span>
                                     <button class="btn-remove" id="btnRemove">
-                                        <i class="fas fa-times"></i> 移除
+                                        <i class="fas fa-times"></i> 移除全部
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                        <div id="fileListPanel" style="display:none;margin-bottom:18px;">
+                            <div style="font-size:14px;font-weight:700;margin-bottom:10px;color:var(--text-primary);"><i class="fas fa-list"></i> 已选文件 (<span id="fileCount">0</span>)</div>
+                            <div id="fileListItems" style="display:grid;gap:8px;max-height:200px;overflow-y:auto;"></div>
                         </div>
 
                         <div class="options-panel">
@@ -148,6 +152,15 @@
                     </div>
                     <p class="progress-text" id="progressText">0%</p>
                 </div>
+            </section>
+
+            <section class="batch-section" id="batchSection" style="display:none;">
+                <div class="result-header">
+                    <h2><i class="fas fa-tasks"></i> 批量任务进度</h2>
+                    <button class="btn-secondary" id="btnBatchNewTask"><i class="fas fa-plus"></i> 新建任务</button>
+                </div>
+                <div class="result-stats" id="batchStats"></div>
+                <div id="batchTaskList" style="display:grid;gap:12px;margin-top:16px;"></div>
             </section>
 
             <section class="result-section" id="resultSection" style="display: none;">

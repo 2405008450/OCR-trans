@@ -1,4 +1,4 @@
-﻿const POLL_INTERVAL = 2000;
+const POLL_INTERVAL = 2000;
 const DETAIL_POLL_INTERVAL = 1500;
 const DASHBOARD_TIME_ZONE = 'Asia/Shanghai';
 
@@ -276,13 +276,22 @@ function normalizeInputFiles(inputFiles) {
       .map((item) => ({ path: item.path, name: item.original_filename || item.path.split('/').pop() }));
   }
 
-  return Object.entries(inputFiles)
-    .filter(([, value]) => typeof value === 'string' && value)
-    .filter(([key]) => key.endsWith('_path') || key === 'input_path')
-    .map(([key, value]) => ({
-      path: value,
-      name: key.endsWith('_path') ? key.replace(/_path$/, '') : value.split('/').pop(),
-    }));
+  const results = [];
+  const pathKeys = Object.keys(inputFiles).filter(
+    (key) => (key.endsWith('_path') || key === 'input_path') && typeof inputFiles[key] === 'string' && inputFiles[key]
+  );
+
+  for (const key of pathKeys) {
+    const filePath = inputFiles[key];
+    const prefix = key.replace(/_path$/, '');
+    const friendlyName =
+      inputFiles[`${prefix}_filename`] ||
+      inputFiles['original_filename'] && key === 'input_path' && inputFiles['original_filename'] ||
+      filePath.split('/').pop();
+    results.push({ path: filePath, name: friendlyName });
+  }
+
+  return results;
 }
 
 function downloadFile(taskId, filePath, friendlyName) {

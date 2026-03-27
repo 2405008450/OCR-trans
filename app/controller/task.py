@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import traceback
 from pathlib import Path
@@ -126,6 +126,22 @@ async def run_task(file: UploadFile = File(...), from_lang: str = Query("zh"), t
     except Exception as exc:
         tb = traceback.format_exc()
         raise HTTPException(status_code=500, detail={"error": str(exc), "type": type(exc).__name__, "traceback": tb.split("\n")[-10:] if tb else []})
+
+
+@router.post("/run/batch")
+async def run_task_batch(files: List[UploadFile] = File(...), from_lang: str = Query("zh"), to_lang: str = Query("en"), enable_correction: bool = Query(False), enable_visualization: bool = Query(True), card_side: str = Query("front"), doc_type: str = Query("id_card"), marriage_page_template: str = Query("page2"), registrar_signature_text: Optional[str] = Query(None), registered_by_text: Optional[str] = Query(None), registered_by_offset_x: int = Query(20), registered_by_offset_y: int = Query(-80), registrar_signature_offset_x: int = Query(48), registrar_signature_offset_y: int = Query(-12), enable_merge: bool = Query(True), enable_overlap_fix: bool = Query(True), enable_colon_fix: bool = Query(True), font_size: Optional[int] = Query(None)):
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="Too many files (max 50)")
+    results = []
+    for file in files:
+        try:
+            task_id = await task_queue_service.submit_ocr_task(file=file, from_lang=from_lang, to_lang=to_lang, enable_correction=enable_correction, enable_visualization=enable_visualization, card_side=card_side, doc_type=doc_type, marriage_page_template=marriage_page_template, registrar_signature_text=registrar_signature_text, registered_by_text=registered_by_text, registered_by_offset_x=registered_by_offset_x, registered_by_offset_y=registered_by_offset_y, registrar_signature_offset_x=registrar_signature_offset_x, registrar_signature_offset_y=registrar_signature_offset_y, enable_merge=enable_merge, enable_overlap_fix=enable_overlap_fix, enable_colon_fix=enable_colon_fix, font_size=font_size)
+            results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
+        except Exception as exc:
+            results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
+    return {"status": "ACCEPTED", "tasks": results, "total": len(results)}
 
 
 @router.get("/run/status/{task_id}")
@@ -281,6 +297,26 @@ async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = 
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
 
+@router.post("/doc-translate/batch")
+async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("openrouter")):
+    allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="Too many files (max 50)")
+    results = []
+    for file in files:
+        if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
+            results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": "Unsupported file format"})
+            continue
+        try:
+            task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, ocr_model=ocr_model, gemini_route=gemini_route)
+            results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
+        except Exception as exc:
+            results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
+    return {"status": "ACCEPTED", "tasks": results, "total": len(results)}
+
+
 @router.get("/doc-translate/status/{task_id}")
 async def get_doc_translate_status(task_id: str):
     queue_task = task_queue_service.get_task_status(task_id)
@@ -315,6 +351,40 @@ async def run_pdf2docx(file: UploadFile = File(...), model: str = Query("google/
             await file.seek(0)
     task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+
+
+@router.post("/pdf2docx/batch")
+async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
+    allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="Too many files (max 50)")
+    results = []
+    for file in files:
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext not in allowed_ext:
+            results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": "Unsupported file format"})
+            continue
+        if ext == ".pdf":
+            try:
+                import fitz
+                content = await file.read()
+                pdf_doc = fitz.open(stream=content, filetype="pdf")
+                page_count = len(pdf_doc)
+                pdf_doc.close()
+                if page_count > 100:
+                    results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": f"PDF has too many pages ({page_count})"})
+                    continue
+                await file.seek(0)
+            except Exception:
+                await file.seek(0)
+        try:
+            task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
+            results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
+        except Exception as exc:
+            results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
+    return {"status": "ACCEPTED", "tasks": results, "total": len(results)}
 
 
 @router.get("/pdf2docx/status/{task_id}")
