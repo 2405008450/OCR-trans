@@ -146,45 +146,69 @@ def _generate_google_with_retry(
     max_retries: int = 2,
     timeout: float = 600.0,
     log_callback: GeminiLogCallback = None,
-):
+) -> str:
     client = client_factory(timeout=timeout)
     delay = 2.0
     for attempt in range(max_retries):
         try:
-            return client.models.generate_content(model=model, contents=contents, config=config)
-        except ClientError as exc:
-            if attempt == max_retries - 1 or not _is_retryable_google_client_error(exc):
+            response_stream = client.models.generate_content_stream(model=model, contents=contents, config=config)
+            full_text = ""
+            char_count = 0
+            last_log_at = 0
+            
+            for chunk in response_stream:
+                chunk_text = getattr(chunk, "text", None)
+                if not chunk_text:
+                    parts = []
+                    for candidate in getattr(chunk, "candidates", []) or []:
+                        content = getattr(candidate, "content", None)
+                        if content:
+                            for part in getattr(content, "parts", []) or []:
+                                part_text = getattr(part, "text", None)
+                                if part_text:
+                                    parts.append(part_text)
+                    chunk_text = "".join(parts)
+                
+                if chunk_text:
+                    full_text += chunk_text
+                    char_count += len(chunk_text)
+                    
+                    if log_callback and (char_count - last_log_at) >= 200:
+                        log_callback(f"[{route_name}] 生成中... 已接收 {char_count} 字符")
+                        last_log_at = char_count
+                        
+            if log_callback and char_count > 0:
+                log_callback(f"[{route_name}] 生成完毕，共 {char_count} 字符")
+                
+            return full_text
+            
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            is_network_err = (
+                exc_name in ("TransportError", "ConnectionError", "TimeoutError", "ProtocolError", "OSError", "Timeout", "ConnectError", "ReadTimeout", "WriteTimeout", "ConnectionResetError") 
+                or any(isinstance(exc, err) for err in _RETRYABLE_NETWORK_ERRORS)
+            )
+            
+            if isinstance(exc, ClientError):
+                if attempt == max_retries - 1 or not _is_retryable_google_client_error(exc):
+                    raise
+                sleep_s = delay + random.uniform(0, 1.5)
+                if log_callback:
+                    log_callback(f"[{route_name}] 客户端异常 ({exc_name})等待 {sleep_s:.1f}s 重试... ({attempt + 1}/{max_retries})")
+                time.sleep(sleep_s)
+                delay = min(delay * 2, 30)
+                client = client_factory(timeout=timeout)
+            elif is_network_err:
+                if attempt == max_retries - 1:
+                    raise
+                sleep_s = delay + random.uniform(0, 2.0)
+                if log_callback:
+                    log_callback(f"[{route_name}] 网络异常 ({exc_name})等待 {sleep_s:.1f}s 重试... ({attempt + 1}/{max_retries})")
+                time.sleep(sleep_s)
+                delay = min(delay * 2, 30)
+                client = client_factory(timeout=timeout)
+            else:
                 raise
-            sleep_s = delay + random.uniform(0, 1.5)
-            if log_callback:
-                log_callback(f"[{route_name}] ????? ({type(exc).__name__})??? {sleep_s:.1f}s ???... ({attempt + 1}/{max_retries})")
-            time.sleep(sleep_s)
-            delay = min(delay * 2, 30)
-            client = client_factory(timeout=timeout)
-        except _RETRYABLE_NETWORK_ERRORS as exc:
-            if attempt == max_retries - 1:
-                raise
-            sleep_s = delay + random.uniform(0, 2.0)
-            if log_callback:
-                log_callback(f"[{route_name}] ???? ({type(exc).__name__})??? {sleep_s:.1f}s ???... ({attempt + 1}/{max_retries})")
-            time.sleep(sleep_s)
-            delay = min(delay * 2, 30)
-            client = client_factory(timeout=timeout)
-
-
-def _extract_google_text(response) -> str:
-    text = getattr(response, "text", None)
-    if text:
-        return text
-
-    parts = []
-    for candidate in getattr(response, "candidates", []) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            part_text = getattr(part, "text", None)
-            if part_text:
-                parts.append(part_text)
-    return "".join(parts)
 
 
 def _should_fallback_to_openrouter(route: str) -> bool:
@@ -291,7 +315,7 @@ def generate_text(
 
     if normalized == GEMINI_ROUTE_GOOGLE:
         try:
-            response = _generate_google_with_retry(
+            text_result = _generate_google_with_retry(
                 route_name="vertex",
                 client_factory=_get_vertex_client,
                 model=resolved_model,
@@ -304,7 +328,7 @@ def generate_text(
                 timeout=timeout,
                 log_callback=log_callback,
             )
-            return (_extract_google_text(response) or "").strip()
+            return (text_result or "").strip()
         except Exception as exc:
             if not _should_fallback_to_openrouter(normalized):
                 raise
@@ -322,7 +346,7 @@ def generate_text(
             )
 
     if normalized == GEMINI_ROUTE_AI_STUDIO:
-        response = _generate_google_with_retry(
+        text_result = _generate_google_with_retry(
             route_name="ai-studio",
             client_factory=_get_ai_studio_client,
             model=resolved_model,
@@ -335,7 +359,7 @@ def generate_text(
             timeout=timeout,
             log_callback=log_callback,
         )
-        return (_extract_google_text(response) or "").strip()
+        return (text_result or "").strip()
 
     return _generate_openrouter_text(
         system_prompt=system_prompt,
@@ -368,7 +392,7 @@ def generate_vision_html(
 
     if normalized == GEMINI_ROUTE_GOOGLE:
         try:
-            response = _generate_google_with_retry(
+            text_result = _generate_google_with_retry(
                 route_name="vertex",
                 client_factory=_get_vertex_client,
                 model=resolved_model,
@@ -389,7 +413,7 @@ def generate_vision_html(
                 timeout=timeout,
                 log_callback=log_callback,
             )
-            return (_extract_google_text(response) or "").strip()
+            return (text_result or "").strip()
         except Exception as exc:
             if not _should_fallback_to_openrouter(normalized):
                 raise
@@ -408,7 +432,7 @@ def generate_vision_html(
             )
 
     if normalized == GEMINI_ROUTE_AI_STUDIO:
-        response = _generate_google_with_retry(
+        text_result = _generate_google_with_retry(
             route_name="ai-studio",
             client_factory=_get_ai_studio_client,
             model=resolved_model,
@@ -429,7 +453,7 @@ def generate_vision_html(
             timeout=timeout,
             log_callback=log_callback,
         )
-        return (_extract_google_text(response) or "").strip()
+        return (text_result or "").strip()
 
     return _generate_openrouter_vision(
         system_prompt=system_prompt,
