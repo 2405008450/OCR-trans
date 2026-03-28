@@ -229,6 +229,9 @@ def _generate_openrouter_text(
         base_url=settings.OPENROUTER_BASE_URL,
         api_key=settings.OPENROUTER_API_KEY,
         timeout=timeout,
+        default_headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        }
     )
     stream = client.chat.completions.create(
         model=model,
@@ -273,6 +276,9 @@ def _generate_openrouter_vision(
         base_url=settings.OPENROUTER_BASE_URL,
         api_key=settings.OPENROUTER_API_KEY,
         timeout=timeout,
+        default_headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        }
     )
     image_b64 = image_bytes.decode("utf-8") if mime_type == "text/plain-base64" else None
     if image_b64 is None:
