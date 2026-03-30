@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import asyncio
+import time
 import uuid
 import traceback
 import threading
@@ -46,6 +47,8 @@ THRESHOLD_MAP = {
 }
 BUFFER_CHARS = 2000
 OUTPUT_DIR = settings.OUTPUT_DIR
+PART_TASK_MAX_RETRIES = 3
+PART_TASK_RETRY_DELAY_SECONDS = 5
 
 AVAILABLE_MODELS = {
     "Google Gemini 2.5 Flash": {
@@ -1546,6 +1549,18 @@ def _list_intermediate_files(temp_dir: str) -> list:
 
 
 # ── 同步主处理（1:1 复刻 memory.py GUI 的 run_processing）─────
+def _is_reusable_alignment_excel(path: str) -> bool:
+    """检查已存在的分块结果是否可直接复用。"""
+    if not os.path.exists(path):
+        return False
+    try:
+        df = pd.read_excel(path, nrows=1)
+    except Exception:
+        return False
+    columns = {str(col).strip() for col in df.columns}
+    return {"原文", "译文"}.issubset(columns)
+
+
 def _run_alignment_sync(
     original_path: str,
     translated_path: str,
@@ -1716,8 +1731,12 @@ def _run_alignment_sync(
         _update_progress(task_id, 30, f"AI 对齐中（共 {len(tasks_queue)} 个任务）...")
         _log(f"待处理任务数: {len(tasks_queue)}")
         progress_per_task = 50 / len(tasks_queue) if tasks_queue else 50
+        stop_following_tasks = False
+        failed_task_names = []
 
         for idx, task in enumerate(tasks_queue):
+            if stop_following_tasks:
+                break
             progress = 30 + int((idx + 1) * progress_per_task)
             _update_progress(task_id, progress,
                              f"AI 对齐中 ({idx + 1}/{len(tasks_queue)})...")
@@ -1727,6 +1746,9 @@ def _run_alignment_sync(
             print(f"[alignment]   original: {task['original']}")
             print(f"[alignment]   trans: {task['trans']}")
             print(f"[alignment]   output: {task['output']}")
+            if split_parts > 1 and _is_reusable_alignment_excel(task['output']):
+                _log(f"任务 {idx + 1} 复用已有结果: {os.path.basename(task['output'])}")
+                continue
 
             # 诊断：直接用 memory 的 read_file_content 测试读取
             try:
@@ -1741,19 +1763,38 @@ def _run_alignment_sync(
             except Exception as diag_e:
                 print(f"[alignment]   read_file_content 诊断异常: {diag_e}")
 
-            memory_module.set_gemini_route(gemini_route)
-            success = memory_module.run_llm_alignment(
-                task['original'],
-                task['trans'],
-                task['output'],
-                model_id,
-                anchor_info_orig=task.get('anchor_orig'),
-                anchor_info_trans=task.get('anchor_trans'),
-                system_prompt_override=task.get('system_prompt_override'),
-                source_lang=source_lang,
-                target_lang=target_lang,
-                enable_post_split=enable_post_split,
-            )
+            max_retries = PART_TASK_MAX_RETRIES if split_parts > 1 else 1
+            success = False
+            for attempt in range(1, max_retries + 1):
+                if attempt > 1:
+                    _log(
+                        f"任务 {idx + 1} 重试 {attempt}/{max_retries}: "
+                        f"{os.path.basename(task['output'])}"
+                    )
+
+                memory_module.set_gemini_route(gemini_route)
+                success = memory_module.run_llm_alignment(
+                    task['original'],
+                    task['trans'],
+                    task['output'],
+                    model_id,
+                    anchor_info_orig=task.get('anchor_orig'),
+                    anchor_info_trans=task.get('anchor_trans'),
+                    system_prompt_override=task.get('system_prompt_override'),
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                    enable_post_split=enable_post_split,
+                )
+
+                if success and os.path.exists(task['output']):
+                    break
+
+                if attempt < max_retries:
+                    _log(
+                        f"任务 {idx + 1} 失败，{PART_TASK_RETRY_DELAY_SECONDS} 秒后重试: "
+                        f"{os.path.basename(task['output'])}"
+                    )
+                    time.sleep(PART_TASK_RETRY_DELAY_SECONDS)
 
             print(f"[alignment] 任务 {idx + 1} 结果: success={success}, output_exists={os.path.exists(task['output'])}")
             if success and os.path.exists(task['output']):
@@ -1762,9 +1803,32 @@ def _run_alignment_sync(
                 _log(f"任务 {idx + 1} 失败: {os.path.basename(task['output'])}")
                 if task['output'] in generated_excel_paths:
                     generated_excel_paths.remove(task['output'])
+                failed_task_names.append(os.path.basename(task['output']))
+                if split_parts > 1:
+                    stop_following_tasks = True
+                    next_part_num = idx + 2
+                    if next_part_num <= len(tasks_queue):
+                        _log(
+                            f"Part{idx + 1} 多次失败，停止继续处理 Part{next_part_num}"
+                        )
 
         # ── 合并 ──
         _update_progress(task_id, 85, "合并与去重...")
+        if generated_excel_paths:
+            _log(f"成功生成的结果文件数: {len(generated_excel_paths)}")
+            for path in generated_excel_paths:
+                _log(f"  - {os.path.basename(path)}")
+
+        if stop_following_tasks:
+            _complete_task(
+                task_id,
+                error=(
+                    "分块对齐未全部完成，已保留成功的中间结果。"
+                    f"失败分块：{', '.join(failed_task_names)}"
+                ),
+            )
+            return
+
         final_path = None
         if split_parts > 1 and len(generated_excel_paths) > 0:
             final_path = os.path.join(task_dir, f"「最终结果」{base_name}_对齐.xlsx")

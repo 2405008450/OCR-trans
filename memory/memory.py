@@ -3,6 +3,7 @@ import re
 import shutil
 import threading
 import queue
+import math
 from datetime import datetime
 import pandas as pd
 from lxml import etree
@@ -42,6 +43,8 @@ BUFFER_CHARS = 2000
 OUTPUT_DIR = "Result_Output"
 PART_TASK_MAX_RETRIES = 3
 PART_TASK_RETRY_DELAY_SECONDS = 5
+AI_STUDIO_ALIGNMENT_TARGET_PROMPT_CHARS = 60000
+AI_STUDIO_ALIGNMENT_MAX_SUB_PARTS = 12
 
 # ==========================================
 # === 🤖 可用模型配置 ===
@@ -1636,6 +1639,120 @@ def save_issues_report(issues, output_path):
 # ==========================================
 # === 🤖 核心 AI 对齐 ===
 # ==========================================
+def build_alignment_user_prompt(anchor_hint, text_original, text_trans):
+    """构造对齐 user_prompt，保持原有提示词模板不变。"""
+    return f"""{anchor_hint}
+
+<Stream_A_Original>
+{text_original}
+</Stream_A_Original>
+
+<Stream_B_Translation>
+{text_trans}
+</Stream_B_Translation>
+
+请严格按规则输出对齐结果：
+"""
+
+
+def _split_text_by_line_ratios(text, num_parts, split_line_ratios=None):
+    """按行进行等比分块，避免在段落中间硬切。"""
+    if num_parts <= 1:
+        return [text], []
+
+    lines = text.splitlines()
+    if not lines:
+        return [text], []
+
+    cumulative_counts = []
+    total_chars = 0
+    for line in lines:
+        total_chars += len(line) + 1
+        cumulative_counts.append(total_chars)
+
+    if total_chars <= 0:
+        return [text], []
+
+    split_ends = []
+    prev_end = 0
+
+    for idx in range(1, num_parts):
+        if split_line_ratios is not None and idx - 1 < len(split_line_ratios):
+            end = int(round(split_line_ratios[idx - 1] * len(lines)))
+        else:
+            target_chars = int(total_chars * idx / num_parts)
+            nearest_idx = find_element_index_by_char_count(cumulative_counts, target_chars)
+            end = nearest_idx + 1
+
+        min_end = prev_end + 1
+        max_end = len(lines) - (num_parts - idx)
+        end = max(min_end, min(end, max_end))
+        split_ends.append(end)
+        prev_end = end
+
+    chunks = []
+    start = 0
+    for end in split_ends + [len(lines)]:
+        chunk_text = "\n".join(lines[start:end]).strip()
+        chunks.append(chunk_text)
+        start = end
+
+    line_ratios = [end / len(lines) for end in split_ends]
+    return chunks, line_ratios
+
+
+def _estimate_alignment_prompt_chars(anchor_hint, text_original, text_trans):
+    return len(anchor_hint) + len(text_original) + len(text_trans) + 200
+
+
+def run_alignment_with_optional_chunking(
+    system_prompt,
+    anchor_hint,
+    text_original,
+    text_trans,
+    model_id,
+    filename,
+):
+    """AI Studio 路线按最终 prompt 体积做二次分块，其他路线保持单次调用。"""
+    route = get_gemini_route()
+    estimated_chars = _estimate_alignment_prompt_chars(anchor_hint, text_original, text_trans)
+
+    if route != "google_ai_studio" or estimated_chars <= AI_STUDIO_ALIGNMENT_TARGET_PROMPT_CHARS:
+        user_prompt = build_alignment_user_prompt(anchor_hint, text_original, text_trans)
+        response = call_llm_stream(system_prompt, user_prompt, model_id, filename)
+        return response, 1
+
+    sub_parts = max(2, math.ceil(estimated_chars / AI_STUDIO_ALIGNMENT_TARGET_PROMPT_CHARS))
+    sub_parts = min(sub_parts, AI_STUDIO_ALIGNMENT_MAX_SUB_PARTS)
+
+    log_manager.log(
+        f"AI Studio 二次分块: {sub_parts} 份（估算请求体 {estimated_chars:,} 字符）"
+    )
+
+    orig_chunks, split_ratios = _split_text_by_line_ratios(text_original, sub_parts)
+    trans_chunks, _ = _split_text_by_line_ratios(text_trans, sub_parts, split_line_ratios=split_ratios)
+
+    combined_responses = []
+    for idx, (orig_chunk, trans_chunk) in enumerate(zip(orig_chunks, trans_chunks), start=1):
+        chunk_prompt = build_alignment_user_prompt(anchor_hint, orig_chunk, trans_chunk)
+        chunk_chars = len(chunk_prompt)
+        log_manager.log(
+            f"  子块 {idx}/{sub_parts}: 原文 {len(orig_chunk):,} 字符, "
+            f"译文 {len(trans_chunk):,} 字符, prompt {chunk_chars:,} 字符"
+        )
+        response = call_llm_stream(
+            system_prompt,
+            chunk_prompt,
+            model_id,
+            f"{filename}-子块{idx}/{sub_parts}",
+        )
+        if not response:
+            return None, sub_parts
+        combined_responses.append(response)
+
+    return "\n".join(combined_responses), sub_parts
+
+
 def call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename=""):
     """统一 Gemini 文本调用，按当前线程选择 Google 官方或 OpenRouter 线路"""
     route = get_gemini_route()
@@ -2034,20 +2151,14 @@ def run_llm_alignment(file_original_path, file_trans_path, output_excel_path, mo
 - 译文开头: "{anchor_info_trans.get('first_anchor', '')[:100]}"
 """
 
-                user_prompt = f"""{anchor_hint}
-
-<Stream_A_Original>
-{text_original}
-</Stream_A_Original>
-
-<Stream_B_Translation>
-{text_trans}
-</Stream_B_Translation>
-
-请严格按规则输出对齐结果：
-"""
-
-                response = call_llm_stream(system_prompt, user_prompt, model_id, f"{filename}-非表格")
+                response, _ = run_alignment_with_optional_chunking(
+                    system_prompt=system_prompt,
+                    anchor_hint=anchor_hint,
+                    text_original=text_original,
+                    text_trans=text_trans,
+                    model_id=model_id,
+                    filename=f"{filename}-非表格",
+                )
 
                 if response:
                     last_500 = response[-500:] if len(response) > 500 else response
@@ -2116,20 +2227,14 @@ def run_llm_alignment(file_original_path, file_trans_path, output_excel_path, mo
 - 译文开头: "{anchor_info_trans.get('first_anchor', '')[:100]}"
 """
 
-    user_prompt = f"""{anchor_hint}
-
-<Stream_A_Original>
-{text_original}
-</Stream_A_Original>
-
-<Stream_B_Translation>
-{text_trans}
-</Stream_B_Translation>
-
-请严格按规则输出对齐结果：
-"""
-
-    response = call_llm_stream(system_prompt, user_prompt, model_id, filename)
+    response, _ = run_alignment_with_optional_chunking(
+        system_prompt=system_prompt,
+        anchor_hint=anchor_hint,
+        text_original=text_original,
+        text_trans=text_trans,
+        model_id=model_id,
+        filename=filename,
+    )
 
     # 检测截断
     if response:

@@ -170,7 +170,7 @@ function populateSelects() {
         modelSelect.value = DEFAULT_MODEL_NAME;
     }
     const routes = configData?.routes || {};
-    const defaultRoute = configData?.default_route || "openrouter";
+    const defaultRoute = configData?.default_route || "google";
     Object.entries(routes).forEach(([value, info]) => {
         geminiRouteSelect.add(new Option(info.label || value, value));
     });
@@ -209,7 +209,7 @@ function populateDefaults() {
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
     geminiRouteSelect.innerHTML = '<option value="google">\u7ebf\u8def1</option><option value="openrouter">\u7ebf\u8def2</option><option value="google_ai_studio">\u7ebf\u8def3</option>';
-    geminiRouteSelect.value = "openrouter";
+    geminiRouteSelect.value = "google";
     updateRouteInfo();
     updateModelInfo();
 }
@@ -290,7 +290,7 @@ async function startAlignment() {
             source_lang: sourceLangSelect.value,
             target_lang: targetLangSelect.value,
             model_name: modelSelect.value,
-            gemini_route: geminiRouteSelect?.value || (configData?.default_route || 'openrouter'),
+            gemini_route: geminiRouteSelect?.value || (configData?.default_route || 'google'),
             enable_post_split: enablePostSplit.checked,
             threshold_2: document.getElementById('threshold2').value,
             threshold_3: document.getElementById('threshold3').value,
@@ -364,6 +364,12 @@ async function pollStatus(taskId) {
         }
 
         if (status.status === 'done') {
+            if (!status.result || !status.result.output_excel) {
+                stopPolling();
+                processingTitle.textContent = '对齐失败';
+                processingText.textContent = '任务已结束，但没有生成可下载的对齐结果文件。';
+                return;
+            }
             stopPolling();
             if (status.result && status.result.stream_log) {
                 streamLogWrap.style.display = 'block';

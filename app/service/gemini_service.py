@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import os
 import random
+import tempfile
 import time
 from typing import Callable, Dict, Optional
 
@@ -104,14 +106,14 @@ def ensure_gemini_route_configured(route: Optional[str]) -> str:
     normalized = normalize_gemini_route(route)
     if normalized == GEMINI_ROUTE_GOOGLE:
         if not settings.VERTEX_PROJECT_ID:
-            raise ValueError("??? VERTEX_PROJECT_ID????? Google Vertex AI ??")
+            raise ValueError("未配置 VERTEX_PROJECT_ID，无法使用 Google Vertex AI。")
         return normalized
     if normalized == GEMINI_ROUTE_AI_STUDIO:
         if not settings.AI_STUDIO_API_KEY:
-            raise ValueError("??? AI_STUDIO_API_KEY ? GEMINI_API_KEY????? Google AI Studio ??")
+            raise ValueError("未配置 AI_STUDIO_API_KEY 或 GOOGLE_API_KEY，无法使用 Google AI Studio。")
         return normalized
     if not settings.OPENROUTER_API_KEY:
-        raise ValueError("??? OPENROUTER_API_KEY????? OpenRouter Gemini ??")
+        raise ValueError("未配置 OPENROUTER_API_KEY，无法使用 OpenRouter Gemini。")
     return normalized
 
 
@@ -143,7 +145,7 @@ def _generate_google_with_retry(
     model: str,
     contents,
     config=None,
-    max_retries: int = 2,
+    max_retries: int = 3,
     timeout: float = 600.0,
     log_callback: GeminiLogCallback = None,
 ) -> str:
@@ -185,7 +187,7 @@ def _generate_google_with_retry(
         except Exception as exc:
             exc_name = type(exc).__name__
             is_network_err = (
-                exc_name in ("TransportError", "ConnectionError", "TimeoutError", "ProtocolError", "OSError", "Timeout", "ConnectError", "ReadTimeout", "WriteTimeout", "ConnectionResetError") 
+                exc_name in ("TransportError", "ConnectionError", "TimeoutError", "ProtocolError", "OSError", "Timeout", "ConnectError", "ReadTimeout", "WriteTimeout", "ConnectionResetError", "ChunkedEncodingError", "RemoteProtocolError") 
                 or any(isinstance(exc, err) for err in _RETRYABLE_NETWORK_ERRORS)
             )
             
@@ -194,7 +196,10 @@ def _generate_google_with_retry(
                     raise
                 sleep_s = delay + random.uniform(0, 1.5)
                 if log_callback:
-                    log_callback(f"[{route_name}] 客户端异常 ({exc_name})等待 {sleep_s:.1f}s 重试... ({attempt + 1}/{max_retries})")
+                    log_callback(
+                        f"[{route_name}] 客户端异常（{exc_name}），等待 {sleep_s:.1f}s 后重试... "
+                        f"({attempt + 1}/{max_retries})"
+                    )
                 time.sleep(sleep_s)
                 delay = min(delay * 2, 30)
                 client = client_factory(timeout=timeout)
@@ -203,7 +208,82 @@ def _generate_google_with_retry(
                     raise
                 sleep_s = delay + random.uniform(0, 2.0)
                 if log_callback:
-                    log_callback(f"[{route_name}] 网络异常 ({exc_name})等待 {sleep_s:.1f}s 重试... ({attempt + 1}/{max_retries})")
+                    log_callback(
+                        f"[{route_name}] 网络异常（{exc_name}），等待 {sleep_s:.1f}s 后重试... "
+                        f"({attempt + 1}/{max_retries})"
+                    )
+                time.sleep(sleep_s)
+                delay = min(delay * 2, 30)
+                client = client_factory(timeout=timeout)
+            else:
+                raise
+
+
+def _generate_google_non_stream_with_retry(
+    *,
+    route_name: str,
+    client_factory,
+    model: str,
+    contents,
+    config=None,
+    max_retries: int = 3,
+    timeout: float = 600.0,
+    log_callback: GeminiLogCallback = None,
+) -> str:
+    client = client_factory(timeout=timeout)
+    delay = 2.0
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+            text = (getattr(response, "text", None) or "").strip()
+            if log_callback:
+                log_callback(f"[{route_name}] 生成完毕，共 {len(text)} 字符")
+            return text
+        except Exception as exc:
+            exc_name = type(exc).__name__
+            is_network_err = (
+                exc_name in (
+                    "TransportError",
+                    "ConnectionError",
+                    "TimeoutError",
+                    "ProtocolError",
+                    "OSError",
+                    "Timeout",
+                    "ConnectError",
+                    "ReadTimeout",
+                    "WriteTimeout",
+                    "ConnectionResetError",
+                    "ChunkedEncodingError",
+                    "RemoteProtocolError",
+                )
+                or any(isinstance(exc, err) for err in _RETRYABLE_NETWORK_ERRORS)
+            )
+
+            if isinstance(exc, ClientError):
+                if attempt == max_retries - 1 or not _is_retryable_google_client_error(exc):
+                    raise
+                sleep_s = delay + random.uniform(0, 1.5)
+                if log_callback:
+                    log_callback(
+                        f"[{route_name}] 客户端异常（{exc_name}），等待 {sleep_s:.1f}s 后重试... "
+                        f"({attempt + 1}/{max_retries})"
+                    )
+                time.sleep(sleep_s)
+                delay = min(delay * 2, 30)
+                client = client_factory(timeout=timeout)
+            elif is_network_err:
+                if attempt == max_retries - 1:
+                    raise
+                sleep_s = delay + random.uniform(0, 2.0)
+                if log_callback:
+                    log_callback(
+                        f"[{route_name}] 网络异常（{exc_name}），等待 {sleep_s:.1f}s 后重试... "
+                        f"({attempt + 1}/{max_retries})"
+                    )
                 time.sleep(sleep_s)
                 delay = min(delay * 2, 30)
                 client = client_factory(timeout=timeout)
@@ -212,7 +292,134 @@ def _generate_google_with_retry(
 
 
 def _should_fallback_to_openrouter(route: str) -> bool:
-    return route == GEMINI_ROUTE_GOOGLE and bool(settings.OPENROUTER_API_KEY)
+    return (
+        route == GEMINI_ROUTE_GOOGLE
+        and settings.GEMINI_ENABLE_OPENROUTER_FALLBACK_ENABLED
+        and bool(settings.OPENROUTER_API_KEY)
+    )
+
+
+def _should_use_ai_studio_file_api(route: str, user_prompt: str) -> bool:
+    return (
+        route == GEMINI_ROUTE_AI_STUDIO
+        and settings.AI_STUDIO_USE_FILES_API_ENABLED
+        and bool(user_prompt)
+    )
+
+
+def _extract_uploaded_file_state_name(file_obj) -> str:
+    state = getattr(file_obj, "state", None)
+    if state is None:
+        return ""
+    state_name = getattr(state, "name", None)
+    if state_name:
+        return str(state_name).upper()
+    return str(state).upper()
+
+
+def _wait_for_ai_studio_file_ready(
+    *,
+    client: genai.Client,
+    file_name: str,
+    timeout: float,
+    log_callback: GeminiLogCallback = None,
+):
+    start_time = time.time()
+    last_state = None
+
+    while True:
+        file_info = client.files.get(name=file_name)
+        state_name = _extract_uploaded_file_state_name(file_info)
+
+        if not state_name or state_name in {"ACTIVE", "SUCCEEDED", "STATE_UNSPECIFIED"}:
+            return file_info
+
+        if "FAILED" in state_name or "ERROR" in state_name:
+            raise RuntimeError(
+                f"AI Studio Files API 文件处理失败，state={state_name}，error={getattr(file_info, 'error', None)}"
+            )
+
+        if time.time() - start_time >= timeout:
+            raise TimeoutError(f"等待 AI Studio Files API 文件就绪超时，最后状态为 {state_name}")
+
+        if log_callback and state_name != last_state:
+            log_callback(f"[ai-studio] 文件处理中，当前状态：{state_name}")
+            last_state = state_name
+        time.sleep(1.0)
+
+
+def _generate_ai_studio_text_with_file_api(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    temperature: float,
+    max_output_tokens: int,
+    timeout: float,
+    log_callback: GeminiLogCallback = None,
+) -> str:
+    client = _get_ai_studio_client(timeout=timeout)
+    temp_path = None
+    remote_file_name = None
+
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".txt", delete=False) as temp_file:
+            temp_file.write(user_prompt)
+            temp_path = temp_file.name
+
+        if log_callback:
+            log_callback(
+                f"[ai-studio] 输入较大，改用 Files API 中转：{len(user_prompt)} 字符"
+            )
+
+        uploaded_file = client.files.upload(
+            file=temp_path,
+            config=types.UploadFileConfig(
+                mime_type="text/plain",
+                display_name=os.path.basename(temp_path),
+            ),
+        )
+        remote_file_name = uploaded_file.name
+
+        if log_callback:
+            log_callback(f"[ai-studio] 文件已上传：{remote_file_name}")
+
+        ready_file = _wait_for_ai_studio_file_ready(
+            client=client,
+            file_name=remote_file_name,
+            timeout=timeout,
+            log_callback=log_callback,
+        )
+
+        text_result = _generate_google_non_stream_with_retry(
+            route_name="ai-studio-file",
+            client_factory=_get_ai_studio_client,
+            model=model,
+            contents=[ready_file],
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+            ),
+            timeout=timeout,
+            log_callback=log_callback,
+        )
+        return (text_result or "").strip()
+    finally:
+        if remote_file_name and settings.AI_STUDIO_FILES_API_DELETE_REMOTE_ENABLED:
+            try:
+                client.files.delete(name=remote_file_name)
+                if log_callback:
+                    log_callback(f"[ai-studio] 已删除远端中转文件：{remote_file_name}")
+            except Exception as exc:
+                if log_callback:
+                    log_callback(f"[ai-studio] 删除远端中转文件失败：{type(exc).__name__}: {exc}")
+
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 def _generate_openrouter_text(
@@ -254,10 +461,10 @@ def _generate_openrouter_text(
         full_text += delta
         char_count += len(delta)
         if log_callback and char_count - last_log_at >= 200:
-            log_callback(f"[openrouter] ????... ???? {char_count} ??")
+            log_callback(f"[openrouter] 生成中... 已接收 {char_count} 字符")
             last_log_at = char_count
     if log_callback:
-        log_callback(f"[openrouter] ?????? {char_count} ??")
+        log_callback(f"[openrouter] 生成完毕，共 {char_count} 字符")
     return full_text.strip()
 
 
@@ -340,7 +547,7 @@ def generate_text(
                 raise
             fallback_model = resolve_model_for_route(model, GEMINI_ROUTE_OPENROUTER)
             if log_callback:
-                log_callback(f"[gemini] Vertex ??????? OpenRouter: {type(exc).__name__}: {exc}")
+                log_callback(f"[gemini] Vertex 失败，回退到 OpenRouter: {type(exc).__name__}: {exc}")
             return _generate_openrouter_text(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -352,6 +559,17 @@ def generate_text(
             )
 
     if normalized == GEMINI_ROUTE_AI_STUDIO:
+        if _should_use_ai_studio_file_api(normalized, user_prompt):
+            return _generate_ai_studio_text_with_file_api(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=resolved_model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                timeout=timeout,
+                log_callback=log_callback,
+            )
+
         text_result = _generate_google_with_retry(
             route_name="ai-studio",
             client_factory=_get_ai_studio_client,
@@ -385,7 +603,7 @@ def generate_vision_html(
     mime_type: str,
     model: str,
     route: Optional[str] = None,
-    user_prompt: str = "??????????? OCR ??? HTML?",
+    user_prompt: str = "请根据上传图片执行 OCR 并输出 HTML。",
     temperature: float = 0.0,
     max_output_tokens: int = 65536,
     timeout: float = 600.0,
@@ -425,7 +643,7 @@ def generate_vision_html(
                 raise
             fallback_model = resolve_model_for_route(model, GEMINI_ROUTE_OPENROUTER)
             if log_callback:
-                log_callback(f"[gemini-vision] Vertex ??????? OpenRouter: {type(exc).__name__}: {exc}")
+                log_callback(f"[gemini-vision] Vertex 失败，回退到 OpenRouter: {type(exc).__name__}: {exc}")
             return _generate_openrouter_vision(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,

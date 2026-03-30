@@ -322,8 +322,21 @@ class TaskQueueService:
         from app.service import alignment_service
         job = asyncio.create_task(alignment_service.run_alignment_task(original_path=input_files['original_path'], translated_path=input_files['translated_path'], task_id=task_id, display_no=display_no, executor=self._task_executor, **params))
         await self._mirror_progress(task_id, job, lambda: alignment_service.get_alignment_progress(task_id), update)
+        await job
         status = alignment_service.get_alignment_progress(task_id) or {}
-        return status.get('result') or {}
+        if status.get('stream_log'):
+            self._set_task_log(task_id, status.get('stream_log', ''))
+
+        final_status = status.get('status')
+        if final_status == 'failed':
+            raise RuntimeError(status.get('error') or status.get('message') or 'alignment failed')
+        if final_status != 'done':
+            raise RuntimeError(f"alignment finished with unexpected status: {final_status or 'unknown'}")
+
+        result = status.get('result')
+        if not result or not result.get('output_excel'):
+            raise RuntimeError('alignment finished without output_excel')
+        return result
 
     async def _execute_drivers_license(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'drivers license started')

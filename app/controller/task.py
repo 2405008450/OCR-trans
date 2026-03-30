@@ -233,11 +233,11 @@ async def update_zhongfanyi_rule(body: RuleUpdateBody):
 @router.get("/alignment/config")
 async def get_alignment_config():
     from app.service.alignment_service import AVAILABLE_MODELS as ALIGNMENT_MODELS, BUFFER_CHARS, SUPPORTED_LANGUAGES, THRESHOLD_MAP
-    return {"models": {name: {"description": info["description"], "id": info["id"], "max_output": info["max_output"]} for name, info in ALIGNMENT_MODELS.items()}, "routes": get_gemini_routes(), "default_route": "openrouter", "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()}, "thresholds": THRESHOLD_MAP, "buffer_chars": BUFFER_CHARS}
+    return {"models": {name: {"description": info["description"], "id": info["id"], "max_output": info["max_output"]} for name, info in ALIGNMENT_MODELS.items()}, "routes": get_gemini_routes(), "default_route": "google", "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()}, "thresholds": THRESHOLD_MAP, "buffer_chars": BUFFER_CHARS}
 
 
 @router.post("/alignment")
-async def run_alignment(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), source_lang: str = Query("zh"), target_lang: str = Query("en"), model_name: str = Query("Google gemini-3-flash-preview"), gemini_route: str = Query("openrouter"), enable_post_split: bool = Query(True), threshold_2: int = Query(25000), threshold_3: int = Query(50000), threshold_4: int = Query(75000), threshold_5: int = Query(100000), threshold_6: int = Query(125000), threshold_7: int = Query(150000), threshold_8: int = Query(175000), buffer_chars: int = Query(2000)):
+async def run_alignment(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), source_lang: str = Query("zh"), target_lang: str = Query("en"), model_name: str = Query("Google gemini-3-flash-preview"), gemini_route: str = Query("google"), enable_post_split: bool = Query(True), threshold_2: int = Query(25000), threshold_3: int = Query(50000), threshold_4: int = Query(75000), threshold_5: int = Query(100000), threshold_6: int = Query(125000), threshold_7: int = Query(150000), threshold_8: int = Query(175000), buffer_chars: int = Query(2000)):
     allowed_ext = {".docx", ".doc", ".pptx", ".xlsx", ".xls"}
     if os.path.splitext(original_file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported original file format")
@@ -254,6 +254,13 @@ async def get_alignment_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     from app.service.alignment_service import get_alignment_progress
     progress = get_alignment_progress(task_id)
+    if progress and progress.get("status") in {"done", "failed"}:
+        merged = _merge_queue_timestamps(progress, queue_task)
+        if progress.get("stream_log"):
+            merged["stream_log"] = progress.get("stream_log")
+            if merged.get("result"):
+                merged["result"]["stream_log"] = progress.get("stream_log")
+        return merged
     if queue_task.get("status") in {"done", "failed"}:
         if progress and progress.get("stream_log"):
             queue_task["stream_log"] = progress.get("stream_log")
