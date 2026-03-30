@@ -342,6 +342,240 @@ def _prepare_specialized_import_path() -> None:
         sys.path.insert(0, specialized_root_str)
 
 
+def _extract_quoted_segments(text: str) -> List[str]:
+    if not text:
+        return []
+
+    patterns = [
+        r"“([^”]+)”",
+        r'"([^"]+)"',
+        r"‘([^’]+)’",
+        r"'([^']+)'",
+    ]
+    result: List[str] = []
+    for pattern in patterns:
+        result.extend(item.strip() for item in re.findall(pattern, text) if item and item.strip())
+    return result
+
+
+def _cleanup_replacement_text(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r" {2,}", " ", text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return text.strip()
+
+
+def _apply_replace_pair(base_text: str, old_fragment: str, new_fragment: str) -> str:
+    if not base_text or not old_fragment:
+        return ""
+    if old_fragment in base_text:
+        return _cleanup_replacement_text(base_text.replace(old_fragment, new_fragment, 1))
+    return ""
+
+
+def _apply_delete_fragment(base_text: str, fragment: str) -> str:
+    if not base_text or not fragment:
+        return ""
+
+    direct = _apply_replace_pair(base_text, fragment, "")
+    if direct:
+        return direct
+
+    candidates = [
+        f" {fragment}",
+        f"{fragment} ",
+        f" {fragment} ",
+    ]
+    for candidate in candidates:
+        direct = _apply_replace_pair(base_text, candidate, " ")
+        if direct:
+            return direct
+
+    return ""
+
+
+def _apply_insert_fragment(base_text: str, anchor: str, fragment: str, position: str) -> str:
+    if not base_text or not anchor or not fragment or anchor not in base_text:
+        return ""
+    if position == "after":
+        replaced = base_text.replace(anchor, f"{anchor} {fragment}", 1)
+    else:
+        replaced = base_text.replace(anchor, f"{fragment} {anchor}", 1)
+    return _cleanup_replacement_text(replaced)
+
+
+def _derive_new_text_from_suggestion(translated_text: str, suggestion: str) -> str:
+    translated_text = (translated_text or "").strip()
+    suggestion = (suggestion or "").strip()
+    if not translated_text or not suggestion:
+        return ""
+
+    quoted = _extract_quoted_segments(suggestion)
+
+    pair_patterns = [
+        r"将“([^”]+)”修改为“([^”]+)”",
+        r'将"([^"]+)"修改为"([^"]+)"',
+        r"把“([^”]+)”改为“([^”]+)”",
+        r'把"([^"]+)"改为"([^"]+)"',
+        r"把“([^”]+)”改成“([^”]+)”",
+        r'把"([^"]+)"改成"([^"]+)"',
+        r"由“([^”]+)”改为“([^”]+)”",
+        r'由"([^"]+)"改为"([^"]+)"',
+    ]
+    for pattern in pair_patterns:
+        match = re.search(pattern, suggestion)
+        if match:
+            old_fragment = match.group(1).strip()
+            new_fragment = match.group(2).strip()
+            replaced = _apply_replace_pair(translated_text, old_fragment, new_fragment)
+            return replaced or new_fragment
+
+    delete_patterns = [
+        r"删除多译的“([^”]+)”",
+        r'删除多译的"([^"]+)"',
+        r"删除“([^”]+)”",
+        r'删除"([^"]+)"',
+        r"删去“([^”]+)”",
+        r'删去"([^"]+)"',
+        r"去掉“([^”]+)”",
+        r'去掉"([^"]+)"',
+    ]
+    for pattern in delete_patterns:
+        match = re.search(pattern, suggestion)
+        if match:
+            fragment = match.group(1).strip()
+            deleted = _apply_delete_fragment(translated_text, fragment)
+            return deleted or translated_text
+
+    add_patterns = [
+        (r"在“([^”]+)”后(?:添加|增加|补充)“([^”]+)”", "after"),
+        (r'在"([^"]+)"后(?:添加|增加|补充)"([^"]+)"', "after"),
+        (r"在“([^”]+)”前(?:添加|增加|补充)“([^”]+)”", "before"),
+        (r'在"([^"]+)"前(?:添加|增加|补充)"([^"]+)"', "before"),
+    ]
+    for pattern, position in add_patterns:
+        match = re.search(pattern, suggestion)
+        if match:
+            anchor = match.group(1).strip()
+            fragment = match.group(2).strip()
+            inserted = _apply_insert_fragment(translated_text, anchor, fragment, position)
+            if inserted:
+                return inserted
+
+    standalone_patterns = [
+        r"修改为“([^”]+)”",
+        r'修改为"([^"]+)"',
+        r"改为“([^”]+)”",
+        r'改为"([^"]+)"',
+        r"建议修改为“([^”]+)”",
+        r'建议修改为"([^"]+)"',
+        r"建议改为“([^”]+)”",
+        r'建议改为"([^"]+)"',
+        r"建议补充译文，例如修改为“([^”]+)”",
+        r'建议补充译文，例如修改为"([^"]+)"',
+        r"建议译为“([^”]+)”",
+        r'建议译为"([^"]+)"',
+        r"应修改为“([^”]+)”",
+        r'应修改为"([^"]+)"',
+        r"应为“([^”]+)”",
+        r'应为"([^"]+)"',
+    ]
+    for pattern in standalone_patterns:
+        match = re.search(pattern, suggestion)
+        if match:
+            candidate = match.group(1).strip()
+            if not candidate:
+                continue
+            if len(candidate) >= max(6, int(len(translated_text) * 0.6)):
+                return candidate
+
+    if len(quoted) >= 2 and quoted[-2] in translated_text:
+        replaced = _apply_replace_pair(translated_text, quoted[-2], quoted[-1])
+        if replaced:
+            return replaced
+
+    if len(quoted) == 1 and len(quoted[0]) >= max(6, int(len(translated_text) * 0.6)):
+        return quoted[0]
+
+    return ""
+
+
+def _normalize_error_item(error: Dict[str, Any], index: int) -> Dict[str, Any]:
+    normalized = dict(error or {})
+
+    error_type = (
+        normalized.get("错误类型")
+        or normalized.get("error_type")
+        or normalized.get("type")
+        or ""
+    )
+    original_text = (
+        normalized.get("原文数值")
+        or normalized.get("original_text")
+        or normalized.get("原文")
+        or ""
+    )
+    translated_text = (
+        normalized.get("译文数值")
+        or normalized.get("translated_text")
+        or normalized.get("trans_text")
+        or normalized.get("译文")
+        or ""
+    )
+    suggestion_text = (
+        normalized.get("译文修改建议值")
+        or normalized.get("correction_suggestion")
+        or normalized.get("suggestion")
+        or ""
+    )
+    direct_reason = (
+        normalized.get("修改理由")
+        or normalized.get("reason")
+        or normalized.get("correction_suggestion")
+        or ""
+    )
+    translated_context = (
+        normalized.get("译文上下文")
+        or normalized.get("translated_context")
+        or translated_text
+    )
+    original_context = (
+        normalized.get("原文上下文")
+        or normalized.get("original_context")
+        or original_text
+    )
+    anchor_text = (
+        normalized.get("替换锚点")
+        or normalized.get("anchor_text")
+        or translated_text
+    )
+
+    derived_new_text = (normalized.get("译文修改建议值") or "").strip()
+    if not derived_new_text and translated_text and suggestion_text:
+        derived_new_text = _derive_new_text_from_suggestion(translated_text, suggestion_text)
+
+    normalized["错误编号"] = str(
+        normalized.get("错误编号")
+        or normalized.get("error_id")
+        or normalized.get("id")
+        or index
+    )
+    normalized["错误类型"] = str(error_type).strip()
+    normalized["原文数值"] = str(original_text).strip()
+    normalized["译文数值"] = str(translated_text).strip()
+    normalized["译文修改建议值"] = str(derived_new_text or suggestion_text).strip()
+    normalized["修改理由"] = str(direct_reason).strip()
+    normalized["原文上下文"] = str(original_context).strip()
+    normalized["译文上下文"] = str(translated_context).strip()
+    normalized["替换锚点"] = str(anchor_text).strip()
+    return normalized
+
+
+def _normalize_error_list(errors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [_normalize_error_item(error, idx) for idx, error in enumerate(errors or [], 1)]
+
+
 def _apply_all_fixes(
     doc: Document,
     errors: List[Dict[str, Any]],
@@ -364,7 +598,8 @@ def _apply_all_fixes(
     if task_id:
         _emit_log(task_id, f"[fix] >>> 正在修复 {label}（共 {total} 条）...")
 
-    for idx, error in enumerate(errors, 1):
+    for idx, raw_error in enumerate(errors, 1):
+        error = _normalize_error_item(raw_error, idx)
         old = (error.get("译文数值") or "").strip()
         new = (error.get("译文修改建议值") or "").strip()
         reason = (error.get("修改理由") or "").strip()
@@ -533,9 +768,9 @@ def _run_number_check_sync(
 
     # ── 阶段 3：加载报告 ─────────────────────────────────────────
     _update_progress(task_id, 5, 7, "正在加载检查报告...")
-    body_errors = extract_and_parse(report_paths.get("正文"))
-    header_errors = extract_and_parse(report_paths.get("页眉"))
-    footer_errors = extract_and_parse(report_paths.get("页脚"))
+    body_errors = _normalize_error_list(extract_and_parse(report_paths.get("正文")))
+    header_errors = _normalize_error_list(extract_and_parse(report_paths.get("页眉")))
+    footer_errors = _normalize_error_list(extract_and_parse(report_paths.get("页脚")))
 
     def _log_errors_preview(label: str, errors: list) -> None:
         _emit_log(task_id, f"[report] 已加载 {label} 报告: {len(errors)} 条错误")
