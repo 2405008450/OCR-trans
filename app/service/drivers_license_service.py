@@ -18,7 +18,15 @@ SUPPORTED_PROCESSING_MODES = {
 
 
 def _drivers_license_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "Driver's_License"
+    base_dir = Path(__file__).resolve().parents[2]
+    candidates = [
+        base_dir / "Drivers_License",
+        base_dir / "Driver's_License",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def _prepare_drivers_license_path() -> None:

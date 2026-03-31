@@ -46,7 +46,7 @@ COPY app/ ./app/
 COPY pdf2docx.py ./
 COPY static/ ./static/
 COPY businesslicence/ ./businesslicence/
-COPY ["Driver's_License/", "./Driver's_License/"]
+COPY Driver*_License/ ./Drivers_License/
 COPY memory/ ./memory/
 COPY 专检/ ./专检/
 
