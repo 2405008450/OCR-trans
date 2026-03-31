@@ -32,6 +32,7 @@ from openai import OpenAI
 from typing import List, Dict, Any, Optional
 
 from app.core.config import settings
+from app.core.pil_text import safe_draw_text, safe_font_line_height, safe_text_size
 
 try:
     from simple_lama_inpainting import SimpleLama
@@ -907,14 +908,12 @@ def should_wrap_text(item, text, bbox_width, draw, font):
 
     words = text.split(" ")
     if len(words) <= 3:
-        bbox = draw.textbbox((0, 0), text, font=font)
-        width = bbox[2] - bbox[0]
+        width, _ = safe_text_size(draw, text, font)
 
         if width <= bbox_width * 1.2:
             return False
 
-    bbox = draw.textbbox((0, 0), text, font=font)
-    width = bbox[2] - bbox[0]
+    width, _ = safe_text_size(draw, text, font)
 
     return width > bbox_width
 
@@ -928,8 +927,7 @@ def wrap_text(text, font, max_width, draw):
     for word in words:
         test_line = (current + " " + word).strip()
 
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        w = bbox[2] - bbox[0]
+        w, _ = safe_text_size(draw, test_line, font)
 
         if w <= max_width:
             current = test_line
@@ -984,7 +982,10 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, 
             "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         ],
         "zh": [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf",
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
             "/usr/share/fonts/truetype/arphic/uming.ttc",
         ]
@@ -1056,17 +1057,7 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, 
             except Exception as e:
                 test_font = ImageFont.load_default()
 
-            # 兼容不同版本的Pillow
-            try:
-                bbox = draw.textbbox((0, 0), text, font=test_font)
-                text_h = bbox[3] - bbox[1]
-            except AttributeError:
-                # 旧版本使用textsize
-                try:
-                    bbox = draw.textsize(text, font=test_font)
-                    text_h = bbox[1]
-                except:
-                    text_h = font_size * 1.2  # 估算值
+            _, text_h = safe_text_size(draw, text, test_font, font_size)
 
             if text_h <= box_height * 1.1:
                 best_font = test_font
@@ -1091,15 +1082,7 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, 
         else:
             lines = [text]
 
-        # 兼容不同版本的getbbox方法
-        try:
-            line_height = best_font.getbbox("A")[3] - best_font.getbbox("A")[1] + 6
-        except AttributeError:
-            try:
-                # 旧版本使用getsize
-                line_height = best_font.getsize("A")[1] + 6
-            except:
-                line_height = font_size + 6  # 估算值
+        line_height = safe_font_line_height(best_font, font_size)
 
         total_text_height = len(lines) * line_height
 
@@ -1115,26 +1098,14 @@ def inpaint_and_fill(img_path: str, items: List[Dict], output_path: str = None, 
         for i, line in enumerate(lines):
             y_line = y_start + i * line_height
             if is_fixed_title:
-                try:
-                    lb = draw.textbbox((0, 0), line, font=best_font)
-                    line_w = lb[2] - lb[0]
-                except AttributeError:
-                    try:
-                        line_w = best_font.getsize(line)[0]
-                    except Exception:
-                        line_w = box_width // 2
+                line_w, _ = safe_text_size(draw, line, best_font, font_size)
                 x_line = x1 + (box_width - line_w) / 2
                 draw_x, draw_y = int(x_line), int(y_line)
             else:
                 draw_x, draw_y = int(x1), int(y_line)
-            try:
-                draw.text((draw_x, draw_y), line, font=best_font, fill=(0, 0, 0))
-            except AttributeError:
-                try:
-                    draw.text((draw_x, draw_y), line, fill=(0, 0, 0))
-                except Exception as e:
-                    print(f"⚠️ 绘制文本失败: {line}, 错误: {e}")
-                    continue
+            if not safe_draw_text(draw, (draw_x, draw_y), line, font=best_font, fill=(0, 0, 0)):
+                print(f"⚠️ 绘制文本失败，已跳过: {line}")
+                continue
 
     img_out = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
