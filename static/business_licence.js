@@ -1,333 +1,454 @@
 'use strict';
 
-// ─────────────────────────────────────────────
-// DOM 引用
-// ─────────────────────────────────────────────
-const uploadArea        = document.getElementById('uploadArea');
-const fileInput         = document.getElementById('fileInput');
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('fileInput');
 const uploadPlaceholder = document.getElementById('uploadPlaceholder');
-const filePreview       = document.getElementById('filePreview');
-const previewImage      = document.getElementById('previewImage');
-const fileNameEl        = document.getElementById('fileName');
-const btnRemove         = document.getElementById('btnRemove');
-const btnStart          = document.getElementById('btnStart');
-const sourceLangSel     = document.getElementById('sourceLang');
-const targetLangSel     = document.getElementById('targetLang');
-const configFileSel     = document.getElementById('configFile');
+const filePreview = document.getElementById('filePreview');
+const fileName = document.getElementById('fileName');
+const fileStatus = document.getElementById('fileStatus');
+const btnRemove = document.getElementById('btnRemove');
+const btnProcess = document.getElementById('btnProcess');
+const btnNewTask = document.getElementById('btnNewTask');
+const modelSelect = document.getElementById('modelSelect');
+const geminiRouteSelect = document.getElementById('geminiRouteSelect');
 
-const uploadSection     = document.getElementById('uploadSection');
+const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
-const resultSection     = document.getElementById('resultSection');
+const resultSection = document.getElementById('resultSection');
+const processingStatus = document.getElementById('processingStatus');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const streamLogWrap = document.getElementById('streamLogWrap');
+const streamLog = document.getElementById('streamLog');
+const resultStats = document.getElementById('resultStats');
+const resultFileList = document.getElementById('resultFileList');
 
-const processingTitle   = document.getElementById('processingTitle');
-const processingStatus  = document.getElementById('processingStatus');
-const progressBar       = document.getElementById('progressBar');
-const progressText      = document.getElementById('progressText');
-const logPanel          = document.getElementById('logPanel');
-
-const imageCompare      = document.getElementById('imageCompare');
-const downloadLink      = document.getElementById('downloadLink');
-const btnRestart        = document.getElementById('btnRestart');
-
-// 印章验证弹窗
-const verifyOverlay     = document.getElementById('verifyOverlay');
-const verifyInfoBox     = document.getElementById('verifyInfoBox');
-const btnConfirm        = document.getElementById('btnConfirm');
-const btnCorrect        = document.getElementById('btnCorrect');
-const btnSkip           = document.getElementById('btnSkip');
-const correctionRow     = document.getElementById('correctionRow');
-const correctionInput   = document.getElementById('correctionInput');
-const btnSubmitCorrection = document.getElementById('btnSubmitCorrection');
-
-// ─────────────────────────────────────────────
-// 状态
-// ─────────────────────────────────────────────
 let selectedFile = null;
-let currentTaskId = null;
-let currentEventSource = null;
-let uploadedInputUrl = null;  // 原图访问地址（用于对比展示）
+let pollingTimer = null;
+let modelConfig = {};
+let routeConfig = {};
+let defaultModel = 'google/gemini-3.1-pro-preview';
+let defaultRoute = 'openrouter';
+let etaHint = null;
 
-// ─────────────────────────────────────────────
-// 文件上传交互
-// ─────────────────────────────────────────────
-uploadArea.addEventListener('click', () => fileInput.click());
-uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.classList.add('dragover');
-});
-uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
-uploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove('dragover');
-    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
-});
-fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) handleFile(fileInput.files[0]);
-});
-btnRemove.addEventListener('click', (e) => {
-    e.stopPropagation();
-    clearFile();
-});
+const ETA_TIME_ZONE = 'Asia/Shanghai';
+const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp', '.gif'];
+
+init();
+
+async function init() {
+    bindEvents();
+    await loadConfig();
+    updateProcessButton();
+}
+
+function bindEvents() {
+    uploadArea?.addEventListener('click', () => fileInput?.click());
+    uploadArea?.addEventListener('dragover', handleDragOver);
+    uploadArea?.addEventListener('drop', handleDrop);
+    fileInput?.addEventListener('change', handleFileSelect);
+    btnRemove?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        clearFile();
+    });
+    btnProcess?.addEventListener('click', processFile);
+    btnNewTask?.addEventListener('click', resetPage);
+}
+
+async function loadConfig() {
+    try {
+        const response = await fetch('/task/business-licence/config');
+        if (!response.ok) {
+            throw new Error(`配置加载失败: ${response.status}`);
+        }
+
+        const data = await response.json();
+        modelConfig = data.models || {};
+        routeConfig = data.routes || {};
+        defaultModel = data.default_model || defaultModel;
+        defaultRoute = data.default_route || defaultRoute;
+    } catch (error) {
+        console.error(error);
+        modelConfig = {
+            'google/gemini-3.1-pro-preview': { label: 'Gemini 3.1 Pro' },
+            'google/gemini-3-flash-preview': { label: 'Gemini 3 Flash' },
+        };
+        routeConfig = {
+            openrouter: { label: 'OpenRouter' },
+            google: { label: 'Google' },
+            google_ai_studio: { label: 'Google AI Studio' },
+        };
+    }
+
+    renderModels();
+    renderRoutes();
+}
+
+function renderModels() {
+    modelSelect.innerHTML = '';
+    Object.entries(modelConfig).forEach(([value, info]) => {
+        modelSelect.add(new Option(info.label || value, value));
+    });
+
+    const fallback = Object.keys(modelConfig)[0] || defaultModel;
+    modelSelect.value = modelConfig[defaultModel] ? defaultModel : fallback;
+}
+
+function renderRoutes() {
+    geminiRouteSelect.innerHTML = '';
+    Object.entries(routeConfig).forEach(([value, info]) => {
+        geminiRouteSelect.add(new Option(info.label || value, value));
+    });
+
+    const fallback = Object.keys(routeConfig)[0] || defaultRoute;
+    geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : fallback;
+}
+
+function handleDragOver(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    uploadArea.style.borderColor = 'var(--primary-color)';
+}
+
+function handleDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    uploadArea.style.borderColor = 'var(--border-color)';
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+        handleFile(file);
+    }
+}
+
+function handleFileSelect(event) {
+    const file = event.target.files?.[0];
+    if (file) {
+        handleFile(file);
+    }
+}
 
 function handleFile(file) {
+    if (!ALLOWED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+        alert(`不支持的图片格式: ${file.name}`);
+        return;
+    }
+
     selectedFile = file;
-    fileNameEl.textContent = file.name;
-    previewImage.src = URL.createObjectURL(file);
+    fileName.textContent = `${file.name} (${formatFileSize(file.size)})`;
+    fileStatus.textContent = '文件已就绪';
     uploadPlaceholder.style.display = 'none';
     filePreview.style.display = 'flex';
-    btnStart.disabled = false;
+    updateProcessButton();
 }
 
 function clearFile() {
     selectedFile = null;
     fileInput.value = '';
-    previewImage.src = '';
-    uploadPlaceholder.style.display = 'flex';
+    uploadPlaceholder.style.display = 'block';
     filePreview.style.display = 'none';
-    btnStart.disabled = true;
+    updateProcessButton();
 }
 
-// ─────────────────────────────────────────────
-// 进度 / 日志更新
-// ─────────────────────────────────────────────
-function setProgress(pct, message) {
-    progressBar.style.setProperty('--progress', pct + '%');
-    progressText.textContent = pct + '%';
-    if (message) processingStatus.textContent = message;
+function updateProcessButton() {
+    btnProcess.disabled = !selectedFile;
 }
 
-function appendLog(text) {
-    const line = document.createElement('span');
-    if (text.includes('错误') || text.includes('Error') || text.includes('error')) {
-        line.className = 'log-error';
-    } else if (text.startsWith('===') || text.startsWith('---')) {
-        line.className = 'log-sep';
-    } else if (text.includes('完成') || text.includes('✅') || text.includes('done')) {
-        line.className = 'log-success';
-    }
-    line.textContent = text + '\n';
-    logPanel.appendChild(line);
-    logPanel.scrollTop = logPanel.scrollHeight;
-}
-
-// ─────────────────────────────────────────────
-// 印章验证弹窗
-// ─────────────────────────────────────────────
-function showVerifyModal(regionInfo) {
-    const bbox = Array.isArray(regionInfo.bbox) ? regionInfo.bbox.join(', ') : regionInfo.bbox;
-    verifyInfoBox.textContent =
-        `类型:    ${regionInfo.type_name}\n` +
-        `文字类型: ${regionInfo.text_type}\n` +
-        `位置:    (${bbox})\n` +
-        `置信度:  ${(regionInfo.confidence * 100).toFixed(1)}%\n` +
-        `\n识别内容:\n${regionInfo.text}\n` +
-        `\n(${regionInfo.index} / ${regionInfo.total})`;
-    correctionRow.classList.remove('active');
-    correctionInput.value = regionInfo.text || '';
-    verifyOverlay.classList.add('active');
-    btnConfirm.focus();
-}
-
-function hideVerifyModal() {
-    verifyOverlay.classList.remove('active');
-    correctionRow.classList.remove('active');
-}
-
-async function sendVerify(action, text) {
-    if (!currentTaskId) return;
-    hideVerifyModal();
-    try {
-        await fetch(`/task/business-licence/verify/${currentTaskId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, text: text || null }),
-        });
-    } catch (err) {
-        console.error('verify request failed', err);
-    }
-}
-
-btnConfirm.addEventListener('click', () => sendVerify('confirm', null));
-btnSkip.addEventListener('click',    () => sendVerify('skip',    null));
-btnCorrect.addEventListener('click', () => {
-    correctionRow.classList.add('active');
-    correctionInput.focus();
-});
-btnSubmitCorrection.addEventListener('click', () => {
-    const text = correctionInput.value.trim();
-    if (!text) return;
-    sendVerify('correct', text);
-});
-correctionInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        const text = correctionInput.value.trim();
-        if (text) sendVerify('correct', text);
-    }
-});
-
-// 键盘快捷键（仅当弹窗打开时）
-document.addEventListener('keydown', (e) => {
-    if (!verifyOverlay.classList.contains('active')) return;
-    if (correctionRow.classList.contains('active')) return; // 修正模式下不拦截
-    if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') {
-        sendVerify('confirm', null);
-    } else if (e.key === 'n' || e.key === 'N') {
-        correctionRow.classList.add('active');
-        correctionInput.focus();
-    } else if (e.key === 's' || e.key === 'S' || e.key === 'Escape') {
-        sendVerify('skip', null);
-    }
-});
-
-// ─────────────────────────────────────────────
-// SSE 事件处理
-// ─────────────────────────────────────────────
-function handleSSEEvent(rawData) {
-    let data;
-    try {
-        data = JSON.parse(rawData);
-    } catch {
+async function processFile() {
+    if (!selectedFile) {
         return;
     }
 
-    switch (data.type) {
-        case 'progress':
-            setProgress(data.progress || 0, data.message || '');
-            break;
-        case 'log':
-            appendLog(data.text || '');
-            break;
-        case 'verification_request':
-            showVerifyModal(data.region_info);
-            processingStatus.textContent = '等待印章验证...';
-            break;
-        case 'done':
-            handleDone(data);
-            break;
-        case 'error':
-            handleError(data.message || '未知错误');
-            break;
-    }
-}
-
-function handleDone(data) {
-    if (currentEventSource) {
-        currentEventSource.close();
-        currentEventSource = null;
-    }
-    setProgress(100, '翻译完成');
-
-    const outputFilename = data.output_filename;
-    const outputUrl = `/bl-outputs/${outputFilename}`;
-
-    // 下载链接
-    downloadLink.href = outputUrl;
-    downloadLink.download = outputFilename;
-
-    // 图片对比
-    imageCompare.innerHTML = '';
-    if (uploadedInputUrl) {
-        imageCompare.innerHTML += `
-            <div class="image-compare-item">
-                <p>原图（翻译前）</p>
-                <img src="${uploadedInputUrl}" alt="原图" onclick="window.open(this.src)">
-            </div>`;
-    }
-    imageCompare.innerHTML += `
-        <div class="image-compare-item">
-            <p>翻译结果</p>
-            <img src="${outputUrl}" alt="翻译结果" onclick="window.open(this.src)">
-        </div>`;
-
-    processingSection.style.display = 'none';
-    resultSection.style.display = 'block';
-}
-
-function handleError(message) {
-    if (currentEventSource) {
-        currentEventSource.close();
-        currentEventSource = null;
-    }
-    processingTitle.textContent = '处理失败';
-    processingStatus.textContent = message;
-    appendLog('❌ 错误: ' + message);
-    setProgress(0, '处理失败');
-    btnStart.disabled = false;
-}
-
-// ─────────────────────────────────────────────
-// 提交任务
-// ─────────────────────────────────────────────
-btnStart.addEventListener('click', async () => {
-    if (!selectedFile) return;
-
-    // 保存原图预览 URL（用于结果对比）
-    uploadedInputUrl = URL.createObjectURL(selectedFile);
-
-    // 切换到处理区域
     uploadSection.style.display = 'none';
-    processingSection.style.display = 'block';
     resultSection.style.display = 'none';
-    logPanel.innerHTML = '';
-    setProgress(0, '上传文件...');
-    btnStart.disabled = true;
+    processingSection.style.display = 'block';
+    clearLog();
+    updateProgress(5, '正在提交任务...');
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-
-    const params = new URLSearchParams({
-        source_lang: sourceLangSel.value,
-        target_lang: targetLangSel.value,
-        config_file: configFileSel.value,
-    });
-
-    let taskId;
     try {
-        const resp = await fetch(`/task/business-licence?${params}`, {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        const params = new URLSearchParams({
+            model: modelSelect.value,
+            gemini_route: geminiRouteSelect.value,
+        });
+
+        const response = await fetch(`/task/business-licence?${params.toString()}`, {
             method: 'POST',
             body: formData,
         });
-        if (!resp.ok) {
-            const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-            throw new Error(err.detail || resp.statusText);
+
+        if (!response.ok) {
+            const message = await safeReadError(response);
+            throw new Error(message || `提交失败: ${response.status}`);
         }
-        const json = await resp.json();
-        taskId = json.task_id;
-        currentTaskId = taskId;
-    } catch (err) {
-        handleError('提交失败: ' + err.message);
-        uploadSection.style.display = 'block';
-        processingSection.style.display = 'none';
+
+        const data = await response.json();
+        startPolling(data.task_id);
+    } catch (error) {
+        showFailure(error.message);
+    }
+}
+
+function startPolling(taskId) {
+    stopPolling();
+    pollStatus(taskId);
+    pollingTimer = setInterval(() => pollStatus(taskId), 2500);
+}
+
+function stopPolling() {
+    if (!pollingTimer) {
         return;
     }
 
-    setProgress(5, '连接处理流...');
+    clearInterval(pollingTimer);
+    pollingTimer = null;
+}
 
-    // 连接 SSE
-    const es = new EventSource(`/task/business-licence/stream/${taskId}`);
-    currentEventSource = es;
+async function pollStatus(taskId) {
+    try {
+        const response = await fetch(`/task/business-licence/status/${taskId}`);
+        if (!response.ok) {
+            throw new Error(`状态查询失败: ${response.status}`);
+        }
 
-    es.onmessage = (e) => handleSSEEvent(e.data);
-    es.onerror = () => {
-        es.close();
-        currentEventSource = null;
-        // 若已完成则忽略断开
-    };
-});
+        const data = await response.json();
+        updateProgress(data.progress || 0, data.message || '正在处理...', data);
+        syncLog(data.stream_log || data.result?.stream_log || '');
 
-// ─────────────────────────────────────────────
-// 重新翻译
-// ─────────────────────────────────────────────
-btnRestart.addEventListener('click', () => {
-    if (currentEventSource) {
-        currentEventSource.close();
-        currentEventSource = null;
+        if (data.status === 'done') {
+            stopPolling();
+            showResult(data.result || {});
+            return;
+        }
+
+        if (data.status === 'failed') {
+            stopPolling();
+            showFailure(data.error || data.message || '处理失败', data.stream_log || '');
+        }
+    } catch (error) {
+        stopPolling();
+        showFailure(error.message);
     }
-    currentTaskId = null;
-    clearFile();
-    resultSection.style.display = 'none';
+}
+
+function updateProgress(percent, message, task = null) {
+    progressFill.style.width = `${percent}%`;
+    progressText.textContent = `${Math.round(percent)}%`;
+    processingStatus.textContent = message;
+    updateEtaHint(task);
+}
+
+function ensureEtaHint() {
+    if (etaHint && etaHint.isConnected) {
+        return etaHint;
+    }
+
+    const card = processingSection?.querySelector('.processing-card') || processingSection;
+    if (!card) {
+        return null;
+    }
+
+    etaHint = document.createElement('div');
+    etaHint.className = 'eta-hint';
+    etaHint.style.cssText = 'margin-top:10px;color:var(--text-secondary, var(--muted, #94a3b8));font-size:13px;';
+    etaHint.textContent = '预计完成时间：计算中...';
+
+    if (processingStatus?.parentNode) {
+        processingStatus.parentNode.insertBefore(etaHint, processingStatus.nextSibling);
+    } else {
+        card.appendChild(etaHint);
+    }
+
+    return etaHint;
+}
+
+function updateEtaHint(task) {
+    const el = ensureEtaHint();
+    if (!el) {
+        return;
+    }
+
+    const text = buildEtaText(task);
+    if (!text) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+
+    el.style.display = 'block';
+    el.textContent = text;
+}
+
+function buildEtaText(task) {
+    if (!task) {
+        return '预计完成时间：计算中...';
+    }
+
+    if (task.status === 'failed' || task.status === 'cancelled') {
+        return '';
+    }
+
+    if (task.status === 'done' && task.finished_at) {
+        return `预计完成时间：${formatEtaMinute(task.finished_at)}`;
+    }
+
+    if (task.status === 'queued') {
+        return '预计完成时间：排队中，开始处理后计算';
+    }
+
+    const progress = Number(task.progress ?? 0);
+    if (!Number.isFinite(progress) || progress <= 0 || progress >= 100 || !task.created_at) {
+        return '预计完成时间：计算中...';
+    }
+
+    const createdAt = parseServerTime(task.created_at);
+    if (Number.isNaN(createdAt.getTime())) {
+        return '预计完成时间：计算中...';
+    }
+
+    const elapsedMs = Date.now() - createdAt.getTime();
+    if (elapsedMs <= 0) {
+        return '预计完成时间：计算中...';
+    }
+
+    const estimatedFinishedAt = new Date(createdAt.getTime() + elapsedMs / (progress / 100));
+    return `预计完成时间：${formatEtaDate(estimatedFinishedAt)}`;
+}
+
+function parseServerTime(iso) {
+    if (!iso) {
+        return new Date(NaN);
+    }
+
+    const normalized = /([zZ]|[+\-]\d{2}:\d{2})$/.test(iso) ? iso : `${iso}Z`;
+    return new Date(normalized);
+}
+
+function formatEtaMinute(iso) {
+    const date = parseServerTime(iso);
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    return formatEtaDate(date);
+}
+
+function formatEtaDate(date) {
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+        timeZone: ETA_TIME_ZONE,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(date);
+
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
+}
+
+function syncLog(text) {
+    if (!text) {
+        return;
+    }
+
+    streamLogWrap.style.display = 'block';
+    streamLog.textContent = text;
+    streamLog.scrollTop = streamLog.scrollHeight;
+}
+
+function clearLog() {
+    streamLogWrap.style.display = 'none';
+    streamLog.textContent = '';
+}
+
+function showFailure(message, logText = '') {
+    syncLog(logText);
+    updateProgress(100, message || '处理失败');
+}
+
+function showResult(result) {
     processingSection.style.display = 'none';
+    resultSection.style.display = 'grid';
+
+    resultStats.innerHTML = `
+        <div class="stat-card">
+            <i class="fas fa-file-image"></i>
+            <h3>${escapeHtml(result.filename || '-')}</h3>
+            <p>源文件</p>
+        </div>
+        <div class="stat-card">
+            <i class="fas fa-robot"></i>
+            <h3>${escapeHtml((modelConfig[result.model] || {}).label || result.model || '-')}</h3>
+            <p>识别模型</p>
+        </div>
+        <div class="stat-card">
+            <i class="fas fa-route"></i>
+            <h3>${escapeHtml((routeConfig[result.gemini_route] || {}).label || result.gemini_route || '-')}</h3>
+            <p>调用线路</p>
+        </div>
+        <div class="stat-card">
+            <i class="fas fa-check-circle"></i>
+            <h3>成功</h3>
+            <p>任务状态</p>
+        </div>
+    `;
+
+    if (!result.output_docx) {
+        resultFileList.innerHTML = '<div class="result-file-empty">当前任务没有可下载文件。</div>';
+        return;
+    }
+
+    resultFileList.innerHTML = `
+        <div class="result-file-item">
+            <div class="result-file-meta">
+                <strong>营业执照译文.docx</strong>
+                <span>最终 Word 译文</span>
+            </div>
+            <a class="download-btn" href="/${result.output_docx}" download>
+                <i class="fas fa-download"></i> 下载
+            </a>
+        </div>
+    `;
+}
+
+function resetPage() {
+    clearFile();
+    clearLog();
+    stopPolling();
     uploadSection.style.display = 'block';
-    logPanel.innerHTML = '';
-    setProgress(0, '');
-});
+    processingSection.style.display = 'none';
+    resultSection.style.display = 'none';
+    updateProgress(0, '等待开始处理');
+}
+
+async function safeReadError(response) {
+    try {
+        const payload = await response.json();
+        return payload?.detail?.error || payload?.detail || payload?.message || '';
+    } catch (_) {
+        return '';
+    }
+}
+
+function formatFileSize(size) {
+    if (size < 1024) {
+        return `${size} B`;
+    }
+
+    if (size < 1024 * 1024) {
+        return `${(size / 1024).toFixed(1)} KB`;
+    }
+
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}

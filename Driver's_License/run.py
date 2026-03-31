@@ -14,12 +14,24 @@ import sys
 import logging
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ENV_FILE = PROJECT_ROOT / ".env"
+
+if load_dotenv and ENV_FILE.exists():
+    load_dotenv(ENV_FILE, override=False)
+
 # ==================== 配置区域 ====================
 # 请在这里填写您的配置信息
 
 # API 密钥配置（必填）
-GLM_API_KEY = "c7970451446347e29f3f586514ef6894.8O7WrHEoZpZ7Y4HM"          # 智谱 GLM API 密钥
-DEEPSEEK_API_KEY = "sk-a681d5bc9d3f4278b084ad4606251298"  # DeepSeek API 密钥
+GLM_API_KEY = ""          # 智谱 GLM API 密钥
+DEEPSEEK_API_KEY = ""  # DeepSeek API 密钥
 
 # 处理模式选择：
 # - "single": 单文件处理（一张图片 → 一个文档）
@@ -60,7 +72,13 @@ def setup_logging():
     )
 
 
-def validate_config():
+def resolve_api_keys():
+    glm_api_key = os.getenv("GLM_API_KEY", "").strip() or GLM_API_KEY.strip()
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "").strip() or DEEPSEEK_API_KEY.strip()
+    return glm_api_key, deepseek_api_key
+
+
+def validate_config(glm_api_key, deepseek_api_key):
     """
     验证配置
     
@@ -68,10 +86,10 @@ def validate_config():
         tuple: (is_valid, error_message)
     """
     # 验证 API 密钥
-    if GLM_API_KEY == "your-glm-api-key-here" or not GLM_API_KEY:
+    if glm_api_key == "your-glm-api-key-here" or not glm_api_key:
         return False, "请先配置 GLM_API_KEY"
     
-    if DEEPSEEK_API_KEY == "your-deepseek-api-key-here" or not DEEPSEEK_API_KEY:
+    if deepseek_api_key == "your-deepseek-api-key-here" or not deepseek_api_key:
         return False, "请先配置 DEEPSEEK_API_KEY"
     
     # 验证处理模式
@@ -164,9 +182,11 @@ def main():
     
     # 配置日志
     setup_logging()
+
+    glm_api_key, deepseek_api_key = resolve_api_keys()
     
     # 验证配置
-    is_valid, error_message = validate_config()
+    is_valid, error_message = validate_config(glm_api_key, deepseek_api_key)
     if not is_valid:
         print(f"❌ 错误: {error_message}")
         return
@@ -192,7 +212,7 @@ def main():
     # 初始化翻译流程
     print("正在初始化翻译系统...")
     try:
-        pipeline = TranslatorPipeline(GLM_API_KEY, DEEPSEEK_API_KEY)
+        pipeline = TranslatorPipeline(glm_api_key, deepseek_api_key)
     except Exception as e:
         print(f"❌ 错误: 初始化失败: {str(e)}")
         return

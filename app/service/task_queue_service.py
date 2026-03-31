@@ -14,6 +14,11 @@ from app.core.file_naming import build_storage_filename
 from app.db.session import SessionLocal
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
+from app.service.business_licence_service import (
+    BUSINESS_LICENCE_DEFAULT_MODEL,
+    BUSINESS_LICENCE_DEFAULT_ROUTE,
+    execute_business_licence_task,
+)
 from app.service.doc_translate_service import execute_doc_translate_task
 from app.service.drivers_license_service import execute_drivers_license_task
 from app.service.llm_service import execute_ocr_task_from_path
@@ -141,6 +146,16 @@ class TaskQueueService:
         reserved_task = self._create_db_task('doc_translate', file.filename or 'input.bin', {'source_lang': source_lang, 'target_langs': target_langs, 'ocr_model': ocr_model, 'gemini_route': gemini_route}, {})
         try:
             input_path, original_filename = await self._save_single_upload(file, 'doc_translate', reserved_task.display_no, reserved_task.task_id)
+            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            return reserved_task.task_id
+        except Exception as exc:
+            self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
+    async def submit_business_licence_task(self, *, file: UploadFile, model: str, gemini_route: str) -> str:
+        reserved_task = self._create_db_task('business_licence', file.filename or 'input.bin', {'model': model, 'gemini_route': gemini_route}, {})
+        try:
+            input_path, original_filename = await self._save_single_upload(file, 'business_licence', reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
             return reserved_task.task_id
         except Exception as exc:
@@ -283,6 +298,9 @@ class TaskQueueService:
             elif task_type == 'doc_translate':
                 result = await self._execute_doc_translate(task_id, display_no, input_files, params, update)
                 output_path = result.get('raw_output_txt') if result else None
+            elif task_type == 'business_licence':
+                result = await self._execute_business_licence(task_id, display_no, input_files, params, update)
+                output_path = result.get('output_docx') if result else None
             elif task_type == 'pdf2docx':
                 result = await self._execute_pdf2docx(task_id, display_no, input_files, params, update)
                 output_path = result.get('output_docx') if result else None
@@ -350,6 +368,19 @@ class TaskQueueService:
         target_langs = [lang.strip() for lang in params.get('target_langs', 'en').split(',') if lang.strip()]
         return await execute_doc_translate_task(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', source_lang=params.get('source_lang', 'zh'), target_langs=target_langs, ocr_model=params.get('ocr_model', 'google/gemini-3-flash-preview'), gemini_route=params.get('gemini_route', 'openrouter'), progress_callback=update, executor=self._task_executor)
 
+    async def _execute_business_licence(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        await update(5, 'business licence started')
+        return await execute_business_licence_task(
+            task_id=task_id,
+            display_no=display_no,
+            input_path=input_files['input_path'],
+            original_filename=input_files.get('original_filename') or 'business_licence.png',
+            model=params.get('model', BUSINESS_LICENCE_DEFAULT_MODEL),
+            gemini_route=params.get('gemini_route', BUSINESS_LICENCE_DEFAULT_ROUTE),
+            progress_callback=update,
+            executor=self._task_executor,
+        )
+
     async def _execute_pdf2docx(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'pdf2docx started')
         return await execute_pdf2docx_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', model=params.get('model', PDF2DOCX_DEFAULT_MODEL), gemini_route=params.get('gemini_route', PDF2DOCX_DEFAULT_GEMINI_ROUTE), progress_callback=update, executor=self._task_executor)
@@ -361,7 +392,7 @@ class TaskQueueService:
         stem = Path(original_filename or 'file').stem[:60]
         if ' | ' in stem:
             stem = stem.split(' | ')[0]
-        suffix = {'ocr': 'ocr', 'number_check': 'number_check', 'zhongfanyi': 'zhongfanyi', 'alignment': 'alignment', 'drivers_license': 'drivers_license', 'doc_translate': 'doc_translate', 'pdf2docx': 'pdf2docx'}.get(task_type, task_type)
+        suffix = {'ocr': 'ocr', 'number_check': 'number_check', 'zhongfanyi': 'zhongfanyi', 'alignment': 'alignment', 'drivers_license': 'drivers_license', 'doc_translate': 'doc_translate', 'business_licence': 'business_licence', 'pdf2docx': 'pdf2docx'}.get(task_type, task_type)
         def friendly(label: str, real_path: str) -> str:
             return f'{stem}_{timestamp}_{suffix}_{label}{Path(real_path).suffix}'
         files = []
@@ -405,6 +436,8 @@ class TaskQueueService:
                 if isinstance(item, dict) and item.get('output_docx'):
                     lang = item.get('lang_code') or item.get('lang') or 'lang'
                     files.append({'name': friendly(f'translation_{lang}', item['output_docx']), 'path': item['output_docx'], 'type': 'output'})
+        elif task_type == 'business_licence':
+            add_result('output_docx', 'output_docx')
         elif task_type == 'pdf2docx':
             add_result('output_docx', 'output_docx')
         if not files and output_path:

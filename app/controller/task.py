@@ -11,6 +11,11 @@ from pydantic import BaseModel
 from app.db.session import SessionLocal
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
+from app.service.business_licence_service import (
+    BUSINESS_LICENCE_DEFAULT_MODEL,
+    BUSINESS_LICENCE_DEFAULT_ROUTE,
+    get_business_licence_models,
+)
 from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
 from app.service.drivers_license_service import get_drivers_license_config
 from app.service.gemini_service import get_gemini_routes
@@ -299,6 +304,33 @@ async def get_drivers_license_status(task_id: str):
     return queue_task
 
 
+@router.get("/business-licence/config")
+async def get_business_licence_config():
+    return {
+        "models": get_business_licence_models(),
+        "default_model": BUSINESS_LICENCE_DEFAULT_MODEL,
+        "routes": get_gemini_routes(),
+        "default_route": BUSINESS_LICENCE_DEFAULT_ROUTE,
+    }
+
+
+@router.post("/business-licence")
+async def submit_business_licence(file: UploadFile = File(...), model: str = Query(BUSINESS_LICENCE_DEFAULT_MODEL), gemini_route: str = Query(BUSINESS_LICENCE_DEFAULT_ROUTE)):
+    allowed_ext = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".gif"}
+    if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
+        raise HTTPException(status_code=400, detail="Unsupported image format")
+    task_id = await task_queue_service.submit_business_licence_task(file=file, model=model, gemini_route=gemini_route)
+    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+
+
+@router.get("/business-licence/status/{task_id}")
+async def get_business_licence_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue_task
+
+
 @router.get("/doc-translate/config")
 async def get_doc_translate_config():
     return {"models": get_doc_translate_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "openrouter", "languages": get_supported_languages()}
@@ -409,4 +441,3 @@ async def get_pdf2docx_status(task_id: str):
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")
     return queue_task
-

@@ -1,9 +1,9 @@
 """文档生成模块"""
 
-import tempfile
 import cv2
 import logging
 from datetime import datetime
+from pathlib import Path
 from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -15,6 +15,7 @@ import re
 
 from .models import LicenseData, ExtractedImage, TextBlock
 from .exceptions import DocumentGenerationError
+from .temp_paths import create_named_temporary_file
 
 
 class DocumentGenerator:
@@ -74,8 +75,9 @@ class DocumentGenerator:
         """
         for img in images:
             # 创建临时文件
-            temp_file = tempfile.NamedTemporaryFile(
+            temp_file = create_named_temporary_file(
                 delete=False,
+                prefix='drivers_license_image_',
                 suffix='.png'
             )
             temp_path = temp_file.name
@@ -85,6 +87,17 @@ class DocumentGenerator:
             cv2.imwrite(temp_path, img.image_data)
             img.temp_path = temp_path
     
+    def _cleanup_extracted_images(self, images: List[ExtractedImage]) -> None:
+        for img in images:
+            if not img.temp_path:
+                continue
+            try:
+                Path(img.temp_path).unlink(missing_ok=True)
+            except OSError as exc:
+                self.logger.warning(f"清理临时图片失败: {img.temp_path}, {exc}")
+            finally:
+                img.temp_path = ""
+
     def _remove_cell_borders(self, cell) -> None:
         """
         移除单元格边框
@@ -417,6 +430,9 @@ class DocumentGenerator:
         except Exception as e:
             raise DocumentGenerationError(f"文档生成失败: {str(e)}")
     
+        finally:
+            self._cleanup_extracted_images(license_data.images)
+
     def _build_field_values_dict(self, fields: List, is_old_version: bool = False) -> dict:
         """
         构建字段值字典（英文标签 -> 翻译值）

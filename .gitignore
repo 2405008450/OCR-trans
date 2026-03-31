@@ -58,6 +58,7 @@ Thumbs.db
 
 # Runtime data and caches
 data/
+Driver's_License/.cache/
 businesslicence/outputs/*
 !businesslicence/outputs/.gitkeep
 *.tar

@@ -15,6 +15,7 @@ from .translation_service import TranslationService
 from .document_generator import DocumentGenerator
 from .ocr_corrector import OCRCorrector
 from .exceptions import TranslationPipelineError
+from .temp_paths import create_named_temporary_file
 
 
 class TranslatorPipeline:
@@ -1061,7 +1062,6 @@ class TranslatorPipeline:
         Returns:
             旋转后的临时文件路径
         """
-        import tempfile
         from PIL import Image
         
         # 打开图片
@@ -1072,7 +1072,12 @@ class TranslatorPipeline:
         
         # 保存到临时文件
         suffix = Path(image_path).suffix
-        with tempfile.NamedTemporaryFile(mode='wb', suffix=suffix, delete=False) as f:
+        with create_named_temporary_file(
+            mode='wb',
+            suffix=suffix,
+            prefix='drivers_license_pipeline_rotate_',
+            delete=False
+        ) as f:
             rotated_img.save(f, format=img.format or 'PNG')
             temp_path = f.name
         

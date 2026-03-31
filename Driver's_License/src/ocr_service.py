@@ -2,13 +2,13 @@
 
 import logging
 import requests
-import tempfile
 from typing import List, Tuple
 from pathlib import Path
 from PIL import Image
 
 from .models import TextBlock
 from .exceptions import OCRError
+from .temp_paths import create_named_temporary_file
 
 
 class OCRService:
@@ -292,7 +292,12 @@ class OCRService:
         
         # 保存到临时文件
         suffix = Path(image_path).suffix
-        with tempfile.NamedTemporaryFile(mode='wb', suffix=suffix, delete=False) as f:
+        with create_named_temporary_file(
+            mode='wb',
+            suffix=suffix,
+            prefix='drivers_license_ocr_rotate_',
+            delete=False
+        ) as f:
             rotated_img.save(f, format=img.format or 'PNG')
             temp_path = f.name
         

@@ -77,6 +77,11 @@ async def ocr_page():
     return _read_page("index.html")
 
 
+@app.get("/certificate-translation", response_class=HTMLResponse)
+async def certificate_translation_page():
+    return _read_page("certificate_translation.html")
+
+
 @app.get("/number-check", response_class=HTMLResponse)
 async def number_check_page():
     return _read_page("number_check.html")
@@ -95,6 +100,11 @@ async def drivers_license_page():
 @app.get("/doc-translate", response_class=HTMLResponse)
 async def doc_translate_page():
     return _read_page("doc_translate.html")
+
+
+@app.get("/business-licence", response_class=HTMLResponse)
+async def business_licence_page():
+    return _read_page("business_licence.html")
 
 
 @app.get("/zhongfanyi", response_class=HTMLResponse)
