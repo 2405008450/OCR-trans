@@ -32,7 +32,66 @@ from openai import OpenAI
 from typing import List, Dict, Any, Optional
 
 from app.core.config import settings
-from app.core.pil_text import safe_draw_text, safe_font_line_height, safe_text_size
+
+try:
+    from app.core.pil_text import safe_draw_text, safe_font_line_height, safe_text_size
+except ModuleNotFoundError:
+    def _estimate_text_size(text: str, font_size: int = 18) -> tuple[int, int]:
+        char_count = max(len(text or ""), 1)
+        has_non_ascii = any(ord(ch) > 127 for ch in text or "")
+        width_factor = 0.95 if has_non_ascii else 0.6
+        width = max(1, int(char_count * font_size * width_factor))
+        height = max(1, int(font_size * 1.2))
+        return width, height
+
+
+    def safe_text_size(draw_obj, text: str, font, fallback_font_size: int = 18) -> tuple[int, int]:
+        try:
+            bbox = draw_obj.textbbox((0, 0), text, font=font)
+            return bbox[2] - bbox[0], bbox[3] - bbox[1]
+        except AttributeError:
+            try:
+                return draw_obj.textsize(text, font=font)
+            except Exception:
+                return _estimate_text_size(text, fallback_font_size)
+        except Exception:
+            return _estimate_text_size(text, fallback_font_size)
+
+
+    def safe_font_line_height(font, fallback_font_size: int = 18) -> int:
+        try:
+            bbox = font.getbbox("Ay")
+            return bbox[3] - bbox[1] + 6
+        except AttributeError:
+            try:
+                return font.getsize("Ay")[1] + 6
+            except Exception:
+                return max(12, int(fallback_font_size * 1.2) + 6)
+        except Exception:
+            return max(12, int(fallback_font_size * 1.2) + 6)
+
+
+    def safe_draw_text(draw_obj, xy, text: str, *, font=None, fill=(0, 0, 0)) -> bool:
+        try:
+            if font is not None:
+                draw_obj.text(xy, text, font=font, fill=fill)
+            else:
+                draw_obj.text(xy, text, fill=fill)
+            return True
+        except AttributeError:
+            try:
+                draw_obj.text(xy, text, fill=fill)
+                return True
+            except Exception:
+                return False
+        except Exception:
+            if font is not None:
+                try:
+                    draw_obj.text(xy, text, fill=fill)
+                    return True
+                except Exception:
+                    return False
+            return False
 
 try:
     from simple_lama_inpainting import SimpleLama
