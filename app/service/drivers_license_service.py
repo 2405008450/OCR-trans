@@ -23,6 +23,12 @@ def _drivers_license_root() -> Path:
 
 def _prepare_drivers_license_path() -> None:
     root = _drivers_license_root()
+    src_dir = root / "src"
+    if not root.exists() or not src_dir.exists():
+        raise FileNotFoundError(
+            f"驾驶证模块目录缺失: {src_dir}. "
+            "请确认部署环境已包含 Driver's_License 目录，并在 Dockerfile 中执行 COPY Driver's_License/ ./Driver's_License/"
+        )
     root_str = str(root)
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
