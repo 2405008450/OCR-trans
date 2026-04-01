@@ -160,16 +160,45 @@ def mark_cancelled(db: Session, task_id: str) -> Optional[Task]:
     return task
 
 
-def requeue_running_tasks(db: Session, *, task_type: Optional[str] = None) -> int:
+def requeue_running_tasks(db: Session, *, task_type: Optional[str] = None, max_retry_count: int = 1) -> Dict[str, int]:
     query = db.query(Task).filter(Task.status == 'running')
     if task_type:
         query = query.filter(Task.task_type == task_type)
-    count = query.count()
-    if count == 0:
-        return 0
-    query.update({Task.status: 'queued', Task.progress: 0, Task.message: 'Requeued after restart', Task.started_at: None, Task.finished_at: None, Task.updated_at: _now()}, synchronize_session=False)
+    tasks = query.order_by(Task.created_at.asc(), Task.id.asc()).all()
+    summary = {'requeued': 0, 'cancelled': 0, 'failed': 0}
+    if not tasks:
+        return summary
+
+    now = _now()
+    for task in tasks:
+        task.started_at = None
+        task.updated_at = now
+
+        if task.cancel_requested:
+            task.status = 'cancelled'
+            task.message = 'Cancelled during restart recovery'
+            task.finished_at = now
+            summary['cancelled'] += 1
+            continue
+
+        if task.retry_count >= max_retry_count:
+            task.status = 'failed'
+            task.message = 'Failed: auto requeue limit reached after restart'
+            task.error_message = 'auto requeue limit reached after restart'
+            task.finished_at = now
+            summary['failed'] += 1
+            continue
+
+        task.status = 'queued'
+        task.progress = 0
+        task.message = f'Requeued after restart ({task.retry_count + 1}/{max_retry_count})'
+        task.finished_at = None
+        task.error_message = None
+        task.retry_count += 1
+        summary['requeued'] += 1
+
     db.commit()
-    return count
+    return summary
 
 
 def list_tasks(db: Session, *, status: Optional[str] = None, task_type: Optional[str] = None, keyword: Optional[str] = None, page: int = 1, page_size: int = 20) -> Tuple[List[Task], int]:

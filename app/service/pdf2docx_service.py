@@ -14,7 +14,7 @@ PDF2DOCX_DEFAULT_MODEL = "google/gemini-3-flash-preview"
 PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
     "gemini-3.1-flash-lite-preview": {
         "label": "极速版V2",
-        "description": "更轻量的极速 OCR 模型，适合追求速度的 PDF / 图片转 Word 场景。",
+        "description": "更轻量的 OCR 模型，适合追求速度的 PDF / 图片转 Word 场景。",
     },
     "google/gemini-3-flash-preview": {
         "label": "Google Gemini 3 Flash Preview",
@@ -22,12 +22,16 @@ PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
     },
     "google/gemini-3.1-pro-preview": {
         "label": "Google Gemini 3.1 Pro Preview",
-        "description": "更强调复杂版面与细节理解，适合高难度文档。",
+        "description": "更强的复杂版面与细节理解能力，适合高难度文档。",
     },
 }
 
 
-async def _maybe_report(progress_callback: Optional[ProgressCallback], progress: int, message: str):
+async def _maybe_report(
+    progress_callback: Optional[ProgressCallback],
+    progress: int,
+    message: str,
+):
     if progress_callback:
         await progress_callback(progress, message)
 
@@ -66,22 +70,19 @@ async def execute_pdf2docx_task_from_path(
 
     await _maybe_report(progress_callback, 5, "文件已入队，准备调用视觉模型")
 
-    _page_state: Dict[str, Any] = {"current": 0, "total": 0}
+    page_state: Dict[str, Any] = {"current": 0, "total": 0}
 
-    def _page_cb(current: int, total: int):
-        _page_state["current"] = current
-        _page_state["total"] = total
+    def page_callback(current: int, total: int):
+        page_state["current"] = current
+        page_state["total"] = total
         pct = 5 + int(current / max(total, 1) * 60)
         pct = min(pct, 65)
         if progress_callback:
-            try:
-                fut = asyncio.run_coroutine_threadsafe(
-                    progress_callback(pct, f"正在 OCR 第 {current}/{total} 页"),
-                    loop,
-                )
-                fut.result(timeout=30)
-            except Exception:
-                pass
+            future = asyncio.run_coroutine_threadsafe(
+                progress_callback(pct, f"正在 OCR 第 {current}/{total} 页"),
+                loop,
+            )
+            future.result(timeout=30)
 
     raw_text = await loop.run_in_executor(
         executor,
@@ -89,12 +90,15 @@ async def execute_pdf2docx_task_from_path(
             file_path=input_path,
             model=model,
             gemini_route=gemini_route,
-            page_progress_callback=_page_cb,
+            page_progress_callback=page_callback,
         ),
     )
 
-    total_pages = _page_state.get("total", 0)
-    pages_msg = f"OCR 完成（共 {total_pages} 页），正在整理中间文本" if total_pages else "OCR 完成，正在整理中间文本"
+    total_pages = page_state.get("total", 0)
+    if total_pages:
+        pages_msg = f"OCR 完成（共 {total_pages} 页），正在整理中间文本"
+    else:
+        pages_msg = "OCR 完成，正在整理中间文本"
     await _maybe_report(progress_callback, 70, pages_msg)
     raw_output_path.write_text(raw_text, encoding="utf-8")
 

@@ -45,12 +45,12 @@
                     <div class="upload-card">
                         <div class="section-title-row">
                             <div>
-                                <span class="section-kicker">Step 1</span>
+                                <span class="section-kicker">第一步</span>
                                 <h2>上传并配置任务</h2>
                             </div>
                             <div class="section-chip">最大 50MB</div>
                         </div>
-                        <p class="upload-desc">支持 JPG、PNG、BMP、TIF 等图片格式。拖拽上传后即可配置身份证正反面与翻译语言。</p>
+                        <p class="upload-desc">支持 JPG、PNG、BMP、TIF 等主流图片格式。拖拽上传后即可开始处理。</p>
 
                         <div class="upload-area" id="uploadArea">
                             <input type="file" id="fileInput" accept="image/*" multiple hidden>
@@ -102,16 +102,7 @@
                                     </select>
                                 </div>
                             </div>
-                            <div class="option-group option-card" id="idCardOptions">
-                                <label for="cardSide">证件面</label>
-                                <div class="field-wrap">
-                                    <i class="fas fa-id-card"></i>
-                                    <select id="cardSide">
-                                        <option value="front">正面（头像面）</option>
-                                        <option value="back">背面（国徽面）</option>
-                                    </select>
-                                </div>
-                            </div>
+
                             <div class="option-group checkbox-card">
                                 <label class="toggle-row">
                                     <input type="checkbox" id="enableVisualization" checked>
@@ -132,20 +123,20 @@
                     <div class="info-card">
                         <div class="section-title-row">
                             <div>
-                                <span class="section-kicker">Guide</span>
-                                <h3>推荐操作方式</h3>
+                                <span class="section-kicker">操作指引</span>
+                                <h3>推荐提示</h3>
                             </div>
                         </div>
                         <ul class="info-list">
-                            <li>身份证先确认正反面，避免参数错选。</li>
-                            <li>图片边缘尽量完整，避免裁切掉印章和字段标题。</li>
+                            <li>请确保图片边缘完整，避免裁切掉国徽、印章和包含文字的边角。</li>
+                            <li>多文件批量上传时可在左侧列表为单张图片配置属性。</li>
                         </ul>
                     </div>
                     <div class="info-card emphasis">
                         <div class="section-title-row">
                             <div>
-                                <span class="section-kicker">Output</span>
-                                <h3>你将得到什么</h3>
+                                <span class="section-kicker">输出产物</span>
+                                <h3>处理结果</h3>
                             </div>
                         </div>
                         <div class="stacked-stats">
@@ -208,6 +199,7 @@
 
     <script src="/static/embed_shell.js"></script>
     <script src="/static/app.js"></script>
+    <script src="/static/header.js"></script>
 </body>
 
 </html>

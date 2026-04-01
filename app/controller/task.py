@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+import tempfile
 import traceback
 from pathlib import Path
 from typing import List, Optional
@@ -14,12 +16,18 @@ from app.service import zhongfanyi_service as zf_service
 from app.service.business_licence_service import (
     BUSINESS_LICENCE_DEFAULT_MODEL,
     BUSINESS_LICENCE_DEFAULT_ROUTE,
+    extract_business_licence_data,
+    get_business_licence_company_name,
     get_business_licence_models,
 )
 from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
 from app.service.drivers_license_service import get_drivers_license_config
 from app.service.gemini_service import get_gemini_routes
-from app.service.number_check_service import _get_task_progress as get_number_check_progress, get_number_check_models
+from app.service.number_check_service import (
+    _get_task_progress as get_number_check_progress,
+    get_number_check_default_mode,
+    get_number_check_models,
+)
 from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     PDF2DOCX_DEFAULT_MODEL,
@@ -162,14 +170,55 @@ async def get_run_task_status(task_id: str):
 
 
 @router.post("/number-check")
-async def run_number_check(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), gemini_route: str = Query("openrouter"), model_name: str = Query("gemini-3.1-pro-preview")):
-    task_id = await task_queue_service.submit_number_check_task(original_file=original_file, translated_file=translated_file, gemini_route=gemini_route, model_name=model_name)
+async def run_number_check(
+    original_file: Optional[UploadFile] = File(None),
+    translated_file: Optional[UploadFile] = File(None),
+    single_file: Optional[UploadFile] = File(None),
+    mode: Optional[str] = Query(None),
+    gemini_route: str = Query("openrouter"),
+    model_name: str = Query("gemini-3.1-pro-preview"),
+):
+    resolved_mode = (mode or get_number_check_default_mode()).strip().lower()
+    if resolved_mode == "single":
+        if single_file is None:
+            raise HTTPException(status_code=400, detail="单文件模式需要上传 single_file")
+    elif resolved_mode == "double":
+        if original_file is None or translated_file is None:
+            raise HTTPException(status_code=400, detail="双文件模式需要同时上传 original_file 和 translated_file")
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的数字专检模式: {mode}")
+
+    task_id = await task_queue_service.submit_number_check_task(
+        mode=resolved_mode,
+        original_file=original_file,
+        translated_file=translated_file,
+        single_file=single_file,
+        gemini_route=gemini_route,
+        model_name=model_name,
+    )
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
 
 @router.get("/number-check/config")
 async def get_number_check_config():
-    return {"models": get_number_check_models(), "default_model": "gemini-3.1-pro-preview", "routes": get_gemini_routes(), "default_route": "openrouter"}
+    return {
+        "models": get_number_check_models(),
+        "default_model": "gemini-3.1-pro-preview",
+        "routes": get_gemini_routes(),
+        "default_route": "openrouter",
+        "default_mode": get_number_check_default_mode(),
+        "modes": {
+            "double": {
+                "label": "双文件模式",
+                "description": "上传原文和译文两个 DOCX 文件，输出修订版译文。",
+            },
+            "single": {
+                "label": "单文件模式",
+                "description": "上传一个中英对照文件；DOCX 可生成修订版，其它格式仅输出报告。",
+            },
+        },
+        "single_file_extensions": [".docx", ".pdf", ".xlsx", ".pptx"],
+    }
 
 
 @router.get("/number-check/status/{task_id}")
@@ -306,21 +355,96 @@ async def get_drivers_license_status(task_id: str):
 
 @router.get("/business-licence/config")
 async def get_business_licence_config():
+    all_routes = get_gemini_routes()
     return {
         "models": get_business_licence_models(),
         "default_model": BUSINESS_LICENCE_DEFAULT_MODEL,
-        "routes": get_gemini_routes(),
+        "routes": {
+            BUSINESS_LICENCE_DEFAULT_ROUTE: all_routes.get(
+                BUSINESS_LICENCE_DEFAULT_ROUTE,
+                {"label": BUSINESS_LICENCE_DEFAULT_ROUTE, "description": ""},
+            )
+        },
         "default_route": BUSINESS_LICENCE_DEFAULT_ROUTE,
     }
 
 
-@router.post("/business-licence")
-async def submit_business_licence(file: UploadFile = File(...), model: str = Query(BUSINESS_LICENCE_DEFAULT_MODEL), gemini_route: str = Query(BUSINESS_LICENCE_DEFAULT_ROUTE)):
+def _validate_business_licence_file(file: UploadFile) -> None:
     allowed_ext = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".gif"}
     if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported image format")
-    task_id = await task_queue_service.submit_business_licence_task(file=file, model=model, gemini_route=gemini_route)
-    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+
+
+@router.post("/business-licence/company-name-preview")
+async def preview_business_licence_company_name(
+    file: UploadFile = File(...),
+    model: str = Query(BUSINESS_LICENCE_DEFAULT_MODEL),
+):
+    _validate_business_licence_file(file)
+
+    temp_dir = BASE_DIR / "uploads" / "_tmp_business_licence_preview"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(file.filename or "business_licence.png").suffix or ".png"
+
+    temp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir) as temp_file:
+            temp_file.write(await file.read())
+            temp_path = Path(temp_file.name)
+
+        parsed_data = await asyncio.to_thread(
+            extract_business_licence_data,
+            temp_path,
+            model=model,
+            gemini_route=BUSINESS_LICENCE_DEFAULT_ROUTE,
+        )
+    finally:
+        if temp_path and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+
+    company_name_info = get_business_licence_company_name(parsed_data) or {}
+    original_cn_name = company_name_info.get("original_cn_name", "")
+    ai_translated_name = company_name_info.get("ai_translated_name", "")
+
+    return {
+        "requires_confirmation": bool(original_cn_name and ai_translated_name),
+        "original_cn_name": original_cn_name,
+        "ai_translated_name": ai_translated_name,
+        "parsed_data_json": json.dumps(parsed_data, ensure_ascii=False),
+        "model": model,
+        "gemini_route": BUSINESS_LICENCE_DEFAULT_ROUTE,
+    }
+
+
+@router.post("/business-licence")
+async def submit_business_licence(
+    file: UploadFile = File(...),
+    parsed_data_json: Optional[str] = Form(None),
+    company_name_override: Optional[str] = Form(None),
+    model: str = Query(BUSINESS_LICENCE_DEFAULT_MODEL),
+):
+    _validate_business_licence_file(file)
+
+    parsed_data = None
+    if parsed_data_json:
+        try:
+            parsed_data = json.loads(parsed_data_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid parsed_data_json: {exc}") from exc
+
+    task_id = await task_queue_service.submit_business_licence_task(
+        file=file,
+        model=model,
+        gemini_route=BUSINESS_LICENCE_DEFAULT_ROUTE,
+        parsed_data=parsed_data,
+        company_name_override=company_name_override,
+    )
+    return {
+        "status": "ACCEPTED",
+        "task_id": task_id,
+        "message": "Task submitted",
+        "gemini_route": BUSINESS_LICENCE_DEFAULT_ROUTE,
+    }
 
 
 @router.get("/business-licence/status/{task_id}")

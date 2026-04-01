@@ -16,6 +16,8 @@ import json
 import re
 from pathlib import Path
 from datetime import datetime
+import tkinter as tk
+from tkinter import ttk, messagebox
 
 # 获取脚本所在目录（项目根目录）
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -28,9 +30,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.service.business_licence_service import (
+    apply_business_licence_company_name_override,
     BUSINESS_LICENCE_DEFAULT_MODEL,
     BUSINESS_LICENCE_DEFAULT_ROUTE,
     extract_business_licence_data,
+    get_business_licence_company_name,
 )
 
 # ==================== 配置区域 ====================
@@ -195,6 +199,95 @@ TEMPLATE_PATH_VERTICAL = str(SCRIPT_DIR / "template/模板竖.docx")
 OUTPUT_DIR = str(PROJECT_ROOT / "outputs" / "business_licence")
 
 # ==================================================
+
+
+def show_company_name_dialog(ai_translated_name: str, original_cn_name: str) -> str:
+    """显示公司名称翻译选择弹窗
+
+    Args:
+        ai_translated_name: AI翻译的英文公司名称
+        original_cn_name: 原始中文公司名称
+
+    Returns:
+        用户选择或输入的英文公司名称
+    """
+
+    result = {"name": ai_translated_name}
+
+    def on_confirm():
+        if choice_var.get() == "ai":
+            result["name"] = ai_translated_name
+        else:
+            manual_name = manual_entry.get().strip()
+            if not manual_name:
+                messagebox.showwarning("提示", "请输入公司英文名称")
+                return
+            result["name"] = manual_name
+        dialog.destroy()
+
+    def on_choice_change():
+        if choice_var.get() == "manual":
+            manual_entry.config(state="normal")
+            manual_entry.focus_set()
+        else:
+            manual_entry.config(state="disabled")
+
+    dialog = tk.Tk()
+    dialog.title("公司名称翻译确认")
+    dialog.geometry("550x420")
+    dialog.resizable(False, False)
+
+    dialog.update_idletasks()
+    x = (dialog.winfo_screenwidth() - 550) // 2
+    y = (dialog.winfo_screenheight() - 420) // 2
+    dialog.geometry(f"550x420+{x}+{y}")
+
+    main_frame = ttk.Frame(dialog, padding="20")
+    main_frame.pack(fill=tk.BOTH, expand=True)
+
+    title_label = ttk.Label(main_frame, text="请确认公司名称翻译", font=("Microsoft YaHei", 14, "bold"))
+    title_label.pack(pady=(0, 15))
+
+    ttk.Label(main_frame, text="中文名称:", font=("Microsoft YaHei", 10)).pack(anchor=tk.W)
+    cn_text = tk.Text(main_frame, height=2, width=60, font=("Microsoft YaHei", 10), wrap=tk.WORD, bg="#f0f0f0")
+    cn_text.insert("1.0", original_cn_name)
+    cn_text.config(state="disabled")
+    cn_text.pack(fill=tk.X, pady=(2, 10))
+
+    ttk.Separator(main_frame, orient="horizontal").pack(fill=tk.X, pady=10)
+
+    choice_var = tk.StringVar(value="ai")
+
+    ai_radio = ttk.Radiobutton(main_frame, text="使用 AI 翻译", variable=choice_var, value="ai", command=on_choice_change)
+    ai_radio.pack(anchor=tk.W, pady=(5, 2))
+
+    ai_text = tk.Text(main_frame, height=2, width=60, font=("Microsoft YaHei", 10), wrap=tk.WORD, fg="green", bg="#f5fff5")
+    ai_text.insert("1.0", ai_translated_name)
+    ai_text.config(state="disabled")
+    ai_text.pack(fill=tk.X, pady=(0, 10), padx=(20, 0))
+
+    manual_radio = ttk.Radiobutton(main_frame, text="手动输入公司英文名称", variable=choice_var, value="manual", command=on_choice_change)
+    manual_radio.pack(anchor=tk.W, pady=(5, 2))
+
+    manual_entry = ttk.Entry(main_frame, width=60, font=("Microsoft YaHei", 10))
+    manual_entry.pack(fill=tk.X, pady=(0, 10), padx=(20, 0))
+    manual_entry.config(state="disabled")
+
+    hint_label = ttk.Label(
+        main_frame,
+        text="提示：某些公司有固定的英文译名，请根据实际情况选择。",
+        font=("Microsoft YaHei", 9),
+        foreground="gray",
+    )
+    hint_label.pack(pady=(5, 10))
+
+    confirm_btn = ttk.Button(main_frame, text="确认", command=on_confirm, width=15)
+    confirm_btn.pack(pady=10)
+
+    dialog.bind("<Return>", lambda _event: on_confirm())
+    dialog.mainloop()
+
+    return result["name"]
 
 
 def get_image_orientation(image_path: str) -> str:
@@ -1729,6 +1822,25 @@ def main():
     
     # 识别并翻译
     data = extract_and_translate(input_image)
+
+    company_name_info = get_business_licence_company_name(data)
+    if company_name_info:
+        business_name_cn = company_name_info.get("original_cn_name", "")
+        business_name_en = company_name_info.get("ai_translated_name", "")
+        print("\n" + "=" * 60)
+        print("公司名称翻译确认")
+        print("=" * 60)
+        print(f"中文名称: {business_name_cn}")
+        print(f"AI翻译: {business_name_en}")
+
+        confirmed_name = show_company_name_dialog(business_name_en, business_name_cn)
+        data = apply_business_licence_company_name_override(data, confirmed_name)
+
+        if confirmed_name != business_name_en:
+            print(f"用户选择手动输入: {confirmed_name}")
+        else:
+            print(f"用户确认使用AI翻译: {confirmed_name}")
+        print()
     
     # 打印识别结果
     print("\n" + "=" * 60)

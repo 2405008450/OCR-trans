@@ -23,13 +23,24 @@ const streamLog = document.getElementById('streamLog');
 const resultStats = document.getElementById('resultStats');
 const resultFileList = document.getElementById('resultFileList');
 
+const companyNameDialog = document.getElementById('companyNameDialog');
+const companyNameOriginalCn = document.getElementById('companyNameOriginalCn');
+const companyNameAiValue = document.getElementById('companyNameAiValue');
+const companyNameUseAi = document.getElementById('companyNameUseAi');
+const companyNameUseManual = document.getElementById('companyNameUseManual');
+const companyNameManualValue = document.getElementById('companyNameManualValue');
+const companyNameDialogError = document.getElementById('companyNameDialogError');
+const companyNameConfirmBtn = document.getElementById('companyNameConfirmBtn');
+const companyNameCancelBtn = document.getElementById('companyNameCancelBtn');
+
 let selectedFile = null;
 let pollingTimer = null;
 let modelConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3.1-pro-preview';
-let defaultRoute = 'openrouter';
+let defaultRoute = 'google';
 let etaHint = null;
+let pendingCompanyNameDialog = null;
 
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp', '.gif'];
@@ -55,6 +66,16 @@ function bindEvents() {
     });
     btnProcess?.addEventListener('click', processFile);
     btnNewTask?.addEventListener('click', resetPage);
+
+    companyNameUseAi?.addEventListener('change', syncCompanyNameDialogState);
+    companyNameUseManual?.addEventListener('change', syncCompanyNameDialogState);
+    companyNameConfirmBtn?.addEventListener('click', confirmCompanyNameDialog);
+    companyNameCancelBtn?.addEventListener('click', cancelCompanyNameDialog);
+    companyNameDialog?.addEventListener('click', (event) => {
+        if (event.target === companyNameDialog) {
+            cancelCompanyNameDialog();
+        }
+    });
 }
 
 async function loadConfig() {
@@ -76,8 +97,7 @@ async function loadConfig() {
             'google/gemini-3-flash-preview': { label: 'Gemini 3 Flash' },
         };
         routeConfig = {
-            openrouter: { label: 'OpenRouter' },
-            google: { label: 'Google' },
+            google: { label: '线路1（Vertex）' },
         };
     }
 
@@ -163,32 +183,156 @@ async function processFile() {
     resultSection.style.display = 'none';
     processingSection.style.display = 'block';
     clearLog();
-    updateProgress(5, '正在提交任务...');
+    updateProgress(6, '正在识别公司名称...');
 
     try {
-        const formData = new FormData();
-        formData.append('file', selectedFile);
+        const preview = await requestCompanyNamePreview();
+        let companyNameOverride = '';
 
-        const params = new URLSearchParams({
-            model: modelSelect.value,
-            gemini_route: geminiRouteSelect.value,
-        });
-
-        const response = await fetch(`/task/business-licence?${params.toString()}`, {
-            method: 'POST',
-            body: formData,
-        });
-
-        if (!response.ok) {
-            const message = await safeReadError(response);
-            throw new Error(message || `提交失败: ${response.status}`);
+        if (preview.requires_confirmation) {
+            updateProgress(18, '已识别公司名称，等待确认...');
+            companyNameOverride = await showCompanyNameDialog(
+                preview.ai_translated_name || '',
+                preview.original_cn_name || '',
+            );
+            updateProgress(26, '公司名称已确认，正在提交正式任务...');
+        } else {
+            updateProgress(26, '未检测到需确认的公司名称，正在提交正式任务...');
         }
 
-        const data = await response.json();
-        startPolling(data.task_id);
+        const task = await submitBusinessLicenceTask(preview.parsed_data_json, companyNameOverride);
+        startPolling(task.task_id);
     } catch (error) {
-        showFailure(error.message);
+        if (error?.isUserCancelled) {
+            resetPage();
+            return;
+        }
+        showFailure(error?.message || '处理失败');
     }
+}
+
+async function requestCompanyNamePreview() {
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    const params = new URLSearchParams({
+        model: modelSelect.value,
+    });
+
+    const response = await fetch(`/task/business-licence/company-name-preview?${params.toString()}`, {
+        method: 'POST',
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const message = await safeReadError(response);
+        throw new Error(message || `预识别失败: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function submitBusinessLicenceTask(parsedDataJson, companyNameOverride) {
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('parsed_data_json', parsedDataJson || '');
+    if (companyNameOverride) {
+        formData.append('company_name_override', companyNameOverride);
+    }
+
+    const params = new URLSearchParams({
+        model: modelSelect.value,
+    });
+
+    const response = await fetch(`/task/business-licence?${params.toString()}`, {
+        method: 'POST',
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const message = await safeReadError(response);
+        throw new Error(message || `任务提交失败: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+function showCompanyNameDialog(aiTranslatedName, originalCnName) {
+    closeCompanyNameDialog();
+
+    companyNameOriginalCn.textContent = originalCnName || '-';
+    companyNameAiValue.textContent = aiTranslatedName || '-';
+    companyNameManualValue.value = aiTranslatedName || '';
+    companyNameDialogError.textContent = '';
+    companyNameUseAi.checked = true;
+    companyNameUseManual.checked = false;
+    syncCompanyNameDialogState();
+
+    companyNameDialog.classList.add('is-open');
+    companyNameDialog.setAttribute('aria-hidden', 'false');
+
+    return new Promise((resolve, reject) => {
+        pendingCompanyNameDialog = { resolve, reject };
+    });
+}
+
+function syncCompanyNameDialogState() {
+    const useManual = Boolean(companyNameUseManual?.checked);
+    companyNameManualValue.disabled = !useManual;
+    if (useManual) {
+        queueMicrotask(() => companyNameManualValue.focus());
+    }
+}
+
+function confirmCompanyNameDialog() {
+    if (!pendingCompanyNameDialog) {
+        return;
+    }
+
+    companyNameDialogError.textContent = '';
+    if (companyNameUseManual?.checked) {
+        const manualName = companyNameManualValue.value.trim();
+        if (!manualName) {
+            companyNameDialogError.textContent = '请输入公司英文名称。';
+            companyNameManualValue.focus();
+            return;
+        }
+        settleCompanyNameDialog('resolve', manualName);
+        return;
+    }
+
+    settleCompanyNameDialog('resolve', (companyNameAiValue.textContent || '').trim());
+}
+
+function cancelCompanyNameDialog() {
+    if (!pendingCompanyNameDialog) {
+        closeCompanyNameDialog();
+        return;
+    }
+    const error = new Error('已取消公司名称确认');
+    error.isUserCancelled = true;
+    settleCompanyNameDialog('reject', error);
+}
+
+function settleCompanyNameDialog(action, payload) {
+    const pending = pendingCompanyNameDialog;
+    pendingCompanyNameDialog = null;
+    closeCompanyNameDialog();
+    if (!pending) {
+        return;
+    }
+
+    if (action === 'resolve') {
+        pending.resolve(payload);
+        return;
+    }
+    pending.reject(payload);
+}
+
+function closeCompanyNameDialog() {
+    companyNameDialog?.classList.remove('is-open');
+    companyNameDialog?.setAttribute('aria-hidden', 'true');
+    companyNameDialogError.textContent = '';
 }
 
 function startPolling(taskId) {
@@ -373,6 +517,16 @@ function showResult(result) {
     processingSection.style.display = 'none';
     resultSection.style.display = 'grid';
 
+    const companyNameCard = result.company_name_confirmed
+        ? `
+        <div class="stat-card">
+            <i class="fas fa-building"></i>
+            <h3>${escapeHtml(result.company_name_confirmed)}</h3>
+            <p>确认后的公司英文名</p>
+        </div>
+    `
+        : '';
+
     resultStats.innerHTML = `
         <div class="stat-card">
             <i class="fas fa-file-image"></i>
@@ -389,6 +543,7 @@ function showResult(result) {
             <h3>${escapeHtml((routeConfig[result.gemini_route] || {}).label || result.gemini_route || '-')}</h3>
             <p>调用线路</p>
         </div>
+        ${companyNameCard}
         <div class="stat-card">
             <i class="fas fa-check-circle"></i>
             <h3>成功</h3>
@@ -415,6 +570,7 @@ function showResult(result) {
 }
 
 function resetPage() {
+    closeCompanyNameDialog();
     clearFile();
     clearLog();
     stopPolling();

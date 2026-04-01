@@ -5,13 +5,14 @@ import importlib.util
 import json
 import re
 from concurrent.futures import Executor
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.config import settings
 from app.service.gemini_service import (
-    GEMINI_ROUTE_OPENROUTER,
+    GEMINI_ROUTE_GOOGLE,
     ensure_gemini_route_configured,
     generate_vision_html,
 )
@@ -19,7 +20,14 @@ from app.service.gemini_service import (
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
 BUSINESS_LICENCE_DEFAULT_MODEL = "google/gemini-3.1-pro-preview"
-BUSINESS_LICENCE_DEFAULT_ROUTE = GEMINI_ROUTE_OPENROUTER
+BUSINESS_LICENCE_DEFAULT_ROUTE = GEMINI_ROUTE_GOOGLE
+
+_BUSINESS_LICENCE_COMPANY_NAME_LABELS = {
+    "名称",
+    "名 称",
+    "公司名称",
+    "企业名称",
+}
 
 BUSINESS_LICENCE_MODELS: Dict[str, Dict[str, str]] = {
     "google/gemini-3.1-pro-preview": {
@@ -223,6 +231,51 @@ def parse_business_licence_response(raw_text: str) -> Dict[str, Any]:
     return normalize_business_licence_result(json.loads(json_text))
 
 
+def _normalize_cn_label(value: str) -> str:
+    return value.strip().replace(" ", "").replace("\u3000", "")
+
+
+def get_business_licence_company_name(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    data = normalize_business_licence_result(payload)
+    normalized_company_labels = {
+        _normalize_cn_label(item) for item in _BUSINESS_LICENCE_COMPANY_NAME_LABELS
+    }
+    for index, field in enumerate(data.get("fields", [])):
+        label_cn = _normalize_cn_label(str(field.get("label_cn", "")))
+        label_en = str(field.get("label_en", "")).strip().lower()
+        if label_en not in {"business name", "company name"} and label_cn not in normalized_company_labels:
+            continue
+
+        original_cn_name = str(field.get("value_cn", "")).strip()
+        ai_translated_name = str(field.get("value_en", "")).strip()
+        if not original_cn_name and not ai_translated_name:
+            continue
+        return {
+            "field_index": index,
+            "original_cn_name": original_cn_name,
+            "ai_translated_name": ai_translated_name,
+        }
+    return None
+
+
+def apply_business_licence_company_name_override(
+    payload: Dict[str, Any],
+    company_name_override: Optional[str],
+) -> Dict[str, Any]:
+    data = normalize_business_licence_result(deepcopy(payload))
+    normalized_name = (company_name_override or "").strip()
+    if not normalized_name:
+        return data
+
+    company_name_info = get_business_licence_company_name(data)
+    if not company_name_info:
+        return data
+
+    field_index = company_name_info["field_index"]
+    data["fields"][field_index]["value_en"] = normalized_name
+    return data
+
+
 def generate_business_licence_response(
     image_path: str | Path,
     *,
@@ -280,6 +333,8 @@ async def execute_business_licence_task(
     original_filename: str,
     model: str = BUSINESS_LICENCE_DEFAULT_MODEL,
     gemini_route: str = BUSINESS_LICENCE_DEFAULT_ROUTE,
+    parsed_data: Optional[Dict[str, Any]] = None,
+    company_name_override: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
@@ -296,17 +351,23 @@ async def execute_business_licence_task(
 
     await _maybe_report(progress_callback, 5, "正在准备营业执照识别任务")
 
-    raw_text = await loop.run_in_executor(
-        executor,
-        lambda: generate_business_licence_response(
-            input_file,
-            model=model,
-            gemini_route=route,
-        ),
-    )
+    if parsed_data is None:
+        raw_text = await loop.run_in_executor(
+            executor,
+            lambda: generate_business_licence_response(
+                input_file,
+                model=model,
+                gemini_route=route,
+            ),
+        )
+    else:
+        parsed_data = normalize_business_licence_result(parsed_data)
 
     await _maybe_report(progress_callback, 45, "模型识别完成，正在解析结构化结果")
-    parsed_data = parse_business_licence_response(raw_text)
+    if parsed_data is None:
+        parsed_data = parse_business_licence_response(raw_text)
+    parsed_data = apply_business_licence_company_name_override(parsed_data, company_name_override)
+    company_name_info = get_business_licence_company_name(parsed_data)
 
     await _maybe_report(progress_callback, 70, "正在套用营业执照模板生成 Word")
     legacy_module = _load_legacy_business_licence_module()
@@ -341,6 +402,8 @@ async def execute_business_licence_task(
         "filename": original_filename,
         "model": model,
         "gemini_route": route,
+        "company_name_confirmed": (company_name_info or {}).get("ai_translated_name", ""),
+        "company_name_original_cn": (company_name_info or {}).get("original_cn_name", ""),
         "output_docx": _normalize_path(output_docx_path),
         "selected_template": _normalize_path(selected_template_path),
     }

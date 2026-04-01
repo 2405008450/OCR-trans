@@ -44,6 +44,129 @@
             color: var(--text-secondary);
             background: rgba(255, 255, 255, 0.55);
         }
+
+        .dialog-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(6, 17, 29, 0.52);
+            backdrop-filter: blur(12px);
+        }
+
+        .dialog-backdrop.is-open {
+            display: flex;
+        }
+
+        .dialog-card {
+            width: min(640px, 100%);
+            border-radius: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow: var(--shadow-lg);
+            padding: 28px;
+            display: grid;
+            gap: 18px;
+        }
+
+        .dialog-card h3 {
+            font-size: 26px;
+            line-height: 1.1;
+        }
+
+        .dialog-card p {
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        .dialog-block {
+            display: grid;
+            gap: 10px;
+            padding: 18px;
+            border-radius: 20px;
+            background: linear-gradient(180deg, #f8fbfe, #eef5fb);
+            border: 1px solid rgba(14, 165, 233, 0.12);
+        }
+
+        .dialog-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--text-soft);
+        }
+
+        .dialog-value {
+            font-size: 16px;
+            line-height: 1.75;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .dialog-radio {
+            display: grid;
+            gap: 10px;
+            padding: 16px 18px;
+            border-radius: 18px;
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        .dialog-radio input {
+            margin-right: 10px;
+        }
+
+        .dialog-textarea {
+            width: 100%;
+            min-height: 96px;
+            resize: vertical;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            font: inherit;
+            color: var(--text-primary);
+            background: #fff;
+        }
+
+        .dialog-textarea:disabled {
+            background: rgba(148, 163, 184, 0.12);
+            color: var(--text-soft);
+        }
+
+        .dialog-error {
+            min-height: 22px;
+            color: var(--danger-color);
+            font-size: 13px;
+        }
+
+        .dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .dialog-actions .btn-secondary,
+        .dialog-actions .btn-primary {
+            min-width: 132px;
+        }
+
+        @media (max-width: 640px) {
+            .dialog-card {
+                padding: 22px;
+            }
+
+            .dialog-actions {
+                flex-direction: column-reverse;
+            }
+
+            .dialog-actions .btn-secondary,
+            .dialog-actions .btn-primary {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -53,7 +176,7 @@
                 <div class="logo-mark"><i class="fas fa-building"></i></div>
                 <div>
                     <h1>营业执照翻译</h1>
-                    <p class="subtitle">统一走主项目模型配置，生成英文营业执照译文 Word。</p>
+                    <p class="subtitle">统一走主项目模型配置，并固定使用全局线路1（Vertex）生成英文营业执照译文 Word。</p>
                 </div>
             </div>
             <nav class="header-nav">
@@ -61,7 +184,7 @@
                 <a href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
                 <span style="color:var(--line); margin:0 4px">|</span>
                 <a href="/certificate-translation"><i class="fas fa-id-card"></i> 证件翻译</a>
-                <a href="/pdf2docx"><i class="fas fa-file-word"></i> 文档预处理V2</a>
+                <a href="/pdf2docx"><i class="fas fa-file-word"></i> 文档预处理</a>
             </nav>
         </header>
 
@@ -69,16 +192,16 @@
             <div>
                 <span class="section-kicker">Business Licence</span>
                 <h2>上传营业执照图片，输出统一格式译文</h2>
-                <p>识别调用已切到主项目统一模型配置，输出文件统一写入根目录 <code>outputs/business_licence/</code>，仅保留最终交付用的 Word 译文。</p>
+                <p>识别调用固定走主项目全局线路1（Vertex），先确认公司名称译法，再将输出文件统一写入 <code>outputs/business_licence/</code>，仅保留最终交付用的 Word 译文。</p>
             </div>
             <div class="hero-metrics">
                 <div class="metric-card">
-                    <strong>统一配置</strong>
-                    <span>默认读取根目录 <code>.env</code> 中的模型与线路配置。</span>
+                    <strong>固定线路1</strong>
+                    <span>营业执照页面默认锁定 Vertex 官方线路，不再切换到其他路由。</span>
                 </div>
                 <div class="metric-card">
-                    <strong>精简输出</strong>
-                    <span>处理完成后只保留最终 <code>.docx</code>，不再生成额外缓存文件。</span>
+                    <strong>名称先确认</strong>
+                    <span>识别出公司名称后会先弹窗确认英文译名，再进入正式任务生成 Word。</span>
                 </div>
             </div>
         </section>
@@ -101,7 +224,7 @@
                             <div class="upload-placeholder" id="uploadPlaceholder">
                                 <i class="fas fa-cloud-arrow-up"></i>
                                 <p>拖拽图片到这里，或点击选择营业执照图片</p>
-                                <span>建议上传完整清晰原图，避免裁切二维码和印章</span>
+                                <span>建议上传完整清晰原图，避免裁切二维码和印章。</span>
                             </div>
                             <div class="file-preview" id="filePreview" style="display:none;">
                                 <div class="file-info" style="width:100%;">
@@ -148,7 +271,7 @@
                         <ul class="info-list">
                             <li>识别内容包括营业执照字段、印章、统一社会信用代码、二维码说明和副本编号。</li>
                             <li>模板填充仍复用 <code>businesslicence/start.py</code> 中成熟的 Word 模板逻辑。</li>
-                            <li>任务结果已接入主项目任务体系，处理进度和日志可直接在页面查看。</li>
+                            <li>页面会先弹出公司名称确认框，确认后的英文名称才会进入最终 Word。</li>
                         </ul>
                     </div>
                     <div class="info-card emphasis">
@@ -161,7 +284,7 @@
                         <div class="stacked-stats">
                             <div><strong>Word 译文</strong><span>最终交付文件</span></div>
                             <div><strong>目录统一</strong><span>输出到 <code>outputs/business_licence/</code></span></div>
-                            <div><strong>缓存精简</strong><span>不再额外生成 JSON 和原始响应文本</span></div>
+                            <div><strong>Vertex 路线</strong><span>固定走全局线路1，不再使用页面内代理或备用端口。</span></div>
                         </div>
                     </div>
                 </aside>
@@ -171,7 +294,7 @@
                 <div class="processing-card">
                     <div class="spinner"></div>
                     <h2>处理中</h2>
-                    <p id="processingStatus">正在提交任务...</p>
+                    <p id="processingStatus">正在准备任务...</p>
                     <div class="progress-bar">
                         <div class="progress-fill" id="progressFill"></div>
                     </div>
@@ -201,7 +324,48 @@
         </main>
     </div>
 
+    <div class="dialog-backdrop" id="companyNameDialog" aria-hidden="true">
+        <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="companyNameDialogTitle">
+            <div>
+                <span class="section-kicker">Company Name</span>
+                <h3 id="companyNameDialogTitle">请确认公司名称翻译</h3>
+                <p>营业执照中的公司名称会直接进入最终 Word。请确认 AI 译名，或手动输入你要使用的固定英文名称。</p>
+            </div>
+
+            <div class="dialog-block">
+                <span class="dialog-label">中文名称</span>
+                <div class="dialog-value" id="companyNameOriginalCn"></div>
+            </div>
+
+            <label class="dialog-radio">
+                <span><input type="radio" name="companyNameChoice" id="companyNameUseAi" value="ai" checked> 使用 AI 翻译</span>
+                <div class="dialog-block" style="padding:14px 16px;">
+                    <span class="dialog-label">AI 英文名称</span>
+                    <div class="dialog-value" id="companyNameAiValue"></div>
+                </div>
+            </label>
+
+            <label class="dialog-radio">
+                <span><input type="radio" name="companyNameChoice" id="companyNameUseManual" value="manual"> 手动输入公司英文名称</span>
+                <textarea
+                    class="dialog-textarea"
+                    id="companyNameManualValue"
+                    placeholder="例如：Foshan Example Trading Co., Ltd."
+                    disabled
+                ></textarea>
+            </label>
+
+            <div class="dialog-error" id="companyNameDialogError"></div>
+
+            <div class="dialog-actions">
+                <button class="btn-secondary" type="button" id="companyNameCancelBtn">取消</button>
+                <button class="btn-primary" type="button" id="companyNameConfirmBtn">确认并继续</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/embed_shell.js"></script>
     <script src="/static/business_licence.js"></script>
+    <script src="/static/header.js"></script>
 </body>
 </html>

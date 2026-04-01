@@ -1,13 +1,23 @@
-﻿const originalFileInput = document.getElementById('originalFile');
+const originalFileInput = document.getElementById('originalFile');
 const translatedFileInput = document.getElementById('translatedFile');
+const singleFileInput = document.getElementById('singleFile');
+const modeDoubleRadio = document.getElementById('modeDouble');
+const modeSingleRadio = document.getElementById('modeSingle');
+const modeHint = document.getElementById('modeHint');
+const uploadDesc = document.getElementById('uploadDesc');
+const pageSubtitle = document.getElementById('pageSubtitle');
 const btnRunCheck = document.getElementById('btnRunCheck');
 const btnReset = document.getElementById('btnReset');
 
 const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
 const resultSection = document.getElementById('resultSection');
+const resultSummary = document.getElementById('resultSummary');
 const resultStats = document.getElementById('resultStats');
 const resultGrid = document.getElementById('resultGrid');
+
+const doubleFileFields = document.getElementById('doubleFileFields');
+const singleFileFields = document.getElementById('singleFileFields');
 
 const progressBar = document.getElementById('progressBar');
 const progressPercent = document.getElementById('progressPercent');
@@ -16,9 +26,121 @@ const processingTitle = document.getElementById('processingTitle');
 const processingText = document.getElementById('processingText');
 
 const POLL_INTERVAL = 1000;
-
 const ETA_TIME_ZONE = 'Asia/Shanghai';
+const MODEL_DISPLAY_NAMES = {
+    'gemini-3-flash-preview': '快速版V2',
+    'google/gemini-3-flash-preview': '快速版V2',
+    'gemini-3.1-pro-preview': '增强版V2',
+    'google/gemini-3.1-pro-preview': '增强版V2',
+};
+
+let pollingTimer = null;
+let modelConfig = {};
+let defaultRoute = 'openrouter';
+let defaultModel = 'gemini-3.1-pro-preview';
+let defaultMode = 'double';
+let currentMode = 'double';
+let modeConfig = {};
+let singleFileExtensions = ['.docx', '.pdf', '.xlsx', '.pptx'];
+let streamLogWrap = null;
+let streamLogEl = null;
 let etaHint = null;
+
+init();
+
+async function init() {
+    ensureLogPanel();
+    ensureEtaHint();
+    bindEvents();
+    await loadConfig();
+    applyMode(defaultMode);
+}
+
+function bindEvents() {
+    btnRunCheck?.addEventListener('click', runNumberCheck);
+    btnReset?.addEventListener('click', resetPage);
+    modeDoubleRadio?.addEventListener('change', () => applyMode('double'));
+    modeSingleRadio?.addEventListener('change', () => applyMode('single'));
+}
+
+async function loadConfig() {
+    try {
+        const resp = await fetch('/task/number-check/config');
+        if (!resp.ok) throw new Error(`配置加载失败: ${resp.status}`);
+        const data = await resp.json();
+        modelConfig = data.models || {};
+        defaultRoute = data.default_route || defaultRoute;
+        defaultModel = data.default_model || defaultModel;
+        defaultMode = data.default_mode || defaultMode;
+        modeConfig = data.modes || {};
+        singleFileExtensions = data.single_file_extensions || singleFileExtensions;
+    } catch (error) {
+        console.error(error);
+        modelConfig = {
+            'gemini-3.1-pro-preview': {
+                label: '增强版V2',
+                description: '推理更强，适合复杂编号和上下文判断场景。',
+            },
+        };
+        modeConfig = {
+            double: {
+                label: '双文件模式',
+                description: '上传原文和译文两个 DOCX 文件，输出修订版译文。',
+            },
+            single: {
+                label: '单文件模式',
+                description: '上传一个双语对照文件；DOCX 可生成修订版。',
+            },
+        };
+    }
+
+    singleFileInput.accept = singleFileExtensions.join(',');
+}
+
+function getSelectedMode() {
+    if (modeSingleRadio?.checked) return 'single';
+    return 'double';
+}
+
+function applyMode(mode) {
+    currentMode = mode === 'single' ? 'single' : 'double';
+    if (modeDoubleRadio) modeDoubleRadio.checked = currentMode === 'double';
+    if (modeSingleRadio) modeSingleRadio.checked = currentMode === 'single';
+
+    const singleMode = currentMode === 'single';
+    doubleFileFields.style.display = singleMode ? 'none' : 'block';
+    singleFileFields.style.display = singleMode ? 'block' : 'none';
+
+    const currentModeConfig = modeConfig[currentMode] || {};
+    const description = currentModeConfig.description || '';
+    modeHint.textContent = description;
+    pageSubtitle.textContent = singleMode
+        ? '上传一个双语对照文件，自动检查数值并在 DOCX 输出修订版'
+        : '上传原文与译文两个 DOCX，自动对比并批注修复';
+    uploadDesc.textContent = singleMode
+        ? `当前为单文件模式，支持 ${singleFileExtensions.join(' / ')}`
+        : '当前为双文件模式，仅支持同时上传原文和译文 DOCX';
+}
+
+function ensureLogPanel() {
+    streamLogWrap = document.getElementById('streamLogWrap');
+    streamLogEl = document.getElementById('streamLog');
+    if (streamLogWrap && streamLogEl) return;
+
+    const card = processingSection?.querySelector('.processing-card');
+    if (!card) return;
+
+    streamLogWrap = document.createElement('div');
+    streamLogWrap.id = 'streamLogWrap';
+    streamLogWrap.className = 'stream-log-wrap';
+    streamLogWrap.style.display = 'none';
+    streamLogWrap.innerHTML = [
+        '<div class="stream-log-head"><i class="fas fa-terminal"></i><span>后端日志</span></div>',
+        '<pre id="streamLog" class="stream-log"></pre>',
+    ].join('');
+    card.appendChild(streamLogWrap);
+    streamLogEl = document.getElementById('streamLog');
+}
 
 function ensureEtaHint() {
     if (etaHint && etaHint.isConnected) return etaHint;
@@ -28,7 +150,7 @@ function ensureEtaHint() {
     etaHint.className = 'eta-hint';
     etaHint.style.cssText = 'margin-top:10px;color:var(--text-secondary, var(--muted, #94a3b8));font-size:13px;';
     etaHint.textContent = '预计完成时间：计算中...';
-    const anchor = typeof processingText !== 'undefined' && processingText ? processingText : null;
+    const anchor = processingText || null;
     if (anchor?.parentNode) {
         anchor.parentNode.insertBefore(etaHint, anchor.nextSibling);
     } else {
@@ -66,14 +188,10 @@ function buildEtaText(task) {
     }
 
     const createdAt = parseServerTime(task.created_at);
-    if (Number.isNaN(createdAt.getTime())) {
-        return '预计完成时间：计算中...';
-    }
+    if (Number.isNaN(createdAt.getTime())) return '预计完成时间：计算中...';
 
     const elapsedMs = Date.now() - createdAt.getTime();
-    if (elapsedMs <= 0) {
-        return '预计完成时间：计算中...';
-    }
+    if (elapsedMs <= 0) return '预计完成时间：计算中...';
 
     const estimatedTotalMs = elapsedMs / (progress / 100);
     const estimatedFinishedAt = new Date(createdAt.getTime() + estimatedTotalMs);
@@ -104,122 +222,40 @@ function formatEtaDate(date) {
     const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
     return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
 }
-const MODEL_DISPLAY_NAMES = {
-    'gemini-3-flash-preview': '快速版V2',
-    'google/gemini-3-flash-preview': '快速版V2',
-    'gemini-3.1-pro-preview': '增强版V2',
-    'google/gemini-3.1-pro-preview': '增强版V2',
-    'Gemini 3.1 Pro Preview': '增强版V2',
-};
-
-let pollingTimer = null;
-let routeConfig = {};
-let modelConfig = {};
-let defaultRoute = 'openrouter';
-let defaultModel = 'gemini-3.1-pro-preview';
-let geminiRouteSelect = null;
-let streamLogWrap = null;
-let streamLogEl = null;
-
-init();
-
-async function init() {
-    ensureOptionControls();
-    ensureLogPanel();
-    ensureEtaHint();
-    bindEvents();
-    await loadConfig();
-}
-
-function bindEvents() {
-    btnRunCheck?.addEventListener('click', runNumberCheck);
-    btnReset?.addEventListener('click', resetPage);
-}
-
-function ensureOptionControls() {
-    geminiRouteSelect = null;
-}
-
-function ensureLogPanel() {
-    streamLogWrap = document.getElementById('streamLogWrap');
-    streamLogEl = document.getElementById('streamLog');
-    if (streamLogWrap && streamLogEl) return;
-
-    const card = processingSection?.querySelector('.processing-card');
-    if (!card) return;
-
-    streamLogWrap = document.createElement('div');
-    streamLogWrap.id = 'streamLogWrap';
-    streamLogWrap.className = 'stream-log-wrap';
-    streamLogWrap.style.display = 'none';
-    streamLogWrap.innerHTML = [
-        '<div class="stream-log-head"><i class="fas fa-terminal"></i><span>后端日志</span></div>',
-        '<pre id="streamLog" class="stream-log"></pre>',
-    ].join('');
-    card.appendChild(streamLogWrap);
-    streamLogEl = document.getElementById('streamLog');
-}
-
-async function loadConfig() {
-    try {
-        const resp = await fetch('/task/number-check/config');
-        if (!resp.ok) throw new Error(`配置加载失败: ${resp.status}`);
-        const data = await resp.json();
-        routeConfig = data.routes || {};
-        modelConfig = data.models || {};
-        defaultRoute = data.default_route || defaultRoute;
-        defaultModel = data.default_model || defaultModel;
-    } catch (error) {
-        console.error(error);
-        routeConfig = {
-            google: { label: '\u7ebf\u8def1' },
-            openrouter: { label: '\u7ebf\u8def2' },
-        };
-        modelConfig = {
-            'gemini-3.1-pro-preview': {
-                label: '增强版V2',
-                description: '推理更强，适合复杂编号和上下文判断场景。',
-            },
-        };
-    }
-
-    renderRouteOptions();
-    defaultModel = modelConfig['gemini-3.1-pro-preview']
-        ? 'gemini-3.1-pro-preview'
-        : (Object.keys(modelConfig)[0] || defaultModel);
-}
-
-function renderRouteOptions() {
-    if (!geminiRouteSelect) return;
-    geminiRouteSelect.innerHTML = '';
-    Object.entries(routeConfig).forEach(([value, info]) => {
-        geminiRouteSelect.add(new Option(info.label || value, value));
-    });
-    geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
-}
 
 async function runNumberCheck() {
-    const originalFile = originalFileInput.files[0];
-    const translatedFile = translatedFileInput.files[0];
+    const mode = getSelectedMode();
+    const formData = new FormData();
 
-    if (!originalFile || !translatedFile) {
-        alert('请同时选择原文和译文 .docx 文件');
-        return;
+    if (mode === 'single') {
+        const singleFile = singleFileInput.files[0];
+        if (!singleFile) {
+            alert('请选择一个双语对照文件');
+            return;
+        }
+        formData.append('single_file', singleFile);
+    } else {
+        const originalFile = originalFileInput.files[0];
+        const translatedFile = translatedFileInput.files[0];
+        if (!originalFile || !translatedFile) {
+            alert('请同时选择原文和译文 DOCX 文件');
+            return;
+        }
+        formData.append('original_file', originalFile);
+        formData.append('translated_file', translatedFile);
     }
 
     uploadSection.style.display = 'none';
+    resultSection.style.display = 'none';
     processingSection.style.display = 'block';
     clearLog();
     updateProgressUI(0, '正在提交任务...');
 
     try {
-        const formData = new FormData();
-        formData.append('original_file', originalFile);
-        formData.append('translated_file', translatedFile);
-
         const params = new URLSearchParams({
-            gemini_route: geminiRouteSelect?.value || defaultRoute,
-            model_name: 'gemini-3.1-pro-preview',
+            mode,
+            gemini_route: defaultRoute,
+            model_name: defaultModel,
         });
 
         const resp = await fetch(`/task/number-check?${params.toString()}`, {
@@ -250,7 +286,6 @@ function updateProgressUI(progress, message, details = [], task = null) {
     progressPercent.textContent = `${progress}%`;
     processingTitle.textContent = message || '数字专检处理中...';
     processingText.textContent = message || '正在处理...';
-
     updateEtaHint(task);
 
     if (details?.length) {
@@ -263,9 +298,7 @@ function updateProgressUI(progress, message, details = [], task = null) {
 async function pollTaskStatus(taskId) {
     try {
         const resp = await fetch(`/task/number-check/status/${taskId}`);
-        if (!resp.ok) {
-            throw new Error(`获取任务状态失败: ${resp.status}`);
-        }
+        if (!resp.ok) throw new Error(`获取任务状态失败: ${resp.status}`);
 
         const status = await resp.json();
         updateProgressUI(status.progress || 0, status.message || '正在处理...', status.details || [], status);
@@ -278,7 +311,6 @@ async function pollTaskStatus(taskId) {
             stopPolling();
             showFailure(`数字专检失败: ${status.error || '未知错误'}`, status.stream_log || '');
         }
-
         return status;
     } catch (error) {
         stopPolling();
@@ -323,10 +355,65 @@ function showFailure(message, logText = '') {
 
 function showResult(data) {
     processingSection.style.display = 'none';
+    uploadSection.style.display = 'none';
     resultSection.style.display = 'block';
 
+    const mode = data.mode || currentMode;
+    const reportCounts = data.report_counts || {};
     const stats = data.stats || {};
-    resultStats.innerHTML = `
+    const fixStats = data.fix_stats || {};
+    const totalIssues = Number(
+        stats.total_issues
+        ?? ((reportCounts.body_issues || 0) + (reportCounts.header_issues || 0) + (reportCounts.footer_issues || 0))
+    );
+
+    resultSummary.textContent = data.summary || (mode === 'single' ? '单文件检查已完成。' : '双文件检查已完成。');
+    resultStats.innerHTML = buildStatsHtml(mode, stats, fixStats, reportCounts, totalIssues, data.model_name || defaultModel);
+    resultGrid.innerHTML = buildResultHtml(data, mode);
+}
+
+function buildStatsHtml(mode, stats, fixStats, reportCounts, totalIssues, modelName) {
+    if (mode === 'single') {
+        const issueTotal = stats.total_issues ?? totalIssues;
+        const bodyIssues = stats.body_issues ?? reportCounts.body_issues ?? 0;
+        const headerIssues = stats.header_issues ?? reportCounts.header_issues ?? 0;
+        const footerIssues = stats.footer_issues ?? reportCounts.footer_issues ?? 0;
+        const fixSuccess = fixStats.success ?? 0;
+        return `
+            <div class="stat-card">
+                <i class="fas fa-list-check"></i>
+                <h3>${issueTotal}</h3>
+                <p>问题总数</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-file-lines"></i>
+                <h3>${bodyIssues}</h3>
+                <p>正文问题</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-heading"></i>
+                <h3>${headerIssues}</h3>
+                <p>页眉问题</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-shoe-prints"></i>
+                <h3>${footerIssues}</h3>
+                <p>页脚问题</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-wand-magic-sparkles"></i>
+                <h3>${fixSuccess}</h3>
+                <p>已修订条数</p>
+            </div>
+            <div class="stat-card">
+                <i class="fas fa-robot"></i>
+                <h3>${escapeHtml(getModelDisplayName(modelName))}</h3>
+                <p>模型</p>
+            </div>
+        `;
+    }
+
+    return `
         <div class="stat-card">
             <i class="fas fa-check"></i>
             <h3>${stats.success ?? 0}</h3>
@@ -343,23 +430,46 @@ function showResult(data) {
             <p>跳过</p>
         </div>
         <div class="stat-card">
+            <i class="fas fa-file-lines"></i>
+            <h3>${(reportCounts.body_issues || 0) + (reportCounts.header_issues || 0) + (reportCounts.footer_issues || 0)}</h3>
+            <p>报告问题数</p>
+        </div>
+        <div class="stat-card">
             <i class="fas fa-robot"></i>
-            <h3>${escapeHtml(getModelDisplayName(data.model_name || defaultModel))}</h3>
+            <h3>${escapeHtml(getModelDisplayName(modelName))}</h3>
             <p>模型</p>
         </div>
     `;
+}
+
+function buildResultHtml(data, mode) {
+    const links = [];
+    if (data.corrected_docx) {
+        links.push(
+            `<a href="/${data.corrected_docx}" download class="download-btn"><i class="fas fa-file-word"></i> ${mode === 'single' ? '下载修订版文档' : '下载修订版译文'}</a>`
+        );
+    }
 
     const reports = data.reports || {};
-    resultGrid.innerHTML = `
+    if (reports.body_json) {
+        links.push(`<a href="/${reports.body_json}" download class="download-btn"><i class="fas fa-file-code"></i> 正文报告 JSON</a>`);
+    }
+    if (reports.header_json) {
+        links.push(`<a href="/${reports.header_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页眉报告 JSON</a>`);
+    }
+    if (reports.footer_json) {
+        links.push(`<a href="/${reports.footer_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页脚报告 JSON</a>`);
+    }
+
+    if (!links.length) {
+        links.push('<div class="detail-item">当前没有可下载输出文件。</div>');
+    }
+
+    return `
         <div class="result-item">
             <h3>输出文件</h3>
             <div class="download-links">
-                <a href="/${data.corrected_docx}" download class="download-btn">
-                    <i class="fas fa-file-word"></i> 下载修复后译文
-                </a>
-                ${reports.body_json ? `<a href="/${reports.body_json}" download class="download-btn"><i class="fas fa-file-code"></i> 正文报告 JSON</a>` : ''}
-                ${reports.header_json ? `<a href="/${reports.header_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页眉报告 JSON</a>` : ''}
-                ${reports.footer_json ? `<a href="/${reports.footer_json}" download class="download-btn"><i class="fas fa-file-code"></i> 页脚报告 JSON</a>` : ''}
+                ${links.join('')}
             </div>
         </div>
     `;
@@ -368,6 +478,7 @@ function showResult(data) {
 function resetPage() {
     originalFileInput.value = '';
     translatedFileInput.value = '';
+    singleFileInput.value = '';
     uploadSection.style.display = 'block';
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';
@@ -376,6 +487,10 @@ function resetPage() {
     progressBar.style.setProperty('--progress', '0%');
     progressPercent.textContent = '0%';
     progressDetails.innerHTML = '';
+    resultSummary.textContent = '';
+    resultStats.innerHTML = '';
+    resultGrid.innerHTML = '';
+    applyMode(defaultMode);
 }
 
 async function safeReadError(response) {
@@ -397,5 +512,5 @@ function escapeHtml(value) {
 }
 
 function getModelDisplayName(name) {
-    return MODEL_DISPLAY_NAMES[name] || name;
+    return MODEL_DISPLAY_NAMES[name] || modelConfig[name]?.label || name;
 }

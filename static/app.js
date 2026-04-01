@@ -12,6 +12,11 @@ const fileStatus = document.getElementById('fileStatus');
 const btnRemove = document.getElementById('btnRemove');
 const btnProcess = document.getElementById('btnProcess');
 const btnNewTask = document.getElementById('btnNewTask');
+const btnCancelQueue = document.createElement('button'); // Dynamically created or query if exists
+btnCancelQueue.className = 'btn-secondary';
+btnCancelQueue.innerHTML = '<i class="fas fa-ban"></i> 中止排队任务';
+btnCancelQueue.style.marginLeft = '10px';
+btnCancelQueue.addEventListener('click', cancelBatchQueue);
 
 const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
@@ -51,7 +56,10 @@ btnRemove.addEventListener('click', (e) => {
     clearFiles();
 });
 btnProcess.addEventListener('click', processFiles);
-btnNewTask.addEventListener('click', resetApp);
+btnNewTask.addEventListener('click', () => {
+    clearFiles();
+    uploadSection.style.display = 'block';
+});
 document.getElementById('btnBatchNewTask')?.addEventListener('click', resetApp);
 
 // ========== 文件处理函数 ==========
@@ -88,6 +96,7 @@ function addFiles(newFiles) {
             continue;
         }
         if (!selectedFiles.some((f) => f.name === file.name && f.size === file.size)) {
+            file.cardSide = 'auto'; // initialize
             selectedFiles.push(file);
         }
     }
@@ -128,10 +137,19 @@ function renderFileList() {
             <i class="fas fa-image" style="color:var(--primary-color);"></i>
             <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(file.name)}</span>
             <span style="font-size:12px;color:var(--text-secondary);">${formatFileSize(file.size)}</span>
+            <select class="indiv-side" onchange="window._updateSide(${idx}, this.value)" style="border:1px solid rgba(88,112,138,0.2);border-radius:6px;padding:2px 4px;font-size:12px;background:#fff;outline:none;color:var(--text-primary)">
+                <option value="auto" ${file.cardSide === 'auto' ? 'selected' : ''}>自动判断</option>
+                <option value="front" ${file.cardSide === 'front' ? 'selected' : ''}>正面</option>
+                <option value="back" ${file.cardSide === 'back' ? 'selected' : ''}>背面</option>
+            </select>
             <button onclick="removeFileAt(${idx})" style="border:none;background:none;color:var(--danger-color);cursor:pointer;font-size:14px;padding:4px;" title="移除"><i class="fas fa-times"></i></button>
         </div>
     `).join('');
 }
+
+window._updateSide = function(idx, val) {
+    if (selectedFiles[idx]) selectedFiles[idx].cardSide = val;
+};
 
 function removeFileAt(idx) {
     selectedFiles.splice(idx, 1);
@@ -168,8 +186,7 @@ function buildParams() {
     const params = new URLSearchParams({
         from_lang: valueOrDefault(fromLang, 'zh'),
         to_lang: valueOrDefault(toLang, 'en'),
-        enable_visualization: checkedOrDefault(enableVisualization, true),
-        card_side: valueOrDefault(cardSide, 'front'),
+        enable_visualization: checkedOrDefault(enableVisualization, true)
     });
     return params;
 }
@@ -201,6 +218,7 @@ async function processSingleFile() {
         const formData = new FormData();
         formData.append('file', selectedFiles[0]);
         const params = buildParams();
+        params.append('card_side', selectedFiles[0].cardSide || 'auto');
 
         const submitResp = await fetch(`/task/run?${params}`, { method: 'POST', body: formData });
         if (!submitResp.ok) {
@@ -252,27 +270,65 @@ async function processBatchFiles() {
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
+    
+    // 注入取消按钮到批量页
+    const btnBatchNewTask = document.getElementById('btnBatchNewTask');
+    if (btnBatchNewTask && !document.body.contains(btnCancelQueue)) {
+        btnBatchNewTask.parentNode.insertBefore(btnCancelQueue, btnBatchNewTask.nextSibling);
+    }
+    btnCancelQueue.disabled = false;
+    btnCancelQueue.style.opacity = '1';
 
-    const params = buildParams();
-    const formData = new FormData();
-    selectedFiles.forEach((file) => formData.append('files', file));
+    const tasks = [];
+    const promises = selectedFiles.map(async (file) => {
+        const params = buildParams();
+        params.append('card_side', file.cardSide || 'auto');
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const resp = await fetch(`/task/run?${params}`, { method: 'POST', body: formData });
+            if (!resp.ok) {
+                let msg = `提交失败: ${resp.status}`;
+                try { const ed = await resp.json(); msg = ed?.detail?.error || ed?.detail || msg; } catch (_) {}
+                throw new Error(msg);
+            }
+            const data = await resp.json();
+            tasks.push({ filename: file.name, task_id: data.task_id, status: 'ACCEPTED' });
+        } catch (error) {
+            tasks.push({ filename: file.name, task_id: null, status: 'FAILED', error: error.message });
+        }
+    });
 
     try {
-        const resp = await fetch(`/task/run/batch?${params}`, { method: 'POST', body: formData });
-        if (!resp.ok) {
-            let msg = `提交失败: ${resp.status}`;
-            try { const ed = await resp.json(); msg = ed?.detail?.error || ed?.detail || msg; } catch (_) {}
-            throw new Error(msg);
-        }
-
-        const data = await resp.json();
-        const tasks = data.tasks || [];
+        await Promise.all(promises);
         renderBatchStats(tasks);
         startBatchPolling(tasks);
     } catch (error) {
-        alert(`批量提交失败: ${error.message}`);
+        alert(`批量处理初始化失败: ${error.message}`);
         resetApp();
     }
+}
+
+// 批量取消排队中的任务
+window.batchTasksStates = [];
+async function cancelBatchQueue() {
+    if (!confirm('确定中止剩余排队的批量任务吗？')) return;
+    btnCancelQueue.disabled = true;
+    btnCancelQueue.style.opacity = '0.5';
+    let cancelledCount = 0;
+    
+    const cancelPromises = window.batchTasksStates.map(async (task) => {
+        if (task.task_id && (task.status === 'queued' || task.status === 'running' || task.submitStatus === 'ACCEPTED')) {
+            try {
+                await fetch(`/task/run/status/${task.task_id}`) // poll to get exact status
+                const res = await fetch(`/task/${task.task_id}/cancel`, { method: 'POST' });
+                if (res.ok) cancelledCount++;
+            } catch (e) { console.error('cancel error', e) }
+        }
+    });
+    
+    await Promise.all(cancelPromises);
+    alert(`已向后端发送取消请求，取消了 ${cancelledCount} 个尚未完成的任务。`);
 }
 
 let batchPollingTimer = null;
@@ -290,7 +346,7 @@ function renderBatchStats(tasks) {
 
 function startBatchPolling(tasks) {
     stopBatchPolling();
-    const taskStates = tasks.map((t) => ({
+    window.batchTasksStates = tasks.map((t) => ({
         filename: t.filename,
         task_id: t.task_id,
         submitStatus: t.status,
@@ -301,11 +357,11 @@ function startBatchPolling(tasks) {
         result: null,
     }));
 
-    renderBatchTaskList(taskStates);
+    renderBatchTaskList(window.batchTasksStates);
 
     batchPollingTimer = setInterval(async () => {
         let allDone = true;
-        for (const task of taskStates) {
+        for (const task of window.batchTasksStates) {
             if (!task.task_id || task.status === 'done' || task.status === 'failed' || task.status === 'cancelled') continue;
             allDone = false;
             try {
@@ -325,9 +381,10 @@ function startBatchPolling(tasks) {
                 }
             } catch (_) {}
         }
-        renderBatchTaskList(taskStates);
-        if (allDone || taskStates.every((t) => ['done', 'failed', 'cancelled'].includes(t.status) || !t.task_id)) {
+        renderBatchTaskList(window.batchTasksStates);
+        if (allDone || window.batchTasksStates.every((t) => ['done', 'failed', 'cancelled'].includes(t.status) || !t.task_id)) {
             stopBatchPolling();
+            btnCancelQueue.style.display = 'none';
         }
     }, 2000);
 }

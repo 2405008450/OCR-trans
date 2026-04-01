@@ -167,11 +167,7 @@
         }
 
         .workspace {
-            padding: 26px;
-            border-radius: 30px;
-            border: 1px solid var(--line);
-            background: rgba(255, 255, 255, 0.05);
-            box-shadow: var(--shadow);
+            margin-bottom: 24px;
         }
 
         .workspace-head {
@@ -180,7 +176,7 @@
             align-items: end;
             gap: 18px;
             flex-wrap: wrap;
-            margin-bottom: 18px;
+            margin-bottom: 24px;
         }
 
         .workspace-head h2 {
@@ -305,13 +301,8 @@
                 padding-top: 18px;
             }
 
-            .workspace,
             .panel-card {
                 border-radius: 22px;
-            }
-
-            .workspace {
-                padding: 20px;
             }
 
             .panel-head {
@@ -527,5 +518,6 @@
         const initialTarget = normalizeTarget(new URLSearchParams(window.location.search).get('tab'));
         activatePanel(initialTarget, { updateUrl: false });
     </script>
+    <script src="/static/header.js"></script>
 </body>
 </html>

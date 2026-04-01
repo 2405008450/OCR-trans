@@ -160,10 +160,7 @@ def ocr_file(
         for i, page in enumerate(doc):
             print(f"\n🔄 正在处理第 {i + 1}/{total} 页...")
             if page_progress_callback:
-                try:
-                    page_progress_callback(i + 1, total)
-                except Exception:
-                    pass
+                page_progress_callback(i + 1, total)
             pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             img_b64 = base64.standard_b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode("utf-8")
             text = _ocr_single_image(img_b64, "image/jpeg", model, gemini_route=gemini_route)

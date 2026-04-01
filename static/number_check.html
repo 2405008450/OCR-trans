@@ -15,12 +15,11 @@
                 <i class="fas fa-check-double"></i>
                 <h1>数字专检</h1>
             </div>
-            <p class="subtitle">上传原文与译文 DOCX，自动对比并批注修复</p>
+            <p class="subtitle" id="pageSubtitle">支持双文件对比与单文件双语对照检查</p>
             <nav class="header-nav">
                 <a href="/"><i class="fas fa-home"></i> 首页</a>
                 <a href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
                 <span style="color:var(--line); margin:0 4px">|</span>
-            
             </nav>
         </header>
 
@@ -28,20 +27,49 @@
             <section class="upload-section" id="uploadSection">
                 <div class="upload-card">
                     <h2>上传待专检文档</h2>
-                    <p class="upload-desc">仅支持 .docx；需同时上传原文和译文</p>
+                    <p class="upload-desc" id="uploadDesc">请选择模式后上传文件</p>
 
                     <div class="options-panel">
                         <div class="option-group" style="grid-column: 1 / -1;">
-                            <label style="width: 100%;">
-                                <i class="fas fa-file-word"></i> 原文文件:
-                                <input type="file" id="originalFile" accept=".docx" style="margin-left: 8px;">
-                            </label>
+                            <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
+                                <span><i class="fas fa-sliders"></i> 检查模式:</span>
+                                <label style="display:flex; align-items:center; gap:6px;">
+                                    <input type="radio" name="checkMode" id="modeDouble" value="double">
+                                    <span>双文件模式</span>
+                                </label>
+                                <label style="display:flex; align-items:center; gap:6px;">
+                                    <input type="radio" name="checkMode" id="modeSingle" value="single">
+                                    <span>单文件模式</span>
+                                </label>
+                            </div>
+                            <div id="modeHint" style="margin-top:8px; color:var(--text-secondary, #64748b); font-size:13px;"></div>
                         </div>
-                        <div class="option-group" style="grid-column: 1 / -1;">
-                            <label style="width: 100%;">
-                                <i class="fas fa-file-word"></i> 译文文件:
-                                <input type="file" id="translatedFile" accept=".docx" style="margin-left: 8px;">
-                            </label>
+
+                        <div id="doubleFileFields" style="grid-column: 1 / -1;">
+                            <div class="option-group" style="grid-column: 1 / -1;">
+                                <label style="width: 100%;">
+                                    <i class="fas fa-file-word"></i> 原文文件:
+                                    <input type="file" id="originalFile" accept=".docx" style="margin-left: 8px;">
+                                </label>
+                            </div>
+                            <div class="option-group" style="grid-column: 1 / -1;">
+                                <label style="width: 100%;">
+                                    <i class="fas fa-file-word"></i> 译文文件:
+                                    <input type="file" id="translatedFile" accept=".docx" style="margin-left: 8px;">
+                                </label>
+                            </div>
+                        </div>
+
+                        <div id="singleFileFields" style="grid-column: 1 / -1; display:none;">
+                            <div class="option-group" style="grid-column: 1 / -1;">
+                                <label style="width: 100%;">
+                                    <i class="fas fa-file-lines"></i> 双语对照文件:
+                                    <input type="file" id="singleFile" accept=".docx,.pdf,.xlsx,.pptx" style="margin-left: 8px;">
+                                </label>
+                            </div>
+                            <div style="margin-top:8px; color:var(--text-secondary, #64748b); font-size:13px;">
+                                支持 `.docx / .pdf / .xlsx / .pptx`；其中 `.docx` 会额外输出修订版文档。
+                            </div>
                         </div>
                     </div>
 
@@ -50,7 +78,7 @@
                             <i class="fas fa-home"></i> 返回首页
                         </button>
                         <button class="btn-primary" id="btnRunCheck" style="max-width: 360px;">
-                            <i class="fas fa-play"></i>  开始处理
+                            <i class="fas fa-play"></i> 开始处理
                         </button>
                     </div>
                 </div>
@@ -62,7 +90,6 @@
                     <h2 id="processingTitle">数字专检处理中...</h2>
                     <p id="processingText">正在提取文本并调用对比引擎</p>
 
-                    <!-- 进度条区域 -->
                     <div class="progress-container" style="margin-top: 24px;">
                         <div class="progress-bar-wrapper">
                             <div class="progress-bar" id="progressBar">
@@ -83,11 +110,13 @@
                         <i class="fas fa-rotate-right"></i> 重新开始
                     </button>
                 </div>
+                <div id="resultSummary" style="margin-bottom:16px; color:var(--text-secondary, #64748b);"></div>
                 <div class="result-stats" id="resultStats"></div>
                 <div class="result-grid" id="resultGrid"></div>
             </section>
         </main>
     </div>
     <script src="/static/number_check.js"></script>
+    <script src="/static/header.js"></script>
 </body>
 </html>

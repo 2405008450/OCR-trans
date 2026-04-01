@@ -319,15 +319,15 @@
                 <div class="brand-mark"><i class="fas fa-wave-square"></i></div>
                 <div>文档处理工作台</div>
             </div>
-            <div class="topbar-note">统一入口：证件翻译、数字专检、对照记忆与文档预处理V2</div>
+            <div class="topbar-note">多功能集成平台：支持证件翻译、数字专检、多语对照及文档处理</div>
         </header>
 
         <section class="hero">
             <div class="hero-grid">
                 <div class="hero-copy">
-                    <div class="eyebrow"><i class="fas fa-sparkles"></i> AI Document Tools</div>
-                    <h1>一个入口，覆盖常用文档处理流程</h1>
-                    <p>把身份证 OCR、驾驶证、营业执照和通用证件翻译统一整合进“证件翻译”总模块，再和数字专检、多语对照记忆、文档预处理 V2 一起集中到同一个工作台。旧路由继续兼容，但新的系统入口统一指向整合后的页面。</p>
+                    <div class="eyebrow"><i class="fas fa-sparkles"></i> AI 文档处理引擎</div>
+                    <h1>一个入口，覆盖核心文档处理流程</h1>
+                    <p>系统已统一聚合各类证件识别模块至专属处理管线，并提供包含数字检查与多语对照在内的高级文本组件矩阵。主页提供直接锚定至各项重构界面的快速通道，同时兼容遗留路由。</p>
                     <div class="hero-actions">
                         <a class="action-btn primary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
                         <a class="action-btn secondary" href="/certificate-translation"><i class="fas fa-id-card"></i> 证件翻译</a>
@@ -336,10 +336,10 @@
                 <aside class="hero-panel">
                     <h2>当前可用模块</h2>
                     <div class="signal-list">
-                        <div class="signal-item"><div><strong>证件翻译总模块</strong><small>身份证 OCR、驾驶证、营业执照、通用证件四合一入口</small></div><span>MERGED</span></div>
-                        <div class="signal-item"><div><strong>证件翻译细分场景</strong><small>营业执照不再单独展示入口，统一放在证件翻译模块内按标签切换</small></div><span>TAB</span></div>
-                        <div class="signal-item"><div><strong>数字专检</strong><small>原文与译文数字一致性检查与修复</small></div><span>DOCX</span></div>
-                        <div class="signal-item"><div><strong>文档预处理V2</strong><small>PDF / 图片 OCR 后导出 DOCX，可选快速版 / 增强版</small></div><span>V2</span></div>
+                        <div class="signal-item"><div><strong>证件翻译总管线</strong><small>身份证 OCR、驾驶证、营业执照、通用证件四合一</small></div><span>聚合</span></div>
+                        <div class="signal-item"><div><strong>细分场景聚合</strong><small>通过多级页签分类呈现各商业证件处理入口</small></div><span>页签</span></div>
+                        <div class="signal-item"><div><strong>数字专检</strong><small>执行双语原文件间严密一致性核实与数据修复</small></div><span>双向对比</span></div>
+                        <div class="signal-item"><div><strong>文档处理组件</strong><small>集成高精视觉提取并转换为标准可交互文档</small></div><span>V2引擎</span></div>
                     </div>
                 </aside>
             </div>
@@ -349,7 +349,7 @@
             <div class="section-head">
                 <div>
                     <h2>处理模块</h2>
-                    <p>按你的工作流直接进入对应页面。</p>
+                    <p>请根据当前业务需求选择相应的核心处理模块。</p>
                 </div>
             </div>
             <div class="module-grid">
@@ -358,8 +358,8 @@
                         <div class="module-icon theme-amber"><i class="fas fa-id-card"></i></div>
                         <div class="tag">统一入口</div>
                     </div>
-                    <h3>证件翻译</h3>
-                    <p>把“身份证 OCR 翻译”“驾驶证翻译”“营业执照翻译”“通用证件翻译”收进同一个子页面，通过标签页切换，减少页面跳转和重复配置。</p>
+                    <h3>证件翻译聚合</h3>
+                    <p>汇集全类型证件翻译核心接口，运用页签实现模块间无缝切换，消除冗余的跳转与额外界面设置成本。</p>
                     <div class="module-meta">
                         <span class="meta-pill">OCR 图片回填</span>
                         <span class="meta-pill">驾驶证 Word</span>
@@ -369,13 +369,13 @@
                     <a class="module-link" href="/certificate-translation">进入模块 <i class="fas fa-arrow-right"></i></a>
                 </article>
 
-                <article class="module-card">
+                <article class="module-card featured">
                     <div class="module-top">
                         <div class="module-icon theme-cyan"><i class="fas fa-file-word"></i></div>
                         <div class="tag">预处理</div>
                     </div>
-                    <h3>文档预处理V2</h3>
-                    <p>上传 PDF 或图片，调用视觉模型 OCR 提取内容，再生成可下载的 Word 文档，适合扫描件、表格页和复杂版式场景。</p>
+                    <h3>文档预处理</h3>
+                    <p>执行原格式输入解析，通过底层视觉组件生成可复用的流式文档，适用于处理复杂图版或印刷件场景。</p>
                     <div class="module-meta">
                         <span class="meta-pill">PDF / 图片</span>
                         <span class="meta-pill">DOCX 输出</span>
@@ -427,5 +427,6 @@
             </div>
         </section>
     </div>
+    <script src="/static/header.js"></script>
 </body>
 </html>

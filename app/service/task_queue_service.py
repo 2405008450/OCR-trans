@@ -35,6 +35,8 @@ class TaskCancelledError(Exception):
 
 
 class TaskQueueService:
+    MAX_AUTO_REQUEUE_ATTEMPTS = 1
+
     def __init__(self):
         self._worker_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
@@ -64,7 +66,7 @@ class TaskQueueService:
         finally:
             self._worker_task = None
             if self._task_executor is not None:
-                self._task_executor.shutdown(wait=False, cancel_futures=False)
+                self._task_executor.shutdown(wait=False, cancel_futures=True)
                 self._task_executor = None
 
     async def submit_ocr_task(self, **kwargs) -> str:
@@ -78,11 +80,55 @@ class TaskQueueService:
             self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_number_check_task(self, *, original_file: UploadFile, translated_file: UploadFile, gemini_route: str, model_name: str) -> str:
-        reserved_task = self._create_db_task('number_check', f'{original_file.filename} | {translated_file.filename}', {'gemini_route': gemini_route, 'model_name': model_name}, {})
+    async def submit_number_check_task(
+        self,
+        *,
+        mode: str,
+        original_file: Optional[UploadFile],
+        translated_file: Optional[UploadFile],
+        single_file: Optional[UploadFile],
+        gemini_route: str,
+        model_name: str,
+    ) -> str:
+        if mode == 'single' and single_file:
+            display_name = single_file.filename or 'single.docx'
+        else:
+            original_name = original_file.filename if original_file else 'original.docx'
+            translated_name = translated_file.filename if translated_file else 'translated.docx'
+            display_name = f'{original_name} | {translated_name}'
+        reserved_task = self._create_db_task(
+            'number_check',
+            display_name,
+            {'mode': mode, 'gemini_route': gemini_route, 'model_name': model_name},
+            {},
+        )
         try:
             upload_dir = Path(settings.UPLOAD_DIR) / 'number_check' / reserved_task.display_no
             upload_dir.mkdir(parents=True, exist_ok=True)
+            if mode == 'single':
+                if single_file is None:
+                    raise ValueError('single_file is required for single mode')
+                single_ext = Path(single_file.filename or 'single.docx').suffix or '.docx'
+                single_path = upload_dir / build_storage_filename(
+                    reserved_task.display_no,
+                    single_file.filename,
+                    reserved_task.task_id,
+                    role='single',
+                    ext=single_ext,
+                )
+                single_path.write_bytes(await single_file.read())
+                self._update_task_input_files(
+                    reserved_task.task_id,
+                    {
+                        'single_path': str(single_path).replace('\\', '/'),
+                        'single_filename': single_file.filename,
+                    },
+                )
+                return reserved_task.task_id
+
+            if original_file is None or translated_file is None:
+                raise ValueError('original_file and translated_file are required for double mode')
+
             original_ext = Path(original_file.filename or 'original.docx').suffix or '.docx'
             translated_ext = Path(translated_file.filename or 'translated.docx').suffix or '.docx'
             original_path = upload_dir / build_storage_filename(reserved_task.display_no, original_file.filename, reserved_task.task_id, role='original', ext=original_ext)
@@ -152,8 +198,26 @@ class TaskQueueService:
             self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_business_licence_task(self, *, file: UploadFile, model: str, gemini_route: str) -> str:
-        reserved_task = self._create_db_task('business_licence', file.filename or 'input.bin', {'model': model, 'gemini_route': gemini_route}, {})
+    async def submit_business_licence_task(
+        self,
+        *,
+        file: UploadFile,
+        model: str,
+        gemini_route: str,
+        parsed_data: Optional[Dict[str, Any]] = None,
+        company_name_override: Optional[str] = None,
+    ) -> str:
+        reserved_task = self._create_db_task(
+            'business_licence',
+            file.filename or 'input.bin',
+            {
+                'model': model,
+                'gemini_route': gemini_route,
+                'parsed_data': parsed_data,
+                'company_name_override': company_name_override,
+            },
+            {},
+        )
         try:
             input_path, original_filename = await self._save_single_upload(file, 'business_licence', reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
@@ -246,7 +310,10 @@ class TaskQueueService:
 
     def _requeue_interrupted_tasks(self):
         with SessionLocal() as db:
-            task_repo.requeue_running_tasks(db)
+            task_repo.requeue_running_tasks(
+                db,
+                max_retry_count=self.MAX_AUTO_REQUEUE_ATTEMPTS,
+            )
 
     async def _worker_loop(self):
         while not self._stop_event.is_set():
@@ -308,6 +375,10 @@ class TaskQueueService:
                 raise ValueError(f'unsupported task type: {task_type}')
             output_files = self._extract_output_files(task_type, result, output_path, filename)
             with SessionLocal() as db:
+                if task_repo.is_cancel_requested(db, task_id):
+                    task_repo.mark_cancelled(db, task_id)
+                    self._append_task_log(task_id, '[cancel] user cancelled before completion')
+                    raise TaskCancelledError('user cancelled')
                 task_repo.complete_task(db, task_id, result_json=json.dumps(result, ensure_ascii=False) if result is not None else None, output_path=output_path, output_files_json=json.dumps(output_files, ensure_ascii=False) if output_files else None)
             self._append_task_log(task_id, '[done] completed')
         except TaskCancelledError:
@@ -322,9 +393,36 @@ class TaskQueueService:
 
     async def _execute_number_check(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'number check started')
-        original_upload = UploadFile(filename=input_files.get('original_filename') or 'original.docx', file=io.BytesIO(Path(input_files['original_path']).read_bytes()))
-        translated_upload = UploadFile(filename=input_files.get('translated_filename') or 'translated.docx', file=io.BytesIO(Path(input_files['translated_path']).read_bytes()))
-        job = asyncio.create_task(run_number_check_task(original_upload, translated_upload, task_id=task_id, display_no=display_no, gemini_route=params.get('gemini_route', 'openrouter'), model_name=params.get('model_name', 'gemini-3.1-pro-preview')))
+        mode = params.get('mode', 'double')
+        if mode == 'single':
+            single_upload = UploadFile(
+                filename=input_files.get('single_filename') or 'single.docx',
+                file=io.BytesIO(Path(input_files['single_path']).read_bytes()),
+            )
+            job = asyncio.create_task(
+                run_number_check_task(
+                    single_file=single_upload,
+                    mode=mode,
+                    task_id=task_id,
+                    display_no=display_no,
+                    gemini_route=params.get('gemini_route', 'openrouter'),
+                    model_name=params.get('model_name', 'gemini-3.1-pro-preview'),
+                )
+            )
+        else:
+            original_upload = UploadFile(filename=input_files.get('original_filename') or 'original.docx', file=io.BytesIO(Path(input_files['original_path']).read_bytes()))
+            translated_upload = UploadFile(filename=input_files.get('translated_filename') or 'translated.docx', file=io.BytesIO(Path(input_files['translated_path']).read_bytes()))
+            job = asyncio.create_task(
+                run_number_check_task(
+                    original_file=original_upload,
+                    translated_file=translated_upload,
+                    mode=mode,
+                    task_id=task_id,
+                    display_no=display_no,
+                    gemini_route=params.get('gemini_route', 'openrouter'),
+                    model_name=params.get('model_name', 'gemini-3.1-pro-preview'),
+                )
+            )
         await self._mirror_progress(task_id, job, lambda: get_number_check_progress(task_id), update)
         return await job
 
@@ -377,6 +475,8 @@ class TaskQueueService:
             original_filename=input_files.get('original_filename') or 'business_licence.png',
             model=params.get('model', BUSINESS_LICENCE_DEFAULT_MODEL),
             gemini_route=params.get('gemini_route', BUSINESS_LICENCE_DEFAULT_ROUTE),
+            parsed_data=params.get('parsed_data'),
+            company_name_override=params.get('company_name_override'),
             progress_callback=update,
             executor=self._task_executor,
         )
@@ -413,9 +513,11 @@ class TaskQueueService:
                         files.append({'name': friendly('visualization', item['visualization_image']), 'path': item['visualization_image'], 'type': 'output'})
         elif task_type == 'number_check':
             add_result('corrected_docx', 'corrected_docx')
-            for item in result.get('json_results', []):
-                if isinstance(item, dict) and item.get('path'):
-                    files.append({'name': friendly('report', item['path']), 'path': item['path'], 'type': 'report'})
+            reports = result.get('reports', {})
+            if isinstance(reports, dict):
+                for label, path in reports.items():
+                    if isinstance(path, str) and path:
+                        files.append({'name': friendly(label, path), 'path': path, 'type': 'report'})
         elif task_type == 'zhongfanyi':
             add_result('corrected_docx', 'corrected_docx')
             add_result('report_path', 'report')
