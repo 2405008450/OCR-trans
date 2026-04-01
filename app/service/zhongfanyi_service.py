@@ -1,38 +1,63 @@
 # -*- coding: utf-8 -*-
 """
-中翻译专检：对接 专检/zhongfanyi/main 的 run_full_pipeline，支持原文/译文/可选规则文件上传。
+中翻译专检：对接 专检/中翻译/main.py，支持双文件模式、单文件双语模式与 Excel 报告导出。
 """
+import importlib.machinery
 import os
-import sys
 import shutil
+import sys
 import threading
 import types
-import importlib.machinery
-from pathlib import Path
-from typing import Dict, Any, Optional
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from app.core.config import settings
-from app.service.gemini_service import ensure_gemini_route_configured
+from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
 
+
+ZHONGFANYI_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
+ZHONGFANYI_MODE_DOUBLE = "double"
+ZHONGFANYI_MODE_SINGLE = "single"
+ZHONGFANYI_SINGLE_FILE_EXTENSIONS = [".docx", ".doc", ".pdf", ".xlsx", ".xls", ".pptx"]
+ZHONGFANYI_DOUBLE_FILE_EXTENSIONS = [".docx", ".doc", ".pdf", ".xlsx", ".xls", ".pptx"]
+SECTION_DIR_NAMES = {"正文": "zhengwen", "页眉": "yemei", "页脚": "yejiao"}
+SECTION_COUNT_KEYS = {"正文": "body_issues", "页眉": "header_issues", "页脚": "footer_issues"}
 
 _task_progress: Dict[str, Dict[str, Any]] = {}
 _specialist_import_lock = threading.Lock()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ZHONGFANYI_PARENT_ROOT = REPO_ROOT / "专检"
-ZHONGFANYI_ROOT = ZHONGFANYI_PARENT_ROOT / "zhongfanyi"
-ZHONGFANYI_LLM_ROOT = ZHONGFANYI_ROOT / "llm"
+ZHONGFANYI_ROOT = REPO_ROOT / "专检" / "中翻译"
+_ALIASED_NAMESPACE_PACKAGES = (
+    "llm",
+    "llm.llm_project",
+    "zhongfanyi",
+    "zhongfanyi.llm",
+    "zhongfanyi.llm.llm_project",
+)
+_LOCAL_PACKAGE_NAMES = (
+    "parsers",
+    "replace",
+    "backup_copy",
+    "llm_check",
+    "note",
+    "utils",
+    "divide",
+    "match",
+)
 
 
-def _zhongfanyi_root() -> Path:
-    """专检 目录（含 zhongfanyi 包）"""
-    return ZHONGFANYI_PARENT_ROOT
+def get_zhongfanyi_default_mode() -> str:
+    return ZHONGFANYI_MODE_DOUBLE
 
 
-def _zhongfanyi_cwd() -> Path:
-    """专检/zhongfanyi 目录（含 llm 包，main.py 里 from llm.xxx 依赖此路径）"""
-    return ZHONGFANYI_ROOT
+def get_zhongfanyi_single_file_extensions() -> list[str]:
+    return ZHONGFANYI_SINGLE_FILE_EXTENSIONS
+
+
+def get_zhongfanyi_double_file_extensions() -> list[str]:
+    return ZHONGFANYI_DOUBLE_FILE_EXTENSIONS
 
 
 def _register_namespace_package(name: str, package_root: Path) -> None:
@@ -76,26 +101,23 @@ def _clear_stale_namespace_modules(name: str, expected_root: Path) -> None:
 
 def _prepare_zhongfanyi_import_path() -> None:
     if not ZHONGFANYI_ROOT.exists():
-        raise FileNotFoundError(f"未找到中翻译专检目录: {ZHONGFANYI_ROOT}")
-    if not ZHONGFANYI_LLM_ROOT.exists():
-        raise FileNotFoundError(f"未找到中翻译专检 llm 目录: {ZHONGFANYI_LLM_ROOT}")
+        raise FileNotFoundError(f"未找到新版中翻译目录: {ZHONGFANYI_ROOT}")
 
-    _clear_stale_namespace_modules("llm", ZHONGFANYI_ROOT)
-    _clear_stale_namespace_modules("zhongfanyi", ZHONGFANYI_ROOT)
-    _register_namespace_package("llm", ZHONGFANYI_LLM_ROOT)
-    _register_namespace_package("zhongfanyi", ZHONGFANYI_ROOT)
+    for module_name in _LOCAL_PACKAGE_NAMES:
+        _clear_stale_namespace_modules(module_name, ZHONGFANYI_ROOT)
+    for alias in _ALIASED_NAMESPACE_PACKAGES:
+        _clear_stale_namespace_modules(alias, ZHONGFANYI_ROOT)
+        _register_namespace_package(alias, ZHONGFANYI_ROOT)
 
-    zhongfanyi_root_str = str(ZHONGFANYI_ROOT)
-    parent_root_str = str(ZHONGFANYI_PARENT_ROOT)
-    if zhongfanyi_root_str not in sys.path:
-        sys.path.insert(0, zhongfanyi_root_str)
-    if parent_root_str not in sys.path:
-        sys.path.insert(0, parent_root_str)
-
-
-def _prepare_zhongfanyi_path() -> None:
-    """把 专检 和 专检/zhongfanyi 加入 sys.path，使可导入 zhongfanyi 且 main 内可导入 llm"""
-    _prepare_zhongfanyi_import_path()
+    root_str = str(ZHONGFANYI_ROOT)
+    parent_str = str(ZHONGFANYI_ROOT.parent)
+    repo_root_str = str(REPO_ROOT)
+    if root_str not in sys.path:
+        sys.path.insert(0, root_str)
+    if parent_str not in sys.path:
+        sys.path.insert(0, parent_str)
+    if repo_root_str not in sys.path:
+        sys.path.insert(0, repo_root_str)
 
 
 def _init_task(task_id: str) -> None:
@@ -150,80 +172,172 @@ def get_task_progress(task_id: str) -> Optional[Dict[str, Any]]:
     return _task_progress.get(task_id)
 
 
-def _normalize_path(p: str) -> str:
-    return p.replace("\\", "/") if p else p
+def _output_web_path(file_path: str | Path) -> str:
+    resolved = Path(file_path).resolve()
+    output_root = Path(settings.OUTPUT_DIR).resolve()
+    relative = resolved.relative_to(output_root)
+    normalized_relative = str(relative).replace("\\", "/")
+    return f"outputs/{normalized_relative}"
 
 
-def run_zhongfanyi_task(
-    original_path: str,
-    translated_path: str,
-    task_id: str,
-    display_no: Optional[str] = None,
-    use_ai_rule: bool = False,
-    gemini_route: str = "openrouter",
-    ai_rule_file_path: Optional[str] = None,
-    session_rule_text: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    在指定输出目录下执行中翻译专检完整流程（对比 + 修复），结果复制到 output_dir 供下载。
-    """
-    folder_name = display_no or task_id
-    gemini_route = ensure_gemini_route_configured(gemini_route)
-    output_dir = Path(settings.OUTPUT_DIR) / "zhongfanyi" / folder_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_base = str(output_dir)
+def _normalize_report_count(path: Optional[str]) -> int:
+    if not path:
+        return 0
+    try:
+        from parsers.json.clean_json import extract_and_parse
 
-    with _specialist_import_lock:
-        _prepare_zhongfanyi_path()
-    # 注入 API 配置到环境变量，供 zhongfanyi 子模块（rule_generation/check）读取，避免后台线程中 .env 未生效
+        return len(extract_and_parse(path))
+    except Exception:
+        return 0
+
+
+def _inject_runtime_env(gemini_route: str) -> None:
     if settings.GOOGLE_API_KEY:
         os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
     if settings.OPENROUTER_API_KEY:
         os.environ["OPENROUTER_API_KEY"] = settings.OPENROUTER_API_KEY
         os.environ["OPENAI_API_KEY"] = settings.OPENROUTER_API_KEY
+        os.environ["API_KEY"] = settings.OPENROUTER_API_KEY
     if settings.OPENROUTER_BASE_URL:
         os.environ["OPENROUTER_BASE_URL"] = settings.OPENROUTER_BASE_URL
+        os.environ["OPENAI_BASE_URL"] = settings.OPENROUTER_BASE_URL
+        os.environ["BASE_URL"] = settings.OPENROUTER_BASE_URL
     os.environ["GEMINI_ROUTE"] = gemini_route
+
+
+def _collect_reports(report_paths: Optional[Dict[str, str]], excel_paths: Optional[Dict[str, str]]) -> tuple[Dict[str, str], Dict[str, int]]:
+    reports: Dict[str, str] = {}
+    report_counts: Dict[str, int] = {value: 0 for value in SECTION_COUNT_KEYS.values()}
+
+    for section_name, path in (report_paths or {}).items():
+        if not path or not Path(path).exists():
+            continue
+        reports[f"{section_name}_json"] = _output_web_path(path)
+        report_counts[SECTION_COUNT_KEYS.get(section_name, section_name)] = _normalize_report_count(path)
+
+    for section_name, path in (excel_paths or {}).items():
+        if not path or not Path(path).exists():
+            continue
+        reports[f"{section_name}_excel"] = _output_web_path(path)
+
+    return reports, report_counts
+
+
+def _copy_final_output(result_path: Optional[str], output_dir: Path) -> tuple[Optional[str], Dict[str, str]]:
+    if not result_path:
+        return None, {}
+
+    source = Path(result_path)
+    if not source.exists():
+        return None, {}
+
+    suffix = source.suffix.lower()
+    target_name = {
+        ".docx": "corrected.docx",
+        ".doc": "corrected.doc",
+        ".pdf": "annotated.pdf",
+        ".xlsx": "annotated.xlsx",
+        ".xls": "annotated.xls",
+        ".pptx": "annotated.pptx",
+    }.get(suffix, source.name)
+    target = output_dir / target_name
+
+    try:
+        same_file = source.resolve() == target.resolve()
+    except Exception:
+        same_file = str(source) == str(target)
+    if not same_file:
+        shutil.copy2(source, target)
+
+    web_path = _output_web_path(target)
+    payload = {"output_file": web_path}
+    if suffix in {".docx", ".doc"}:
+        payload["corrected_docx"] = web_path
+    elif suffix == ".pdf":
+        payload["annotated_pdf"] = web_path
+    elif suffix in {".xlsx", ".xls"}:
+        payload["annotated_excel"] = web_path
+    elif suffix == ".pptx":
+        payload["annotated_pptx"] = web_path
+    return web_path, payload
+
+
+def run_zhongfanyi_task(
+    *,
+    task_id: str,
+    display_no: Optional[str] = None,
+    mode: str = ZHONGFANYI_MODE_DOUBLE,
+    original_path: Optional[str] = None,
+    translated_path: Optional[str] = None,
+    single_path: Optional[str] = None,
+    use_ai_rule: bool = False,
+    gemini_route: str = ZHONGFANYI_DEFAULT_GEMINI_ROUTE,
+    ai_rule_file_path: Optional[str] = None,
+    session_rule_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    执行新版中翻译专检流程。
+    """
+    _init_task(task_id)
+    normalized_mode = (mode or ZHONGFANYI_MODE_DOUBLE).strip().lower()
+    if normalized_mode not in {ZHONGFANYI_MODE_DOUBLE, ZHONGFANYI_MODE_SINGLE}:
+        _complete_task(task_id, error=f"不支持的中翻译模式: {mode}")
+        return _task_progress[task_id]
+
+    gemini_route = ensure_gemini_route_configured(ZHONGFANYI_DEFAULT_GEMINI_ROUTE)
+    folder_name = display_no or task_id
+    output_dir = Path(settings.OUTPUT_DIR) / "zhongfanyi" / folder_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     with _specialist_import_lock:
+        _prepare_zhongfanyi_import_path()
+        _inject_runtime_env(gemini_route)
         from zhongfanyi.main import run_full_pipeline
 
-    _update_task(task_id, "正在提取与对比原文/译文...", 20)
-    result_docx_path, report_paths, stats = run_full_pipeline(
-        original_path,
-        translated_path,
-        output_base,
+    input_path = single_path if normalized_mode == ZHONGFANYI_MODE_SINGLE else original_path
+    if not input_path:
+        _complete_task(task_id, error="缺少输入文件")
+        return _task_progress[task_id]
+
+    _update_task(task_id, "正在提取文本并执行中翻译专检...", 20)
+    result_path, report_paths, excel_paths, stats = run_full_pipeline(
+        input_path,
+        translated_path or input_path,
+        str(output_dir),
         use_ai_rule=use_ai_rule,
+        bilingual=normalized_mode == ZHONGFANYI_MODE_SINGLE,
         ai_rule_file_path=ai_rule_file_path or None,
         session_rule_text=session_rule_text,
     )
 
-    if result_docx_path is None:
+    if report_paths is None or excel_paths is None or stats is None:
         _complete_task(task_id, error="对比或规则加载失败")
         return _task_progress[task_id]
 
-    _update_task(task_id, "正在保存结果...", 90)
-    # 复制修复后的 docx 到统一输出目录，便于前端下载
-    final_docx = output_dir / "corrected.docx"
-    shutil.copy2(result_docx_path, final_docx)
+    _update_task(task_id, "正在整理输出文件...", 90)
+    output_web_path, output_payload = _copy_final_output(result_path, output_dir)
+    reports, report_counts = _collect_reports(report_paths, excel_paths)
+    total_issues = sum(report_counts.values())
 
-    # 报告 JSON 在 output_dir 下的 zhengwen/yemei/yejiao/output_json 中，转为前端可下载的相对路径
-    report_dir_names = {"正文": "zhengwen", "页眉": "yemei", "页脚": "yejiao"}
-    reports = {}
-    if report_paths:
-        for name, path in report_paths.items():
-            if path and os.path.exists(path):
-                subdir = report_dir_names.get(name, name)
-                fname = os.path.basename(path)
-                reports[f"{name}_json"] = f"outputs/zhongfanyi/{folder_name}/{subdir}/output_json/{fname}"
-
-    # 前端下载使用相对站点的路径，如 /outputs/zhongfanyi/{task_id}/corrected.docx
-    corrected_web_path = f"outputs/zhongfanyi/{folder_name}/corrected.docx"
     result = {
         "task_id": task_id,
+        "mode": normalized_mode,
         "gemini_route": gemini_route,
-        "corrected_docx": corrected_web_path,
         "reports": reports,
+        "report_counts": report_counts,
         "stats": stats or {"success": 0, "failed": 0, "skipped": 0},
+        "summary": "单文件模式已完成中翻译专检。" if normalized_mode == ZHONGFANYI_MODE_SINGLE else "双文件模式已完成中翻译专检。",
+        "total_issues": total_issues,
     }
+    if normalized_mode == ZHONGFANYI_MODE_SINGLE and single_path:
+        result["single_filename"] = Path(single_path).name
+    if normalized_mode == ZHONGFANYI_MODE_DOUBLE:
+        if original_path:
+            result["original_filename"] = Path(original_path).name
+        if translated_path:
+            result["translated_filename"] = Path(translated_path).name
+    if output_web_path:
+        result.update(output_payload)
+
     _complete_task(task_id, result=result)
     return result

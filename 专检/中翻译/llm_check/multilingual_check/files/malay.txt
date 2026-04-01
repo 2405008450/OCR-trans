@@ -1,0 +1,18 @@
+小数点（.）与千分符（,）与英文相同。
+标点符号：
+. 句号
+, 逗号
+; 分号
+: 冒号
+! 感叹号
+? 问号
+… 省略号（省略号前无需空格）
+/ 斜线号
+“”/‘’ 引号
+圆括号：( )
+括号后的句点的位置取决于句点属于哪一部分，若句点属于括号内句子的一部分，
+则置于括号内，反之则置于括号外
+Untuk meneruskan, klik "Seterusnya" (anda mungkin perlu menentukan kunci
+produk).
+Untuk meneruskan, klik Seterusnya. (Anda mungkin perlu menentukan kunci
+produk.)

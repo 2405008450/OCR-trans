@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY", "")
     GEMINI_DEFAULT_ROUTE: str = os.getenv("GEMINI_DEFAULT_ROUTE", "google")
     GEMINI_ENABLE_OPENROUTER_FALLBACK: str = os.getenv("GEMINI_ENABLE_OPENROUTER_FALLBACK", "False")
+    GEMINI_TIMEOUT_SECONDS: float = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
 
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", "gen-lang-client-0128671098")
     VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "global")

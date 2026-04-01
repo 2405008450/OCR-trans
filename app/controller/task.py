@@ -20,7 +20,12 @@ from app.service.business_licence_service import (
     get_business_licence_company_name,
     get_business_licence_models,
 )
-from app.service.doc_translate_service import get_doc_translate_models, get_supported_languages
+from app.service.doc_translate_service import (
+    DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
+    DOC_TRANSLATE_DEFAULT_MODEL,
+    get_doc_translate_models,
+    get_supported_languages,
+)
 from app.service.drivers_license_service import get_drivers_license_config
 from app.service.gemini_service import get_gemini_routes
 from app.service.number_check_service import (
@@ -37,7 +42,7 @@ from app.service.task_queue_service import task_queue_service
 
 router = APIRouter(prefix="/task", tags=["Task"])
 BASE_DIR = Path(__file__).resolve().parents[2]
-ZHONGFANYI_RULE_DIR = BASE_DIR / "\u4e13\u68c0" / "zhongfanyi" / "llm" / "llm_project" / "rule"
+ZHONGFANYI_RULE_DIR = BASE_DIR / "\u4e13\u68c0" / "\u4e2d\u7ffb\u8bd1" / "rule"
 
 
 class RuleUpdateBody(BaseModel):
@@ -237,19 +242,67 @@ async def get_number_check_status(task_id: str):
 
 
 @router.post("/zhongfanyi")
-async def run_zhongfanyi(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), use_ai_rule: bool = Query(False), gemini_route: str = Query("openrouter"), rule_file: Optional[UploadFile] = File(None), session_rule_content: Optional[str] = Form(None)):
-    allowed = {".docx", ".doc", ".pdf"}
-    if os.path.splitext(original_file.filename or "")[1].lower() not in allowed:
-        raise HTTPException(status_code=400, detail="Unsupported original file format")
-    if os.path.splitext(translated_file.filename or "")[1].lower() not in allowed:
-        raise HTTPException(status_code=400, detail="Unsupported translated file format")
-    task_id = await task_queue_service.submit_zhongfanyi_task(original_file=original_file, translated_file=translated_file, use_ai_rule=use_ai_rule, gemini_route=gemini_route, rule_file=rule_file, session_rule_content=session_rule_content)
+async def run_zhongfanyi(
+    original_file: Optional[UploadFile] = File(None),
+    translated_file: Optional[UploadFile] = File(None),
+    single_file: Optional[UploadFile] = File(None),
+    mode: Optional[str] = Query(None),
+    use_ai_rule: bool = Query(False),
+    gemini_route: str = Query("openrouter"),
+    rule_file: Optional[UploadFile] = File(None),
+    session_rule_content: Optional[str] = Form(None),
+):
+    resolved_mode = (mode or zf_service.get_zhongfanyi_default_mode()).strip().lower()
+    allowed_double = set(zf_service.get_zhongfanyi_double_file_extensions())
+    allowed_single = set(zf_service.get_zhongfanyi_single_file_extensions())
+
+    if resolved_mode == zf_service.ZHONGFANYI_MODE_SINGLE:
+        if single_file is None:
+            raise HTTPException(status_code=400, detail="单文件模式需要上传 single_file")
+        if os.path.splitext(single_file.filename or "")[1].lower() not in allowed_single:
+            raise HTTPException(status_code=400, detail="Unsupported single file format")
+    elif resolved_mode == zf_service.ZHONGFANYI_MODE_DOUBLE:
+        if original_file is None or translated_file is None:
+            raise HTTPException(status_code=400, detail="双文件模式需要同时上传 original_file 和 translated_file")
+        if os.path.splitext(original_file.filename or "")[1].lower() not in allowed_double:
+            raise HTTPException(status_code=400, detail="Unsupported original file format")
+        if os.path.splitext(translated_file.filename or "")[1].lower() not in allowed_double:
+            raise HTTPException(status_code=400, detail="Unsupported translated file format")
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的中翻译模式: {mode}")
+
+    task_id = await task_queue_service.submit_zhongfanyi_task(
+        mode=resolved_mode,
+        original_file=original_file,
+        translated_file=translated_file,
+        single_file=single_file,
+        use_ai_rule=use_ai_rule,
+        gemini_route=gemini_route,
+        rule_file=rule_file,
+        session_rule_content=session_rule_content,
+    )
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
 
 @router.get("/zhongfanyi/config")
 async def get_zhongfanyi_config():
-    return {"routes": get_gemini_routes(), "default_route": "openrouter"}
+    return {
+        "routes": get_gemini_routes(),
+        "default_route": "openrouter",
+        "default_mode": zf_service.get_zhongfanyi_default_mode(),
+        "modes": {
+            zf_service.ZHONGFANYI_MODE_DOUBLE: {
+                "label": "双文件模式",
+                "description": "上传原文和译文两个文件，支持 Word / PDF / Excel / PPTX。",
+            },
+            zf_service.ZHONGFANYI_MODE_SINGLE: {
+                "label": "单文件模式",
+                "description": "上传一个双语对照文件，自动检查并导出 JSON / Excel 报告。",
+            },
+        },
+        "single_file_extensions": zf_service.get_zhongfanyi_single_file_extensions(),
+        "double_file_extensions": zf_service.get_zhongfanyi_double_file_extensions(),
+    }
 
 
 @router.get("/zhongfanyi/status/{task_id}")
@@ -468,11 +521,11 @@ async def get_business_licence_status(task_id: str):
 
 @router.get("/doc-translate/config")
 async def get_doc_translate_config():
-    return {"models": get_doc_translate_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "google", "languages": get_supported_languages()}
+    return {"models": get_doc_translate_models(), "default_model": DOC_TRANSLATE_DEFAULT_MODEL, "routes": get_gemini_routes(), "default_route": DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE, "languages": get_supported_languages()}
 
 
 @router.post("/doc-translate")
-async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
+async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE)):
     allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
     if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
@@ -481,7 +534,7 @@ async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = 
 
 
 @router.post("/doc-translate/batch")
-async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
+async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE)):
     allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")

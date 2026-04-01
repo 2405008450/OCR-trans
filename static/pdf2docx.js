@@ -3,7 +3,7 @@ let pollingTimer = null;
 let modelConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
-let defaultRoute = 'google';
+let defaultRoute = 'openrouter';
 
 const MODEL_DISPLAY_NAMES = {
     'gemini-3.1-flash-lite-preview': '极速版V2',

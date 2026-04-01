@@ -4,11 +4,11 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.config import settings
-from app.service.gemini_service import GEMINI_ROUTE_GOOGLE, ensure_gemini_route_configured
+from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
-PDF2DOCX_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_GOOGLE
+PDF2DOCX_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
 PDF2DOCX_DEFAULT_MODEL = "google/gemini-3-flash-preview"
 
 PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {

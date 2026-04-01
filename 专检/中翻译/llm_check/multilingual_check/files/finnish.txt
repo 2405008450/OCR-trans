@@ -1,0 +1,19 @@
+小数点是逗号，千分符是小数点。
+标点符号：
+. 句号
+, 逗号
+; 分号
+: 冒号
+! 感叹号
+? 问号
+… 省略号
+/ 斜线号
+”...” 引号
+百分号：%
+在芬兰语中，百分号与数字之前需空格。
+圆括号：( )
+括号内内容若为完整句子，第一个单词需首字母大写，并加句号，反之则都不需
+加。
+例：
+Saat lisätietoja napsauttamalla tätä. (Saat tiedot sähköpostitse.)
+Saat lisätietoja napsauttamalla tätä (saat tiedot sähköpostitse).

@@ -26,7 +26,11 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.core.config import settings
-from app.service.gemini_service import ensure_gemini_route_configured, generate_text
+from app.service.gemini_service import (
+    DEFAULT_GEMINI_TIMEOUT_SECONDS,
+    ensure_gemini_route_configured,
+    generate_text,
+)
 
 # ── 全局配置 ──────────────────────────────────────────────
 ROW_BUCKET = 20_000
@@ -1093,7 +1097,7 @@ def _call_llm(system_prompt: str, user_prompt: str, model_id: str, max_output: i
             route=route,
             temperature=0.1,
             max_output_tokens=max_output,
-            timeout=600.0,
+            timeout=DEFAULT_GEMINI_TIMEOUT_SECONDS,
         )
         print(f"[alignment-llm] ??, ?? {len(full)} ??")
         return full

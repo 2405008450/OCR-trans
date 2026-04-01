@@ -1,0 +1,58 @@
+基本跟英语一样，引号、小数点、千分符不同
+5.1 标点符号：
+, 逗号
+. 句号
+: 冒号
+! 感叹号
+? 问号
+… 省略号
+() 括号
+- 连接符
+; 分号
+_ 下划线
+’ 撇号；省略号(即')
+„…“/»…«/ 引号
+<, > 关系符
+小数点是逗号，千位符是小数点
+小数点：,
+例：两千2.000
+千分符：.
+例：人民币两角五分RMB2,50
+引号：一般有两种书写方式
+1. „ “（常用引号），形状类似于„99-66“
+使用情景：
+（1）BEI WÖRTLICHER REDE（引用话语）
+（2）ZUR HERVORHEBUNG（突出强调，包括各类作品名称、报纸名称等）
+例：Sie sagte zu ihrem Kunden: „Das übernehme ich gerne für Sie.“
+2. » «（法文引号Guillemets）
+使用情景：主要用于出版文本，如报纸报刊书籍等（„ “ 在视觉上容易和其
+他标点符号如逗号，分号之类的相混淆，故用» « 表示引用，更清晰一些。）
+例：Dieser »treue Freund« verriet ihn als Erster.
+冒号后的大小写问题
+冒号后单词首字母大写：
+1. 冒号后面直接引用别人说的话，即直接引语：
+Sie sagte zu ihrem Kunden: „Das übernehme ich gerne für Sie.“
+2. 冒号后面接Titel，如书名，直接保留原名称写法即可：
+Sie las das Buch: Der Social Media Manager.
+3. 冒号后面是含义独立的完整句子，则句子首字母大写：
+Er arbeitet rund um die Uhr, ernährt sich schlecht und Sport betreibt er auch
+keinen: Das kann doch nicht gesund sein.
+注意：有时候后面不是完整句子（即：没有明确主谓语），是一个独立结构，
+则首字母也大写：
+Der Arm ist nicht gebrochen: Alles in Ordnung.
+4. 冒号后面接名词或者专有名词，其首字母大写：
+Gäste sind heute im Sportstudio: Andreas Möller, Bret Hart und Boris Becker.
+Zutaten: Eier, Butter, Schinken
+冒号后单词首字母小写：
+1. 冒号后面不是完整的独立句子或独立结构，则单词（非名词）首字母小写
+So sah sie aus: mittelgroß, blond, schlanke Figur.
+Familienstand: verheiratet
+分号及破折号后的大小写问题：
+1. 后接名词或专有名词，则首字母大写：
+Unser Proviant bestand aus Dörrfleisch, Speck und Schinken; Ei- und
+Milchpulver; Reis, Nudeln und Grieß.
+Die deutsche Wirtschaft – Steuersenkungen gefordert
+2. 除1 之外的情况，首字母小写：
+Barbara hatte den Flug verpasst; deshalb kam sie erst einen Tag später in
+Deutschland an.
+Traumsommer – am Wochenende ist mit hohen Temperaturen zu rechnen

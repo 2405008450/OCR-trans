@@ -1,0 +1,24 @@
+小数点是逗号，千分符是小数点。
+例：€1,000,000.00 (English) €1.000.000,00 (Dutch)
+标点符号：
+. 句号
+, 逗号
+; 分号
+: 冒号
+! 感叹号
+? 问号
+… 省略号
+/ 斜线号
+( ) 圆括号
+单引号：‘’
+用于表示讽刺或反义
+例：
+荷兰语：Door het ‘fantastische’ weer kunnen we niet barbecuen.
+英语：Because of the “fantastic” weather, we can’t have the barbecue.
+双引号：“”
+一般用于冒号后
+例：
+荷兰语：Paul zei: “Ik ga naar Drenthe.”
+英语：Paul said, “I’m going to Drenthe.”
+注意：荷兰语中“ij”看做一个字母，要大写就一起大写。
+例：IJssel

@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from openai import OpenAI
 
 from app.core.config import settings
-from app.service.gemini_service import ensure_gemini_route_configured
+from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
@@ -43,6 +43,9 @@ SUPPORTED_LANGUAGES: Dict[str, Dict[str, str]] = {
 }
 
 # OCR 模型配置（复用 pdf2docx 的模型）
+DOC_TRANSLATE_DEFAULT_MODEL = "google/gemini-3-flash-preview"
+DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
+
 DOC_TRANSLATE_MODELS: Dict[str, Dict[str, str]] = {
     "google/gemini-3-flash-preview": {
         "label": "快速版V2",
@@ -199,8 +202,8 @@ async def execute_doc_translate_task(
     original_filename: str,
     source_lang: str = "zh",
     target_langs: List[str],
-    ocr_model: str = "google/gemini-3-flash-preview",
-    gemini_route: str = "google",
+    ocr_model: str = DOC_TRANSLATE_DEFAULT_MODEL,
+    gemini_route: str = DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:

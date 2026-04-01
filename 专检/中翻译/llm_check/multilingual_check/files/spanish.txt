@@ -1,0 +1,27 @@
+6.1 逗号表示小数点，句号表示每三位的分节号，如：1,05 是一点零五，2.000
+是两千（在拉美部分地区，逗号是分节号，句号是小数点）；
+6.2 分割小时和分钟，既可以用冒号，也可以用句号，如：18:20h 和18.20h（句
+号较少用）；
+6.3 西班牙语引号有三种，角引号« »、双引号“”和单引号‘’（注意角引号不是书
+名号）。在印刷品中，建议一般使用角引号。如果引文中还有引文，才依次使用
+另两种引号，如：«Antonio me dijo: “Vaya ‘cacharro’ que se ha comprado Julián”».
+6.4 问号和感叹号连用可以写作¿……!或¡……?，但最好写作¿¡……!?或¡¿……?!。
+例：¡Cómo te has atrevido? 或¿Cómo te has atrevido!
+规范：¿¡Qué estás diciendo!? 或¡¿Qué estás diciendo?!
+6.5 标点符号：
+¿ ? 问号（成对，在句子首尾）。例：¿Cómo te llamas?
+¡ ! 感叹号（成对，在句子首尾）。例：¡Mucho gusto!
+－ 破折号
+() 圆括号
+[ ] 方括号
+6.6 日期的表示：
+6.6.1 年份用前置词en 加上表年份的基数词来表示，有时也可以加上año（年）。
+Nací en (el año) 1976（mil novecientos setenta y seis）. 我出生于1976 年
+¿En qué año fuiste a España?
+6.6.2 月份用前置词en 加上表月份的名词（不加冠词）来表示。
+一月enero 二月febrero 三月marzo 四月abril
+五月mayo 六月junio 七月julio 八月agosto
+九月septiembre 十月octubre 十一月noviembre 十二月diciembre
+6.6.3 表示星期的名词。
+星期一lunes 星期二martes 星期三miércoles 星期四jueves
+星期五viernes 星期六sábado 星期日domingo

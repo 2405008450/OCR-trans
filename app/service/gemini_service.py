@@ -55,6 +55,7 @@ _ALL_GEMINI_ROUTES = (
 DEFAULT_GEMINI_ROUTE = (
     settings.GEMINI_DEFAULT_ROUTE if settings.GEMINI_DEFAULT_ROUTE in _ALL_GEMINI_ROUTES else GEMINI_ROUTE_GOOGLE
 )
+DEFAULT_GEMINI_TIMEOUT_SECONDS = float(settings.GEMINI_TIMEOUT_SECONDS)
 
 GEMINI_ROUTE_OPTIONS: Dict[str, Dict[str, str]] = {
     GEMINI_ROUTE_GOOGLE: {
@@ -106,7 +107,7 @@ def ensure_gemini_route_configured(route: Optional[str]) -> str:
     return normalized
 
 
-def _get_vertex_client(timeout: float = 600.0) -> genai.Client:
+def _get_vertex_client(timeout: float = DEFAULT_GEMINI_TIMEOUT_SECONDS) -> genai.Client:
     return genai.Client(
         vertexai=True,
         project=settings.VERTEX_PROJECT_ID,
@@ -127,7 +128,7 @@ def _generate_google_with_retry(
     contents,
     config=None,
     max_retries: int = 3,
-    timeout: float = 600.0,
+    timeout: float = DEFAULT_GEMINI_TIMEOUT_SECONDS,
     log_callback: GeminiLogCallback = None,
 ) -> str:
     client = client_factory(timeout=timeout)
@@ -304,7 +305,7 @@ def generate_text(
     route: Optional[str] = None,
     temperature: float = 0.1,
     max_output_tokens: int = 65536,
-    timeout: float = 600.0,
+    timeout: float = DEFAULT_GEMINI_TIMEOUT_SECONDS,
     log_callback: GeminiLogCallback = None,
 ) -> str:
     normalized = ensure_gemini_route_configured(route)
@@ -368,7 +369,7 @@ def generate_vision_html(
     user_prompt: str = "请根据上传图片执行 OCR 并输出 HTML。",
     temperature: float = 0.0,
     max_output_tokens: int = 65536,
-    timeout: float = 600.0,
+    timeout: float = DEFAULT_GEMINI_TIMEOUT_SECONDS,
     log_callback: GeminiLogCallback = None,
 ) -> str:
     normalized = ensure_gemini_route_configured(route)

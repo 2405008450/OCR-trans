@@ -141,17 +141,36 @@ class TaskQueueService:
             self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_zhongfanyi_task(self, *, original_file: UploadFile, translated_file: UploadFile, use_ai_rule: bool, gemini_route: str, rule_file: Optional[UploadFile], session_rule_content: Optional[str]) -> str:
-        reserved_task = self._create_db_task('zhongfanyi', f'{original_file.filename} | {translated_file.filename}', {'use_ai_rule': use_ai_rule, 'gemini_route': gemini_route, 'ai_rule_file_path': None, 'session_rule_text': (session_rule_content.strip() or None) if session_rule_content else None}, {})
+    async def submit_zhongfanyi_task(self, *, mode: str, original_file: Optional[UploadFile], translated_file: Optional[UploadFile], single_file: Optional[UploadFile], use_ai_rule: bool, gemini_route: str, rule_file: Optional[UploadFile], session_rule_content: Optional[str]) -> str:
+        if mode == zf_service.ZHONGFANYI_MODE_SINGLE:
+            display_name = single_file.filename if single_file else 'single.docx'
+        else:
+            original_name = original_file.filename if original_file else 'original.docx'
+            translated_name = translated_file.filename if translated_file else 'translated.docx'
+            display_name = f'{original_name} | {translated_name}'
+        reserved_task = self._create_db_task('zhongfanyi', display_name, {'mode': mode, 'use_ai_rule': use_ai_rule, 'gemini_route': gemini_route, 'ai_rule_file_path': None, 'session_rule_text': (session_rule_content.strip() or None) if session_rule_content else None}, {})
         try:
             upload_dir = Path(settings.UPLOAD_DIR) / 'zhongfanyi' / reserved_task.display_no
             upload_dir.mkdir(parents=True, exist_ok=True)
-            ext_orig = Path(original_file.filename or 'original.docx').suffix.lower()
-            ext_tran = Path(translated_file.filename or 'translated.docx').suffix.lower()
-            original_path = upload_dir / build_storage_filename(reserved_task.display_no, original_file.filename, reserved_task.task_id, role='original', ext=ext_orig)
-            translated_path = upload_dir / build_storage_filename(reserved_task.display_no, translated_file.filename, reserved_task.task_id, role='translated', ext=ext_tran)
-            original_path.write_bytes(await original_file.read())
-            translated_path.write_bytes(await translated_file.read())
+            input_files = {}
+            if mode == zf_service.ZHONGFANYI_MODE_SINGLE:
+                ext_single = Path(single_file.filename or 'single.docx').suffix.lower()
+                single_path = upload_dir / build_storage_filename(reserved_task.display_no, single_file.filename, reserved_task.task_id, role='single', ext=ext_single)
+                single_path.write_bytes(await single_file.read())
+                input_files.update({'single_path': str(single_path).replace('\\', '/'), 'single_filename': single_file.filename})
+            else:
+                ext_orig = Path(original_file.filename or 'original.docx').suffix.lower()
+                ext_tran = Path(translated_file.filename or 'translated.docx').suffix.lower()
+                original_path = upload_dir / build_storage_filename(reserved_task.display_no, original_file.filename, reserved_task.task_id, role='original', ext=ext_orig)
+                translated_path = upload_dir / build_storage_filename(reserved_task.display_no, translated_file.filename, reserved_task.task_id, role='translated', ext=ext_tran)
+                original_path.write_bytes(await original_file.read())
+                translated_path.write_bytes(await translated_file.read())
+                input_files.update({
+                    'original_path': str(original_path).replace('\\', '/'),
+                    'translated_path': str(translated_path).replace('\\', '/'),
+                    'original_filename': original_file.filename,
+                    'translated_filename': translated_file.filename,
+                })
             ai_rule_file_path = None
             if rule_file and use_ai_rule:
                 ext_rule = Path(rule_file.filename or 'rule.txt').suffix.lower()
@@ -165,7 +184,7 @@ class TaskQueueService:
                     params['ai_rule_file_path'] = ai_rule_file_path
                     task.params_json = json.dumps(params, ensure_ascii=False)
                     db.commit()
-            self._update_task_input_files(reserved_task.task_id, {'original_path': str(original_path).replace('\\', '/'), 'translated_path': str(translated_path).replace('\\', '/')})
+            self._update_task_input_files(reserved_task.task_id, input_files)
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -429,7 +448,21 @@ class TaskQueueService:
     async def _execute_zhongfanyi(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'zhongfanyi started')
         loop = asyncio.get_running_loop()
-        job = loop.run_in_executor(self._task_executor, lambda: zf_service.run_zhongfanyi_task(input_files['original_path'], input_files['translated_path'], task_id, display_no=display_no, use_ai_rule=params.get('use_ai_rule', False), gemini_route=params.get('gemini_route', 'openrouter'), ai_rule_file_path=params.get('ai_rule_file_path'), session_rule_text=params.get('session_rule_text')))
+        job = loop.run_in_executor(
+            self._task_executor,
+            lambda: zf_service.run_zhongfanyi_task(
+                task_id=task_id,
+                display_no=display_no,
+                mode=params.get('mode', zf_service.ZHONGFANYI_MODE_DOUBLE),
+                original_path=input_files.get('original_path'),
+                translated_path=input_files.get('translated_path'),
+                single_path=input_files.get('single_path'),
+                use_ai_rule=params.get('use_ai_rule', False),
+                gemini_route=params.get('gemini_route', 'openrouter'),
+                ai_rule_file_path=params.get('ai_rule_file_path'),
+                session_rule_text=params.get('session_rule_text'),
+            )
+        )
         await self._mirror_progress(task_id, job, lambda: zf_service.get_task_progress(task_id), update)
         return await job
 
@@ -520,7 +553,15 @@ class TaskQueueService:
                         files.append({'name': friendly(label, path), 'path': path, 'type': 'report'})
         elif task_type == 'zhongfanyi':
             add_result('corrected_docx', 'corrected_docx')
-            add_result('report_path', 'report')
+            add_result('annotated_pdf', 'annotated_pdf')
+            add_result('annotated_excel', 'annotated_excel')
+            add_result('annotated_pptx', 'annotated_pptx')
+            add_result('output_file', 'output')
+            reports = result.get('reports', {})
+            if isinstance(reports, dict):
+                for label, path in reports.items():
+                    if isinstance(path, str) and path:
+                        files.append({'name': friendly(label, path), 'path': path, 'type': 'report'})
         elif task_type == 'alignment':
             add_result('output_excel', 'output_excel')
         elif task_type == 'drivers_license':
