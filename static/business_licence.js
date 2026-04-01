@@ -37,6 +37,8 @@ const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.
 init();
 
 async function init() {
+    const routeGroup = document.getElementById('geminiRouteGroup') || geminiRouteSelect?.closest('.option-group');
+    if (routeGroup) routeGroup.style.display = 'none';
     bindEvents();
     await loadConfig();
     updateProcessButton();

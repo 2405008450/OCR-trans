@@ -34,7 +34,7 @@ let modelConfig = {};
 let languageConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
-let defaultRoute = 'openrouter';
+let defaultRoute = 'google';
 let streamLogWrap = null;
 let streamLogEl = null;
 let retryBtn = null;
@@ -109,7 +109,7 @@ async function init() {
 
 function ensureGeminiRouteSelect() {
     const routeCard = document.getElementById('geminiRouteGroup');
-    if (routeCard) routeCard.style.display = ''; 
+    if (routeCard) routeCard.style.display = 'none';
     geminiRouteSelect = document.getElementById('geminiRouteSelect');
 }
 

@@ -852,7 +852,7 @@ async def run_number_check_task(
     translated_file: UploadFile,
     task_id: str = "",
     display_no: Optional[str] = None,
-    gemini_route: str = "google",
+    gemini_route: str = "openrouter",
     model_name: str = "gemini-3.1-pro-preview",
 ) -> Dict[str, Any]:
     _validate_docx(original_file, "原文")

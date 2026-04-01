@@ -238,11 +238,11 @@ async def update_zhongfanyi_rule(body: RuleUpdateBody):
 @router.get("/alignment/config")
 async def get_alignment_config():
     from app.service.alignment_service import AVAILABLE_MODELS as ALIGNMENT_MODELS, BUFFER_CHARS, SUPPORTED_LANGUAGES, THRESHOLD_MAP
-    return {"models": {name: {"description": info["description"], "id": info["id"], "max_output": info["max_output"]} for name, info in ALIGNMENT_MODELS.items()}, "routes": get_gemini_routes(), "default_route": "google", "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()}, "thresholds": THRESHOLD_MAP, "buffer_chars": BUFFER_CHARS}
+    return {"models": {name: {"description": info["description"], "id": info["id"], "max_output": info["max_output"]} for name, info in ALIGNMENT_MODELS.items()}, "routes": get_gemini_routes(), "default_route": "openrouter", "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()}, "thresholds": THRESHOLD_MAP, "buffer_chars": BUFFER_CHARS}
 
 
 @router.post("/alignment")
-async def run_alignment(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), source_lang: str = Query("zh"), target_lang: str = Query("en"), model_name: str = Query("Google gemini-3-flash-preview"), gemini_route: str = Query("google"), enable_post_split: bool = Query(True), threshold_2: int = Query(25000), threshold_3: int = Query(50000), threshold_4: int = Query(75000), threshold_5: int = Query(100000), threshold_6: int = Query(125000), threshold_7: int = Query(150000), threshold_8: int = Query(175000), buffer_chars: int = Query(2000)):
+async def run_alignment(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), source_lang: str = Query("zh"), target_lang: str = Query("en"), model_name: str = Query("Google gemini-3-flash-preview"), gemini_route: str = Query("openrouter"), enable_post_split: bool = Query(True), threshold_2: int = Query(25000), threshold_3: int = Query(50000), threshold_4: int = Query(75000), threshold_5: int = Query(100000), threshold_6: int = Query(125000), threshold_7: int = Query(150000), threshold_8: int = Query(175000), buffer_chars: int = Query(2000)):
     allowed_ext = {".docx", ".doc", ".pptx", ".xlsx", ".xls"}
     if os.path.splitext(original_file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported original file format")
@@ -333,11 +333,11 @@ async def get_business_licence_status(task_id: str):
 
 @router.get("/doc-translate/config")
 async def get_doc_translate_config():
-    return {"models": get_doc_translate_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "openrouter", "languages": get_supported_languages()}
+    return {"models": get_doc_translate_models(), "default_model": "google/gemini-3-flash-preview", "routes": get_gemini_routes(), "default_route": "google", "languages": get_supported_languages()}
 
 
 @router.post("/doc-translate")
-async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("openrouter")):
+async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
     allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
     if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
@@ -346,7 +346,7 @@ async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = 
 
 
 @router.post("/doc-translate/batch")
-async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("openrouter")):
+async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query("google/gemini-3-flash-preview"), gemini_route: str = Query("google")):
     allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")

@@ -133,22 +133,7 @@ if (document.readyState === 'loading') {
 }
 
 function ensureRouteControl() {
-    const panel = document.querySelector('.options-panel');
-    if (!panel) return;
-    if (!document.getElementById('geminiRouteSelect')) {
-        const routeGroup = document.createElement('div');
-        routeGroup.className = 'option-group option-card';
-        routeGroup.style.gridColumn = '1 / -1';
-        routeGroup.innerHTML = [
-            '<label for="geminiRouteSelect">\u8def\u7ebf\u5207\u6362</label>',
-            '<div class="field-wrap">',
-            '<i class="fas fa-route"></i>',
-            '<select id="geminiRouteSelect"></select>',
-            '</div>',
-        ].join('');
-        panel.appendChild(routeGroup);
-    }
-    geminiRouteSelect = document.getElementById('geminiRouteSelect');
+    geminiRouteSelect = null;
 }
 
 async function loadRouteConfig() {
