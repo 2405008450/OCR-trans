@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.config import settings
 from app.service.gemini_service import (
-    GEMINI_ROUTE_GOOGLE,
+    GEMINI_ROUTE_OPENROUTER,
     ensure_gemini_route_configured,
     generate_vision_html,
 )
@@ -20,7 +20,7 @@ from app.service.gemini_service import (
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
 BUSINESS_LICENCE_DEFAULT_MODEL = "google/gemini-3.1-pro-preview"
-BUSINESS_LICENCE_DEFAULT_ROUTE = GEMINI_ROUTE_GOOGLE
+BUSINESS_LICENCE_DEFAULT_ROUTE = GEMINI_ROUTE_OPENROUTER
 
 _BUSINESS_LICENCE_COMPANY_NAME_LABELS = {
     "名称",
@@ -31,11 +31,11 @@ _BUSINESS_LICENCE_COMPANY_NAME_LABELS = {
 
 BUSINESS_LICENCE_MODELS: Dict[str, Dict[str, str]] = {
     "google/gemini-3.1-pro-preview": {
-        "label": "Gemini 3.1 Pro",
+        "label": "增强版V2",
         "description": "适合复杂版面和印章、二维码等细节识别。",
     },
     "google/gemini-3-flash-preview": {
-        "label": "Gemini 3 Flash",
+        "label": "快速版V2",
         "description": "速度更快，适合常规营业执照图片。",
     },
 }
@@ -316,8 +316,8 @@ def extract_business_licence_data(
 
 @lru_cache(maxsize=1)
 def _load_legacy_business_licence_module():
-    module_path = Path(__file__).resolve().parents[2] / "businesslicence" / "start.py"
-    spec = importlib.util.spec_from_file_location("businesslicence_start_legacy", module_path)
+    module_path = Path(__file__).resolve().parents[2] / "businesslicence" / "start2.py"
+    spec = importlib.util.spec_from_file_location("businesslicence_start2_runtime", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"无法加载营业执照脚本: {module_path}")
     module = importlib.util.module_from_spec(spec)

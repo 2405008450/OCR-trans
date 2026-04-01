@@ -312,6 +312,13 @@ def generate_text(
     if log_callback:
         log_callback(f"[gemini] route={normalized}, model={resolved_model}")
 
+    config_kwargs = {
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+    }
+    if (system_prompt or "").strip():
+        config_kwargs["system_instruction"] = system_prompt
+
     if normalized == GEMINI_ROUTE_GOOGLE:
         try:
             text_result = _generate_google_with_retry(
@@ -319,11 +326,7 @@ def generate_text(
                 client_factory=_get_vertex_client,
                 model=resolved_model,
                 contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=temperature,
-                    max_output_tokens=max_output_tokens,
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
                 timeout=timeout,
                 log_callback=log_callback,
             )
@@ -373,6 +376,17 @@ def generate_vision_html(
     if log_callback:
         log_callback(f"[gemini-vision] route={normalized}, model={resolved_model}, mime={mime_type}")
 
+    config_kwargs = {
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+    }
+    if (system_prompt or "").strip():
+        config_kwargs["system_instruction"] = system_prompt
+
+    parts = [types.Part.from_bytes(data=image_bytes, mime_type=mime_type)]
+    if (user_prompt or "").strip():
+        parts.insert(0, types.Part.from_text(text=user_prompt))
+
     if normalized == GEMINI_ROUTE_GOOGLE:
         try:
             text_result = _generate_google_with_retry(
@@ -382,17 +396,10 @@ def generate_vision_html(
                 contents=[
                     types.Content(
                         role="user",
-                        parts=[
-                            types.Part.from_text(text=user_prompt),
-                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                        ],
+                        parts=parts,
                     )
                 ],
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=temperature,
-                    max_output_tokens=max_output_tokens,
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
                 timeout=timeout,
                 log_callback=log_callback,
             )

@@ -176,7 +176,7 @@
                 <div class="logo-mark"><i class="fas fa-building"></i></div>
                 <div>
                     <h1>营业执照翻译</h1>
-                    <p class="subtitle">统一走主项目模型配置，并固定使用全局线路1（Vertex）生成英文营业执照译文 Word。</p>
+                    <p class="subtitle">支持营业执照信息识别、名称校对与标准化英文译文生成。</p>
                 </div>
             </div>
             <nav class="header-nav">
@@ -192,16 +192,16 @@
             <div>
                 <span class="section-kicker">Business Licence</span>
                 <h2>上传营业执照图片，输出统一格式译文</h2>
-                <p>识别调用固定走主项目全局线路1（Vertex），先确认公司名称译法，再将输出文件统一写入 <code>outputs/business_licence/</code>，仅保留最终交付用的 Word 译文。</p>
+                <p>系统将提取营业执照主要信息，并在提交前提示确认公司英文名称，确认后生成规范译文文件。</p>
             </div>
             <div class="hero-metrics">
                 <div class="metric-card">
-                    <strong>固定线路1</strong>
-                    <span>营业执照页面默认锁定 Vertex 官方线路，不再切换到其他路由。</span>
+                    <strong>规范译文</strong>
+                    <span>生成统一版式的英文营业执照译文，便于审核、留档与交付。</span>
                 </div>
                 <div class="metric-card">
-                    <strong>名称先确认</strong>
-                    <span>识别出公司名称后会先弹窗确认英文译名，再进入正式任务生成 Word。</span>
+                    <strong>名称校对</strong>
+                    <span>公司英文名称将在正式提交前确认，确保最终译文表述准确。</span>
                 </div>
             </div>
         </section>
@@ -270,21 +270,21 @@
                         </div>
                         <ul class="info-list">
                             <li>识别内容包括营业执照字段、印章、统一社会信用代码、二维码说明和副本编号。</li>
-                            <li>模板填充仍复用 <code>businesslicence/start.py</code> 中成熟的 Word 模板逻辑。</li>
-                            <li>页面会先弹出公司名称确认框，确认后的英文名称才会进入最终 Word。</li>
+                            <li>系统将根据识别结果自动匹配适用版式，并生成标准化译文。</li>
+                            <li>提交前将单独确认公司英文名称，确认后的名称将写入最终译文。</li>
                         </ul>
                     </div>
                     <div class="info-card emphasis">
                         <div class="section-title-row">
                             <div>
                                 <span class="section-kicker">Output</span>
-                                <h3>输出内容</h3>
+                                <h3>交付内容</h3>
                             </div>
                         </div>
                         <div class="stacked-stats">
-                            <div><strong>Word 译文</strong><span>最终交付文件</span></div>
-                            <div><strong>目录统一</strong><span>输出到 <code>outputs/business_licence/</code></span></div>
-                            <div><strong>Vertex 路线</strong><span>固定走全局线路1，不再使用页面内代理或备用端口。</span></div>
+                            <div><strong>英文译文</strong><span>生成正式交付文件</span></div>
+                            <div><strong>结果下载</strong><span>处理完成后可在结果区直接下载</span></div>
+                            <div><strong>名称确认</strong><span>公司英文名称确认后进入正式处理</span></div>
                         </div>
                     </div>
                 </aside>
@@ -328,8 +328,8 @@
         <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="companyNameDialogTitle">
             <div>
                 <span class="section-kicker">Company Name</span>
-                <h3 id="companyNameDialogTitle">请确认公司名称翻译</h3>
-                <p>营业执照中的公司名称会直接进入最终 Word。请确认 AI 译名，或手动输入你要使用的固定英文名称。</p>
+                <h3 id="companyNameDialogTitle">请确认公司英文名称</h3>
+                <p>公司名称将写入最终译文。请确认系统建议名称，或手动输入要使用的英文名称。</p>
             </div>
 
             <div class="dialog-block">
@@ -338,15 +338,15 @@
             </div>
 
             <label class="dialog-radio">
-                <span><input type="radio" name="companyNameChoice" id="companyNameUseAi" value="ai" checked> 使用 AI 翻译</span>
+                <span><input type="radio" name="companyNameChoice" id="companyNameUseAi" value="ai" checked> 使用系统建议名称</span>
                 <div class="dialog-block" style="padding:14px 16px;">
-                    <span class="dialog-label">AI 英文名称</span>
+                    <span class="dialog-label">建议英文名称</span>
                     <div class="dialog-value" id="companyNameAiValue"></div>
                 </div>
             </label>
 
             <label class="dialog-radio">
-                <span><input type="radio" name="companyNameChoice" id="companyNameUseManual" value="manual"> 手动输入公司英文名称</span>
+                <span><input type="radio" name="companyNameChoice" id="companyNameUseManual" value="manual"> 手动输入英文名称</span>
                 <textarea
                     class="dialog-textarea"
                     id="companyNameManualValue"
@@ -359,13 +359,13 @@
 
             <div class="dialog-actions">
                 <button class="btn-secondary" type="button" id="companyNameCancelBtn">取消</button>
-                <button class="btn-primary" type="button" id="companyNameConfirmBtn">确认并继续</button>
+                <button class="btn-primary" type="button" id="companyNameConfirmBtn">确认并提交</button>
             </div>
         </div>
     </div>
 
     <script src="/static/embed_shell.js"></script>
-    <script src="/static/business_licence.js"></script>
+    <script src="/static/business_licence.js?v=20260401-4"></script>
     <script src="/static/header.js"></script>
 </body>
 </html>

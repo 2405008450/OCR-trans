@@ -388,16 +388,27 @@ async def preview_business_licence_company_name(
 
     temp_path: Optional[Path] = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir) as temp_file:
-            temp_file.write(await file.read())
-            temp_path = Path(temp_file.name)
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir) as temp_file:
+                temp_file.write(await file.read())
+                temp_path = Path(temp_file.name)
 
-        parsed_data = await asyncio.to_thread(
-            extract_business_licence_data,
-            temp_path,
-            model=model,
-            gemini_route=BUSINESS_LICENCE_DEFAULT_ROUTE,
-        )
+            parsed_data = await asyncio.to_thread(
+                extract_business_licence_data,
+                temp_path,
+                model=model,
+                gemini_route=BUSINESS_LICENCE_DEFAULT_ROUTE,
+            )
+        except Exception as exc:
+            return {
+                "requires_confirmation": False,
+                "original_cn_name": "",
+                "ai_translated_name": "",
+                "parsed_data_json": "",
+                "model": model,
+                "gemini_route": BUSINESS_LICENCE_DEFAULT_ROUTE,
+                "preview_error": str(exc),
+            }
     finally:
         if temp_path and temp_path.exists():
             temp_path.unlink(missing_ok=True)

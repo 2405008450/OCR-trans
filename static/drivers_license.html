@@ -79,7 +79,7 @@
                 <div class="logo-mark"><i class="fas fa-id-card"></i></div>
                 <div>
                     <h1>驾驶证翻译</h1>
-                    <p class="subtitle">将单张或多张驾驶证图片接入统一任务平台，自动识别字段、翻译内容并输出 Word 文档。</p>
+                    <p class="subtitle">支持驾驶证图像识别、信息提取与标准化译文生成。</p>
                 </div>
             </div>
             <nav class="header-nav">
@@ -96,8 +96,8 @@
         <section class="hero-banner">
             <div>
                 <span class="section-kicker">Driver License</span>
-                <h2>单图、合并、批量三种模式统一接入</h2>
-                <p>复用 `Driver's_License/run.py` 的主处理逻辑，API 密钥改为读取项目根目录全局 `.env`。适合驾驶证首页、副页、图例页的单次合并输出，也支持一批图片分别生成多份译文。</p>
+                <h2>单份、合并、批量三种模式统一处理</h2>
+                <p>适用于驾驶证主页、副页及相关附页材料的识别与译文生成，可根据材料情况选择合并处理或逐份输出。</p>
             </div>
             <div class="hero-metrics">
                 <div class="metric-card">
@@ -105,8 +105,8 @@
                     <span>多张同证件图片可合并为一个 Word，适合主页 + 副页 + 图例页。</span>
                 </div>
                 <div class="metric-card">
-                    <strong>统一任务体系</strong>
-                    <span>提交后进入统一队列、统一状态查询、统一结果下载，不影响现有模块。</span>
+                    <strong>结果管理</strong>
+                    <span>提交后可在任务工作台统一查看处理进度并下载结果文件。</span>
                 </div>
             </div>
         </section>
@@ -179,14 +179,14 @@
                     <div class="info-card emphasis">
                         <div class="section-title-row">
                             <div>
-                                <span class="section-kicker">Env</span>
-                                <h3>配置来源</h3>
+                                <span class="section-kicker">Delivery</span>
+                                <h3>交付说明</h3>
                             </div>
                         </div>
                         <div class="stacked-stats">
-                            <div><strong>GLM OCR</strong><span>读取项目根目录 `.env` 中的 `GLM_API_KEY`</span></div>
-                            <div><strong>DeepSeek 翻译</strong><span>读取项目根目录 `.env` 中的 `DEEPSEEK_API_KEY`</span></div>
-                            <div><strong>任务输出</strong><span>统一保存到 `outputs/drivers_license/`</span></div>
+                            <div><strong>信息提取</strong><span>自动识别驾驶证主要字段并生成对应译文</span></div>
+                            <div><strong>处理方式</strong><span>支持单份处理、合并处理与批量处理</span></div>
+                            <div><strong>结果交付</strong><span>处理完成后可直接下载正式译文文件</span></div>
                         </div>
                     </div>
                 </aside>

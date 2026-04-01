@@ -5,7 +5,7 @@
 2. 翻译识别结果（中文->英文）
 3. 根据字段标签匹配，填充到Word模板中
 
-直接运行: python start.py
+直接运行: python start2.py
 右键运行: 右键点击此文件 -> 运行Python文件
 """
 
@@ -174,18 +174,20 @@ EXTRA_FIELD_LABELS = {
     "business scope note": "Business Scope Note",
 }
 
-# 输入图片路径
-INPUT_IMAGE = str(SCRIPT_DIR / "picture/foshan.jpg")
+# 输入图片路径；留空表示运行时必须显式传入
+INPUT_IMAGE = ""
+
+TEMPLATE_DIR = SCRIPT_DIR / "template"
 
 # Word模板路径
-TEMPLATE_PATH = str(SCRIPT_DIR / "picture/模板.docx")
+TEMPLATE_PATH = str(TEMPLATE_DIR / "模板.docx")
 # 八字段模板路径（包含经营期限字段）
-TEMPLATE_PATH_8 = str(SCRIPT_DIR / "picture/模板8.docx")
+TEMPLATE_PATH_8 = str(TEMPLATE_DIR / "模板8.docx")
 # 竖版模板路径（用于竖版营业执照）
-TEMPLATE_PATH_VERTICAL = str(SCRIPT_DIR / "picture/模板竖.docx")
+TEMPLATE_PATH_VERTICAL = str(TEMPLATE_DIR / "模板竖.docx")
 
 # 输出目录
-OUTPUT_DIR = str(SCRIPT_DIR / "translated")
+OUTPUT_DIR = str(SCRIPT_DIR.parent / "outputs" / "business_licence")
 
 # ==================================================
 
@@ -2001,27 +2003,31 @@ def main():
     else:
         input_image = INPUT_IMAGE
     
+    print(f"输入图片: {input_image}")
+    print(f"默认模板: {TEMPLATE_PATH}")
+    print(f"八字段模板: {TEMPLATE_PATH_8}")
+    print(f"竖版模板: {TEMPLATE_PATH_VERTICAL}")
+    print("=" * 60)
+
+    if not input_image:
+        print("错误: 未提供输入图片路径。请通过命令行传入，例如: python start2.py your_image.jpg")
+        sys.exit(1)
+
+    # 检查文件
+    if not Path(input_image).exists():
+        print(f"错误: 输入图片不存在: {input_image}")
+        sys.exit(1)
+
     # 生成输出文件路径
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     input_path = Path(input_image)
     output_filename = f"{input_path.stem}_translated_{timestamp}.docx"
     output_path = str(Path(OUTPUT_DIR) / output_filename)
-    
+
     # 确保输出目录存在
     Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
-    
-    print(f"输入图片: {input_image}")
-    print(f"默认模板: {TEMPLATE_PATH}")
-    print(f"八字段模板: {TEMPLATE_PATH_8}")
-    print(f"竖版模板: {TEMPLATE_PATH_VERTICAL}")
     print(f"输出文件: {output_path}")
-    print("=" * 60)
-    
-    # 检查文件
-    if not Path(input_image).exists():
-        print(f"错误: 输入图片不存在: {input_image}")
-        sys.exit(1)
-    
+
     # 检查默认模板是否存在（八字段模板在选择时检查）
     if not Path(TEMPLATE_PATH).exists():
         print(f"错误: 默认模板文件不存在: {TEMPLATE_PATH}")

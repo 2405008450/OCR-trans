@@ -38,7 +38,7 @@ let pollingTimer = null;
 let modelConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3.1-pro-preview';
-let defaultRoute = 'google';
+let defaultRoute = 'openrouter';
 let etaHint = null;
 let pendingCompanyNameDialog = null;
 
@@ -71,11 +71,6 @@ function bindEvents() {
     companyNameUseManual?.addEventListener('change', syncCompanyNameDialogState);
     companyNameConfirmBtn?.addEventListener('click', confirmCompanyNameDialog);
     companyNameCancelBtn?.addEventListener('click', cancelCompanyNameDialog);
-    companyNameDialog?.addEventListener('click', (event) => {
-        if (event.target === companyNameDialog) {
-            cancelCompanyNameDialog();
-        }
-    });
 }
 
 async function loadConfig() {
@@ -93,11 +88,11 @@ async function loadConfig() {
     } catch (error) {
         console.error(error);
         modelConfig = {
-            'google/gemini-3.1-pro-preview': { label: 'Gemini 3.1 Pro' },
-            'google/gemini-3-flash-preview': { label: 'Gemini 3 Flash' },
+            'google/gemini-3.1-pro-preview': { label: '增强版V2' },
+            'google/gemini-3-flash-preview': { label: '快速版V2' },
         };
         routeConfig = {
-            google: { label: '线路1（Vertex）' },
+            openrouter: { label: '线路2（OpenRouter）' },
         };
     }
 
@@ -107,7 +102,14 @@ async function loadConfig() {
 
 function renderModels() {
     modelSelect.innerHTML = '';
-    Object.entries(modelConfig).forEach(([value, info]) => {
+    const modelOrder = {
+        'google/gemini-3-flash-preview': 0,
+        'google/gemini-3.1-pro-preview': 1,
+    };
+
+    Object.entries(modelConfig)
+        .sort(([left], [right]) => (modelOrder[left] ?? 99) - (modelOrder[right] ?? 99))
+        .forEach(([value, info]) => {
         modelSelect.add(new Option(info.label || value, value));
     });
 
@@ -186,10 +188,21 @@ async function processFile() {
     updateProgress(6, '正在识别公司名称...');
 
     try {
-        const preview = await requestCompanyNamePreview();
+        let preview;
+        try {
+            preview = await requestCompanyNamePreview();
+        } catch (error) {
+            preview = buildPreviewFallback(error?.message || '公司名称预识别失败');
+        }
+
+        if (preview.preview_error) {
+            syncLog(`[preview] ${preview.preview_error}`);
+            updateProgress(18, '公司名称预识别失败，已跳过确认并直接提交正式任务...');
+        }
+
         let companyNameOverride = '';
 
-        if (preview.requires_confirmation) {
+        if (preview.requires_confirmation && !preview.preview_error) {
             updateProgress(18, '已识别公司名称，等待确认...');
             companyNameOverride = await showCompanyNameDialog(
                 preview.ai_translated_name || '',
@@ -204,11 +217,28 @@ async function processFile() {
         startPolling(task.task_id);
     } catch (error) {
         if (error?.isUserCancelled) {
-            resetPage();
+            restoreUploadAfterDialogCancel();
             return;
         }
         showFailure(error?.message || '处理失败');
     }
+}
+
+function restoreUploadAfterDialogCancel() {
+    processingSection.style.display = 'none';
+    resultSection.style.display = 'none';
+    uploadSection.style.display = 'block';
+    updateProgress(0, '已取消公司名称确认，请确认后重新提交');
+}
+
+function buildPreviewFallback(message) {
+    return {
+        requires_confirmation: false,
+        original_cn_name: '',
+        ai_translated_name: '',
+        parsed_data_json: '',
+        preview_error: message || '公司名称预识别失败',
+    };
 }
 
 async function requestCompanyNamePreview() {
@@ -260,20 +290,28 @@ async function submitBusinessLicenceTask(parsedDataJson, companyNameOverride) {
 function showCompanyNameDialog(aiTranslatedName, originalCnName) {
     closeCompanyNameDialog();
 
-    companyNameOriginalCn.textContent = originalCnName || '-';
-    companyNameAiValue.textContent = aiTranslatedName || '-';
-    companyNameManualValue.value = aiTranslatedName || '';
-    companyNameDialogError.textContent = '';
-    companyNameUseAi.checked = true;
-    companyNameUseManual.checked = false;
-    syncCompanyNameDialogState();
+    const message = [
+        '请确认公司英文名称',
+        '',
+        `中文名称：${originalCnName || '-'}`,
+        '',
+        '请确认或修改以下英文名称：',
+    ].join('\n');
 
-    companyNameDialog.classList.add('is-open');
-    companyNameDialog.setAttribute('aria-hidden', 'false');
+    const value = window.prompt(message, aiTranslatedName || '');
+    if (value === null) {
+        const error = new Error('已取消公司名称确认');
+        error.isUserCancelled = true;
+        throw error;
+    }
 
-    return new Promise((resolve, reject) => {
-        pendingCompanyNameDialog = { resolve, reject };
-    });
+    const normalized = value.trim();
+    if (!normalized) {
+        window.alert('请输入公司英文名称。');
+        return showCompanyNameDialog(aiTranslatedName, originalCnName);
+    }
+
+    return normalized;
 }
 
 function syncCompanyNameDialogState() {
