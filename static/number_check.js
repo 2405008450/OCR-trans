@@ -193,7 +193,6 @@ async function loadConfig() {
         routeConfig = {
             google: { label: '\u7ebf\u8def1' },
             openrouter: { label: '\u7ebf\u8def2' },
-            google_ai_studio: { label: '\u7ebf\u8def3' },
         };
         modelConfig = {
             'gemini-3.1-pro-preview': {

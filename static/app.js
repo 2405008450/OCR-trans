@@ -18,31 +18,10 @@ const processingSection = document.getElementById('processingSection');
 const resultSection = document.getElementById('resultSection');
 const batchSection = document.getElementById('batchSection');
 
-const docType = document.getElementById('docType');
 const fromLang = document.getElementById('fromLang');
 const toLang = document.getElementById('toLang');
 const cardSide = document.getElementById('cardSide');
 const enableVisualization = document.getElementById('enableVisualization');
-
-const idCardOptions = document.getElementById('idCardOptions');
-const marriageCertOptions = document.getElementById('marriageCertOptions');
-const enableMerge = document.getElementById('enableMerge');
-const enableOverlapFix = document.getElementById('enableOverlapFix');
-const enableColonFix = document.getElementById('enableColonFix');
-const marriagePageTemplate = document.getElementById('marriagePageTemplate');
-const fontSizeInput = document.getElementById('fontSize');
-const registrarSignatureText = document.getElementById('registrarSignatureText');
-const registeredByText = document.getElementById('registeredByText');
-const registeredByOffsetX = document.getElementById('registeredByOffsetX');
-const registeredByOffsetY = document.getElementById('registeredByOffsetY');
-const registrarSignatureOffsetX = document.getElementById('registrarSignatureOffsetX');
-const registrarSignatureOffsetY = document.getElementById('registrarSignatureOffsetY');
-const page1ManualSignatureGroup = document.getElementById('page1ManualSignatureGroup');
-const page1RegisteredByGroup = document.getElementById('page1RegisteredByGroup');
-const page1RegisteredByOffsetXGroup = document.getElementById('page1RegisteredByOffsetXGroup');
-const page1RegisteredByOffsetYGroup = document.getElementById('page1RegisteredByOffsetYGroup');
-const page1SignatureOffsetXGroup = document.getElementById('page1SignatureOffsetXGroup');
-const page1SignatureOffsetYGroup = document.getElementById('page1SignatureOffsetYGroup');
 
 const fileListPanel = document.getElementById('fileListPanel');
 const fileListItems = document.getElementById('fileListItems');
@@ -62,40 +41,6 @@ function valueOrDefault(el, defaultValue = '') {
     return el ? el.value : defaultValue;
 }
 
-function applyMarriageTemplate() {
-    const template = valueOrDefault(marriagePageTemplate, 'page2');
-    const isPage1 = template === 'page1';
-
-    [
-        page1ManualSignatureGroup,
-        page1RegisteredByGroup,
-        page1RegisteredByOffsetXGroup,
-        page1RegisteredByOffsetYGroup,
-        page1SignatureOffsetXGroup,
-        page1SignatureOffsetYGroup,
-    ].forEach((el) => {
-        if (el) el.style.display = isPage1 ? '' : 'none';
-    });
-
-    if (template === 'page1') {
-        if (enableMerge) enableMerge.checked = true;
-        if (enableOverlapFix) enableOverlapFix.checked = true;
-        if (enableColonFix) enableColonFix.checked = false;
-        return;
-    }
-    if (template === 'page2') {
-        if (enableMerge) enableMerge.checked = false;
-        if (enableOverlapFix) enableOverlapFix.checked = true;
-        if (enableColonFix) enableColonFix.checked = true;
-        return;
-    }
-    if (template === 'page3') {
-        if (enableMerge) enableMerge.checked = true;
-        if (enableOverlapFix) enableOverlapFix.checked = true;
-        if (enableColonFix) enableColonFix.checked = false;
-    }
-}
-
 // ========== 事件监听 ==========
 uploadArea.addEventListener('click', () => fileInput.click());
 uploadArea.addEventListener('dragover', handleDragOver);
@@ -108,27 +53,6 @@ btnRemove.addEventListener('click', (e) => {
 btnProcess.addEventListener('click', processFiles);
 btnNewTask.addEventListener('click', resetApp);
 document.getElementById('btnBatchNewTask')?.addEventListener('click', resetApp);
-
-if (docType) {
-    docType.addEventListener('change', handleDocTypeChange);
-    handleDocTypeChange();
-}
-if (marriagePageTemplate) {
-    marriagePageTemplate.addEventListener('change', applyMarriageTemplate);
-}
-
-function handleDocTypeChange() {
-    const type = valueOrDefault(docType, 'id_card');
-    if (!idCardOptions || !marriageCertOptions) return;
-    if (type === 'marriage_cert') {
-        idCardOptions.style.display = 'none';
-        marriageCertOptions.style.display = 'block';
-        applyMarriageTemplate();
-    } else {
-        idCardOptions.style.display = 'block';
-        marriageCertOptions.style.display = 'none';
-    }
-}
 
 // ========== 文件处理函数 ==========
 function handleDragOver(e) {
@@ -245,34 +169,8 @@ function buildParams() {
         from_lang: valueOrDefault(fromLang, 'zh'),
         to_lang: valueOrDefault(toLang, 'en'),
         enable_visualization: checkedOrDefault(enableVisualization, true),
-        doc_type: valueOrDefault(docType, 'id_card'),
+        card_side: valueOrDefault(cardSide, 'front'),
     });
-
-    if (valueOrDefault(docType, 'id_card') === 'id_card') {
-        params.append('card_side', valueOrDefault(cardSide, 'front'));
-    } else if (valueOrDefault(docType, 'id_card') === 'marriage_cert') {
-        const template = valueOrDefault(marriagePageTemplate, 'page2');
-        params.append('marriage_page_template', template);
-        params.append('enable_merge', checkedOrDefault(enableMerge, true));
-        params.append('enable_overlap_fix', checkedOrDefault(enableOverlapFix, true));
-        params.append('enable_colon_fix', checkedOrDefault(enableColonFix, false));
-        if (template === 'page1') {
-            const signatureText = valueOrDefault(registrarSignatureText, '').trim();
-            if (signatureText) params.append('registrar_signature_text', signatureText);
-            const registeredBy = valueOrDefault(registeredByText, '').trim();
-            if (registeredBy) params.append('registered_by_text', registeredBy);
-            const regByOffsetX = parseInt(valueOrDefault(registeredByOffsetX, '0'));
-            if (!Number.isNaN(regByOffsetX)) params.append('registered_by_offset_x', regByOffsetX);
-            const regByOffsetY = parseInt(valueOrDefault(registeredByOffsetY, '0'));
-            if (!Number.isNaN(regByOffsetY)) params.append('registered_by_offset_y', regByOffsetY);
-            const signOffsetX = parseInt(valueOrDefault(registrarSignatureOffsetX, '36'));
-            if (!Number.isNaN(signOffsetX) && signOffsetX >= 0) params.append('registrar_signature_offset_x', signOffsetX);
-            const signOffsetY = parseInt(valueOrDefault(registrarSignatureOffsetY, '-12'));
-            if (!Number.isNaN(signOffsetY)) params.append('registrar_signature_offset_y', signOffsetY);
-        }
-        const fs = parseInt(valueOrDefault(fontSizeInput, '18'));
-        if (fs && fs >= 8 && fs <= 30) params.append('font_size', fs);
-    }
     return params;
 }
 
@@ -485,10 +383,7 @@ function updateProgress(percent) {
     progressFill.style.width = `${percent}%`;
     progressText.textContent = `${Math.round(percent)}%`;
 
-    const currentDocType = valueOrDefault(docType, 'id_card');
-    const docLabel = currentDocType === 'marriage_cert' ? '结婚证' : '身份证';
-
-    if (percent < 30) processingStatus.textContent = `正在读取${docLabel}文件...`;
+    if (percent < 30) processingStatus.textContent = '正在读取身份证文件...';
     else if (percent < 60) processingStatus.textContent = '正在进行OCR识别...';
     else if (percent < 90) processingStatus.textContent = '正在翻译文本...';
     else processingStatus.textContent = '正在生成结果...';
@@ -499,12 +394,9 @@ function displayResult(data) {
     processingSection.style.display = 'none';
     resultSection.style.display = 'block';
 
-    const currentDocType = valueOrDefault(docType, 'id_card');
-    const docLabel = currentDocType === 'marriage_cert' ? '结婚证' : '身份证';
-
     resultStats.innerHTML = `
         <div class="stat-card"><i class="fas fa-file-alt"></i><h3>${data.filename}</h3><p>文件名</p></div>
-        <div class="stat-card"><i class="fas fa-stamp"></i><h3>${docLabel}</h3><p>证件类型</p></div>
+        <div class="stat-card"><i class="fas fa-stamp"></i><h3>身份证</h3><p>证件类型</p></div>
         <div class="stat-card"><i class="fas fa-images"></i><h3>${data.total_images}</h3><p>处理图片数</p></div>
         <div class="stat-card"><i class="fas fa-check-circle"></i><h3>成功</h3><p>处理状态</p></div>
     `;

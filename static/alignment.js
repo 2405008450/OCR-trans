@@ -208,7 +208,7 @@ function populateDefaults() {
     modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
-    geminiRouteSelect.innerHTML = '<option value="google">\u7ebf\u8def1</option><option value="openrouter">\u7ebf\u8def2</option><option value="google_ai_studio">\u7ebf\u8def3</option>';
+    geminiRouteSelect.innerHTML = '<option value="google">\u7ebf\u8def1</option><option value="openrouter">\u7ebf\u8def2</option>';
     geminiRouteSelect.value = "google";
     updateRouteInfo();
     updateModelInfo();

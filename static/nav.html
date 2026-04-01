@@ -319,7 +319,7 @@
                 <div class="brand-mark"><i class="fas fa-wave-square"></i></div>
                 <div>文档处理工作台</div>
             </div>
-            <div class="topbar-note">统一入口：证件翻译、营业执照翻译、数字专检、对照记忆与文档预处理V2</div>
+            <div class="topbar-note">统一入口：证件翻译、数字专检、对照记忆与文档预处理V2</div>
         </header>
 
         <section class="hero">
@@ -327,18 +327,17 @@
                 <div class="hero-copy">
                     <div class="eyebrow"><i class="fas fa-sparkles"></i> AI Document Tools</div>
                     <h1>一个入口，覆盖常用文档处理流程</h1>
-                    <p>把证件翻译、营业执照翻译、数字专检、多语对照记忆和文档预处理 V2 集中到同一个工作台。你仍然可以保留旧路由，但新的系统入口统一指向整合后的页面。</p>
+                    <p>把身份证 OCR、驾驶证、营业执照和通用证件翻译统一整合进“证件翻译”总模块，再和数字专检、多语对照记忆、文档预处理 V2 一起集中到同一个工作台。旧路由继续兼容，但新的系统入口统一指向整合后的页面。</p>
                     <div class="hero-actions">
                         <a class="action-btn primary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
                         <a class="action-btn secondary" href="/certificate-translation"><i class="fas fa-id-card"></i> 证件翻译</a>
-                        <a class="action-btn secondary" href="/business-licence"><i class="fas fa-building"></i> 营业执照翻译</a>
                     </div>
                 </div>
                 <aside class="hero-panel">
                     <h2>当前可用模块</h2>
                     <div class="signal-list">
-                        <div class="signal-item"><div><strong>证件翻译</strong><small>身份证 / 结婚证 OCR、驾驶证、通用证件三合一入口</small></div><span>MERGED</span></div>
-                        <div class="signal-item"><div><strong>营业执照翻译</strong><small>统一走主项目 OpenRouter 配置并输出 Word 译文</small></div><span>NEW</span></div>
+                        <div class="signal-item"><div><strong>证件翻译总模块</strong><small>身份证 OCR、驾驶证、营业执照、通用证件四合一入口</small></div><span>MERGED</span></div>
+                        <div class="signal-item"><div><strong>证件翻译细分场景</strong><small>营业执照不再单独展示入口，统一放在证件翻译模块内按标签切换</small></div><span>TAB</span></div>
                         <div class="signal-item"><div><strong>数字专检</strong><small>原文与译文数字一致性检查与修复</small></div><span>DOCX</span></div>
                         <div class="signal-item"><div><strong>文档预处理V2</strong><small>PDF / 图片 OCR 后导出 DOCX，可选快速版 / 增强版</small></div><span>V2</span></div>
                     </div>
@@ -360,28 +359,14 @@
                         <div class="tag">统一入口</div>
                     </div>
                     <h3>证件翻译</h3>
-                    <p>把“身份证 and 结婚证 OCR 翻译”“驾驶证翻译”“通用证件翻译”收进同一个子页面，通过标签页切换，减少页面跳转和重复配置。</p>
+                    <p>把“身份证 OCR 翻译”“驾驶证翻译”“营业执照翻译”“通用证件翻译”收进同一个子页面，通过标签页切换，减少页面跳转和重复配置。</p>
                     <div class="module-meta">
                         <span class="meta-pill">OCR 图片回填</span>
                         <span class="meta-pill">驾驶证 Word</span>
+                        <span class="meta-pill">营业执照 Word</span>
                         <span class="meta-pill">PDF / 图片多语翻译</span>
                     </div>
                     <a class="module-link" href="/certificate-translation">进入模块 <i class="fas fa-arrow-right"></i></a>
-                </article>
-
-                <article class="module-card">
-                    <div class="module-top">
-                        <div class="module-icon theme-indigo"><i class="fas fa-building"></i></div>
-                        <div class="tag">已接入</div>
-                    </div>
-                    <h3>营业执照翻译</h3>
-                    <p>复用原有模板填充逻辑，但模型调用和缓存输出已经并入主项目统一配置，结果统一落到 <code>outputs/business_licence/</code>。</p>
-                    <div class="module-meta">
-                        <span class="meta-pill">图片上传</span>
-                        <span class="meta-pill">Word 输出</span>
-                        <span class="meta-pill">JSON 留档</span>
-                    </div>
-                    <a class="module-link" href="/business-licence">进入模块 <i class="fas fa-arrow-right"></i></a>
                 </article>
 
                 <article class="module-card">

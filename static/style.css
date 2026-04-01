@@ -49,6 +49,44 @@ body::before {
     mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65), transparent 82%);
 }
 
+body.embedded-shell {
+    min-height: auto;
+    padding: 0;
+    background: transparent;
+}
+
+body.embedded-shell::before {
+    display: none;
+}
+
+body.embedded-shell .container {
+    max-width: none;
+}
+
+body.embedded-shell .header,
+body.embedded-shell .hero-banner,
+body.embedded-shell .footer {
+    display: none;
+}
+
+body.embedded-shell .main-content {
+    gap: 18px;
+}
+
+body.embedded-shell .workspace-grid {
+    grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+body.embedded-shell .upload-card,
+body.embedded-shell .processing-card,
+body.embedded-shell .result-header,
+body.embedded-shell .result-grid,
+body.embedded-shell .info-card,
+body.embedded-shell .stat-card,
+body.embedded-shell .result-item {
+    box-shadow: var(--shadow-md);
+}
+
 .container {
     position: relative;
     z-index: 1;
@@ -892,6 +930,10 @@ body::before {
 
     .info-rail {
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+
+    body.embedded-shell .workspace-grid {
+        grid-template-columns: 1fr;
     }
 }
 

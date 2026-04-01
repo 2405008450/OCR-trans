@@ -31,15 +31,8 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY", "")
-    AI_STUDIO_API_KEY: str = (
-        os.getenv("AI_STUDIO_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-        or os.getenv("GEMINI_API_KEY", "")
-    )
     GEMINI_DEFAULT_ROUTE: str = os.getenv("GEMINI_DEFAULT_ROUTE", "google")
     GEMINI_ENABLE_OPENROUTER_FALLBACK: str = os.getenv("GEMINI_ENABLE_OPENROUTER_FALLBACK", "False")
-    AI_STUDIO_USE_FILES_API: str = os.getenv("AI_STUDIO_USE_FILES_API", "True")
-    AI_STUDIO_FILES_API_DELETE_REMOTE: str = os.getenv("AI_STUDIO_FILES_API_DELETE_REMOTE", "True")
 
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", "gen-lang-client-0128671098")
     VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "global")
@@ -70,14 +63,6 @@ class Settings(BaseSettings):
     @property
     def GEMINI_ENABLE_OPENROUTER_FALLBACK_ENABLED(self) -> bool:
         return str(self.GEMINI_ENABLE_OPENROUTER_FALLBACK).strip().lower() in {"1", "true", "yes", "on"}
-
-    @property
-    def AI_STUDIO_USE_FILES_API_ENABLED(self) -> bool:
-        return str(self.AI_STUDIO_USE_FILES_API).strip().lower() in {"1", "true", "yes", "on"}
-
-    @property
-    def AI_STUDIO_FILES_API_DELETE_REMOTE_ENABLED(self) -> bool:
-        return str(self.AI_STUDIO_FILES_API_DELETE_REMOTE).strip().lower() in {"1", "true", "yes", "on"}
 
 
 settings = Settings()

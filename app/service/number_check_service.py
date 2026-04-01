@@ -668,9 +668,7 @@ def _run_number_check_sync(
         _prepare_specialized_import_path()
         if settings.GOOGLE_API_KEY:
             os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
-        if settings.AI_STUDIO_API_KEY:
-            os.environ["GEMINI_API_KEY"] = settings.AI_STUDIO_API_KEY
-            os.environ["AI_STUDIO_API_KEY"] = settings.AI_STUDIO_API_KEY
+            os.environ["GEMINI_API_KEY"] = settings.GOOGLE_API_KEY
         if settings.OPENROUTER_API_KEY:
             os.environ["OPENROUTER_API_KEY"] = settings.OPENROUTER_API_KEY
             os.environ["OPENAI_API_KEY"] = settings.OPENROUTER_API_KEY

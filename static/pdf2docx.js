@@ -154,7 +154,7 @@ async function loadConfig() {
         defaultRoute = data.default_route || defaultRoute;
     } catch (error) {
         console.error(error);
-        routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' }, google_ai_studio: { label: '\u7ebf\u8def3' } };
+        routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };
         modelConfig = {
             'gemini-3.1-flash-lite-preview': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规场景。' },

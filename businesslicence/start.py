@@ -1,7 +1,7 @@
 """图片翻译系统启动文件
 
 功能：
-1. 使用 Google AI Studio (Gemini API) 识别图片中的字段标签和字段值
+1. 使用 Gemini API 识别图片中的字段标签和字段值
 2. 翻译识别结果（中文->英文）
 3. 根据字段标签匹配，填充到Word模板中
 
@@ -35,7 +35,7 @@ from app.service.business_licence_service import (
 
 # ==================== 配置区域 ====================
 
-# Google AI Studio API 配置
+# Gemini API 配置
 MODEL = BUSINESS_LICENCE_DEFAULT_MODEL
 DEFAULT_ROUTE = BUSINESS_LICENCE_DEFAULT_ROUTE
 

@@ -76,7 +76,6 @@ async function loadConfig() {
         routeConfig = {
             openrouter: { label: 'OpenRouter' },
             google: { label: 'Google' },
-            google_ai_studio: { label: 'Google AI Studio' },
         };
     }
 

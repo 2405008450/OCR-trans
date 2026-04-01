@@ -3,7 +3,6 @@ import re
 import shutil
 import threading
 import queue
-import math
 from datetime import datetime
 import pandas as pd
 from lxml import etree
@@ -43,8 +42,6 @@ BUFFER_CHARS = 2000
 OUTPUT_DIR = "Result_Output"
 PART_TASK_MAX_RETRIES = 3
 PART_TASK_RETRY_DELAY_SECONDS = 5
-AI_STUDIO_ALIGNMENT_TARGET_PROMPT_CHARS = 60000
-AI_STUDIO_ALIGNMENT_MAX_SUB_PARTS = 12
 
 # ==========================================
 # === 🤖 可用模型配置 ===
@@ -1701,10 +1698,6 @@ def _split_text_by_line_ratios(text, num_parts, split_line_ratios=None):
     return chunks, line_ratios
 
 
-def _estimate_alignment_prompt_chars(anchor_hint, text_original, text_trans):
-    return len(anchor_hint) + len(text_original) + len(text_trans) + 200
-
-
 def run_alignment_with_optional_chunking(
     system_prompt,
     anchor_hint,
@@ -1713,44 +1706,9 @@ def run_alignment_with_optional_chunking(
     model_id,
     filename,
 ):
-    """AI Studio 路线按最终 prompt 体积做二次分块，其他路线保持单次调用。"""
-    route = get_gemini_route()
-    estimated_chars = _estimate_alignment_prompt_chars(anchor_hint, text_original, text_trans)
-
-    if route != "google_ai_studio" or estimated_chars <= AI_STUDIO_ALIGNMENT_TARGET_PROMPT_CHARS:
-        user_prompt = build_alignment_user_prompt(anchor_hint, text_original, text_trans)
-        response = call_llm_stream(system_prompt, user_prompt, model_id, filename)
-        return response, 1
-
-    sub_parts = max(2, math.ceil(estimated_chars / AI_STUDIO_ALIGNMENT_TARGET_PROMPT_CHARS))
-    sub_parts = min(sub_parts, AI_STUDIO_ALIGNMENT_MAX_SUB_PARTS)
-
-    log_manager.log(
-        f"AI Studio 二次分块: {sub_parts} 份（估算请求体 {estimated_chars:,} 字符）"
-    )
-
-    orig_chunks, split_ratios = _split_text_by_line_ratios(text_original, sub_parts)
-    trans_chunks, _ = _split_text_by_line_ratios(text_trans, sub_parts, split_line_ratios=split_ratios)
-
-    combined_responses = []
-    for idx, (orig_chunk, trans_chunk) in enumerate(zip(orig_chunks, trans_chunks), start=1):
-        chunk_prompt = build_alignment_user_prompt(anchor_hint, orig_chunk, trans_chunk)
-        chunk_chars = len(chunk_prompt)
-        log_manager.log(
-            f"  子块 {idx}/{sub_parts}: 原文 {len(orig_chunk):,} 字符, "
-            f"译文 {len(trans_chunk):,} 字符, prompt {chunk_chars:,} 字符"
-        )
-        response = call_llm_stream(
-            system_prompt,
-            chunk_prompt,
-            model_id,
-            f"{filename}-子块{idx}/{sub_parts}",
-        )
-        if not response:
-            return None, sub_parts
-        combined_responses.append(response)
-
-    return "\n".join(combined_responses), sub_parts
+    user_prompt = build_alignment_user_prompt(anchor_hint, text_original, text_trans)
+    response = call_llm_stream(system_prompt, user_prompt, model_id, filename)
+    return response, 1
 
 
 def call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename=""):

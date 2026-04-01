@@ -14,7 +14,7 @@ TASK_TYPE_LABELS = {
     'alignment': 'Alignment',
     'drivers_license': 'Drivers License',
     'doc_translate': 'Doc Translate',
-    'business_licence': '营业执照翻译',
+    'business_licence': '证件翻译（营业执照）',
     'pdf2docx': 'PDF2DOCX',
 }
 

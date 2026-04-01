@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.controller import task
@@ -102,9 +102,14 @@ async def doc_translate_page():
     return _read_page("doc_translate.html")
 
 
-@app.get("/business-licence", response_class=HTMLResponse)
-async def business_licence_page():
+@app.get("/business-licence/embed", response_class=HTMLResponse)
+async def business_licence_embed_page():
     return _read_page("business_licence.html")
+
+
+@app.get("/business-licence")
+async def business_licence_page():
+    return RedirectResponse(url="/certificate-translation?tab=business-panel", status_code=307)
 
 
 @app.get("/zhongfanyi", response_class=HTMLResponse)

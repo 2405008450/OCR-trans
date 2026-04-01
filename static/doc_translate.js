@@ -156,7 +156,7 @@ async function loadConfig() {
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规 OCR。' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '复杂版面表现更稳。' },
         };
-        routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' }, google_ai_studio: { label: '\u7ebf\u8def3' } };
+        routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };
         languageConfig = { zh:{name:'中文'}, en:{name:'英文'}, ja:{name:'日文'}, ko:{name:'韩文'}, es:{name:'西班牙文'}, fr:{name:'法文'}, de:{name:'德文'}, ru:{name:'俄文'} };
     }
     renderModels();

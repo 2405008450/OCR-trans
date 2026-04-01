@@ -13,6 +13,7 @@ LABEL_MAP = {
     'alignment': 'Alignment',
     'drivers_license': 'Drivers License',
     'doc_translate': 'Doc Translate',
+    'business_licence': '证件翻译（营业执照）',
     'pdf2docx': 'PDF2DOCX',
 }
 
@@ -52,7 +53,13 @@ def _ensure_task_table_columns():
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_updated_at ON task (updated_at)'))
         connection.execute(text('UPDATE task SET updated_at = created_at WHERE updated_at IS NULL AND created_at IS NOT NULL'))
         for task_type, label in LABEL_MAP.items():
-            connection.execute(text('UPDATE task SET task_label = :label WHERE task_type = :tt AND task_label IS NULL'), {'label': label, 'tt': task_type})
+            if task_type == 'business_licence':
+                connection.execute(
+                    text("UPDATE task SET task_label = :label WHERE task_type = :tt AND (task_label IS NULL OR task_label = '营业执照翻译')"),
+                    {'label': label, 'tt': task_type},
+                )
+            else:
+                connection.execute(text('UPDATE task SET task_label = :label WHERE task_type = :tt AND task_label IS NULL'), {'label': label, 'tt': task_type})
         rows = connection.execute(text('SELECT id, created_at FROM task WHERE display_no IS NULL ORDER BY id')).fetchall()
         for row in rows:
             task_id = row[0]

@@ -128,9 +128,9 @@ async def task_download(task_id: str, file_path: str = Query(...), download_name
 
 
 @router.post("/run")
-async def run_task(file: UploadFile = File(...), from_lang: str = Query("zh"), to_lang: str = Query("en"), enable_correction: bool = Query(False), enable_visualization: bool = Query(True), card_side: str = Query("front"), doc_type: str = Query("id_card"), marriage_page_template: str = Query("page2"), registrar_signature_text: Optional[str] = Query(None), registered_by_text: Optional[str] = Query(None), registered_by_offset_x: int = Query(20), registered_by_offset_y: int = Query(-80), registrar_signature_offset_x: int = Query(48), registrar_signature_offset_y: int = Query(-12), enable_merge: bool = Query(True), enable_overlap_fix: bool = Query(True), enable_colon_fix: bool = Query(True), font_size: Optional[int] = Query(None)):
+async def run_task(file: UploadFile = File(...), from_lang: str = Query("zh"), to_lang: str = Query("en"), enable_correction: bool = Query(False), enable_visualization: bool = Query(True), card_side: str = Query("front")):
     try:
-        task_id = await task_queue_service.submit_ocr_task(file=file, from_lang=from_lang, to_lang=to_lang, enable_correction=enable_correction, enable_visualization=enable_visualization, card_side=card_side, doc_type=doc_type, marriage_page_template=marriage_page_template, registrar_signature_text=registrar_signature_text, registered_by_text=registered_by_text, registered_by_offset_x=registered_by_offset_x, registered_by_offset_y=registered_by_offset_y, registrar_signature_offset_x=registrar_signature_offset_x, registrar_signature_offset_y=registrar_signature_offset_y, enable_merge=enable_merge, enable_overlap_fix=enable_overlap_fix, enable_colon_fix=enable_colon_fix, font_size=font_size)
+        task_id = await task_queue_service.submit_ocr_task(file=file, from_lang=from_lang, to_lang=to_lang, enable_correction=enable_correction, enable_visualization=enable_visualization, card_side=card_side)
         return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
     except Exception as exc:
         tb = traceback.format_exc()
@@ -138,7 +138,7 @@ async def run_task(file: UploadFile = File(...), from_lang: str = Query("zh"), t
 
 
 @router.post("/run/batch")
-async def run_task_batch(files: List[UploadFile] = File(...), from_lang: str = Query("zh"), to_lang: str = Query("en"), enable_correction: bool = Query(False), enable_visualization: bool = Query(True), card_side: str = Query("front"), doc_type: str = Query("id_card"), marriage_page_template: str = Query("page2"), registrar_signature_text: Optional[str] = Query(None), registered_by_text: Optional[str] = Query(None), registered_by_offset_x: int = Query(20), registered_by_offset_y: int = Query(-80), registrar_signature_offset_x: int = Query(48), registrar_signature_offset_y: int = Query(-12), enable_merge: bool = Query(True), enable_overlap_fix: bool = Query(True), enable_colon_fix: bool = Query(True), font_size: Optional[int] = Query(None)):
+async def run_task_batch(files: List[UploadFile] = File(...), from_lang: str = Query("zh"), to_lang: str = Query("en"), enable_correction: bool = Query(False), enable_visualization: bool = Query(True), card_side: str = Query("front")):
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")
     if len(files) > 50:
@@ -146,7 +146,7 @@ async def run_task_batch(files: List[UploadFile] = File(...), from_lang: str = Q
     results = []
     for file in files:
         try:
-            task_id = await task_queue_service.submit_ocr_task(file=file, from_lang=from_lang, to_lang=to_lang, enable_correction=enable_correction, enable_visualization=enable_visualization, card_side=card_side, doc_type=doc_type, marriage_page_template=marriage_page_template, registrar_signature_text=registrar_signature_text, registered_by_text=registered_by_text, registered_by_offset_x=registered_by_offset_x, registered_by_offset_y=registered_by_offset_y, registrar_signature_offset_x=registrar_signature_offset_x, registrar_signature_offset_y=registrar_signature_offset_y, enable_merge=enable_merge, enable_overlap_fix=enable_overlap_fix, enable_colon_fix=enable_colon_fix, font_size=font_size)
+            task_id = await task_queue_service.submit_ocr_task(file=file, from_lang=from_lang, to_lang=to_lang, enable_correction=enable_correction, enable_visualization=enable_visualization, card_side=card_side)
             results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
         except Exception as exc:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
