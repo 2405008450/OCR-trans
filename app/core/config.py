@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -51,6 +52,11 @@ class Settings(BaseSettings):
 
     TARGET_IMAGE_WIDTH: int = int(os.getenv("TARGET_IMAGE_WIDTH", "1080"))
     ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "*")
+    TASK_QUEUE_MAX_CONCURRENT_TASKS: int = int(os.getenv("TASK_QUEUE_MAX_CONCURRENT_TASKS", "2"))
+    TASK_QUEUE_EXECUTOR_MAX_WORKERS: int = int(os.getenv("TASK_QUEUE_EXECUTOR_MAX_WORKERS", "4"))
+    TASK_QUEUE_POLL_INTERVAL_SECONDS: float = float(os.getenv("TASK_QUEUE_POLL_INTERVAL_SECONDS", "0.5"))
+    TASK_QUEUE_CANDIDATE_BATCH_SIZE: int = int(os.getenv("TASK_QUEUE_CANDIDATE_BATCH_SIZE", "20"))
+    TASK_QUEUE_TYPE_LIMITS_JSON: str = os.getenv("TASK_QUEUE_TYPE_LIMITS_JSON", "")
 
     class Config:
         env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
@@ -64,6 +70,27 @@ class Settings(BaseSettings):
     @property
     def GEMINI_ENABLE_OPENROUTER_FALLBACK_ENABLED(self) -> bool:
         return str(self.GEMINI_ENABLE_OPENROUTER_FALLBACK).strip().lower() in {"1", "true", "yes", "on"}
+
+    @property
+    def TASK_QUEUE_TYPE_LIMITS(self) -> dict[str, int]:
+        raw = (self.TASK_QUEUE_TYPE_LIMITS_JSON or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        limits: dict[str, int] = {}
+        for key, value in parsed.items():
+            try:
+                limit = int(value)
+            except (TypeError, ValueError):
+                continue
+            if limit > 0:
+                limits[str(key)] = limit
+        return limits
 
 
 settings = Settings()

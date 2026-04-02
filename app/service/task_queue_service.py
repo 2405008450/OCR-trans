@@ -36,35 +36,88 @@ class TaskCancelledError(Exception):
 
 class TaskQueueService:
     MAX_AUTO_REQUEUE_ATTEMPTS = 1
+    DEFAULT_TASK_TYPE_LIMITS: Dict[str, int] = {
+        'ocr': 1,
+        'pdf2docx': 1,
+        'doc_translate': 1,
+        'alignment': 1,
+        'drivers_license': 1,
+        'business_licence': 2,
+        'number_check': 2,
+        'zhongfanyi': 2,
+    }
+    SHARED_TASK_GROUPS: Dict[str, str] = {
+        'number_check': 'specialist_text',
+        'zhongfanyi': 'specialist_text',
+    }
+    SHARED_GROUP_LIMITS: Dict[str, int] = {
+        'specialist_text': 1,
+    }
 
     def __init__(self):
         self._worker_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+        self._dispatch_event = asyncio.Event()
         self._task_executor: Optional[ThreadPoolExecutor] = None
         self._task_logs: Dict[str, str] = {}
         self._last_log_line: Dict[str, str] = {}
         self._max_log_chars = 50000
+        self._running_tasks: Dict[str, asyncio.Task] = {}
+        self._running_task_types: Dict[str, str] = {}
+        self._running_counts: Dict[str, int] = {}
+        self._running_group_counts: Dict[str, int] = {}
+        self._max_concurrent_tasks = max(1, settings.TASK_QUEUE_MAX_CONCURRENT_TASKS)
+        self._poll_interval_seconds = max(0.1, settings.TASK_QUEUE_POLL_INTERVAL_SECONDS)
+        self._candidate_batch_size = max(1, settings.TASK_QUEUE_CANDIDATE_BATCH_SIZE)
+        self._task_type_limits = self._build_task_type_limits()
+
+    @classmethod
+    def _build_task_type_limits(cls) -> Dict[str, int]:
+        limits = dict(cls.DEFAULT_TASK_TYPE_LIMITS)
+        for task_type, limit in settings.TASK_QUEUE_TYPE_LIMITS.items():
+            limits[task_type] = limit
+        return limits
 
     async def start(self):
         if self._worker_task and not self._worker_task.done():
             return
         self._stop_event = asyncio.Event()
+        self._dispatch_event = asyncio.Event()
+        self._running_tasks = {}
+        self._running_task_types = {}
+        self._running_counts = {}
+        self._running_group_counts = {}
         if self._task_executor is None:
-            self._task_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='task-queue')
+            executor_workers = max(
+                1,
+                settings.TASK_QUEUE_EXECUTOR_MAX_WORKERS,
+                self._max_concurrent_tasks,
+            )
+            self._task_executor = ThreadPoolExecutor(max_workers=executor_workers, thread_name_prefix='task-queue')
         self._requeue_interrupted_tasks()
-        self._worker_task = asyncio.create_task(self._worker_loop(), name='task-queue-worker')
+        self._worker_task = asyncio.create_task(self._worker_loop(), name='task-queue-dispatcher')
 
     async def stop(self):
         if not self._worker_task:
             return
         self._stop_event.set()
+        self._dispatch_event.set()
         self._worker_task.cancel()
+        running_tasks = list(self._running_tasks.values())
+        for running_task in running_tasks:
+            running_task.cancel()
         try:
             await self._worker_task
+            if running_tasks:
+                await asyncio.gather(*running_tasks, return_exceptions=True)
         except asyncio.CancelledError:
             pass
         finally:
             self._worker_task = None
+            self._running_tasks = {}
+            self._running_task_types = {}
+            self._running_counts = {}
+            self._running_group_counts = {}
             if self._task_executor is not None:
                 self._task_executor.shutdown(wait=False, cancel_futures=True)
                 self._task_executor = None
@@ -75,6 +128,7 @@ class TaskQueueService:
         try:
             input_path, original_filename = await self._save_single_upload(file, 'ocr', reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -124,6 +178,7 @@ class TaskQueueService:
                         'single_filename': single_file.filename,
                     },
                 )
+                self._notify_dispatcher()
                 return reserved_task.task_id
 
             if original_file is None or translated_file is None:
@@ -136,6 +191,7 @@ class TaskQueueService:
             original_path.write_bytes(await original_file.read())
             translated_path.write_bytes(await translated_file.read())
             self._update_task_input_files(reserved_task.task_id, {'original_path': str(original_path).replace('\\', '/'), 'translated_path': str(translated_path).replace('\\', '/'), 'original_filename': original_file.filename, 'translated_filename': translated_file.filename})
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -185,6 +241,7 @@ class TaskQueueService:
                     task.params_json = json.dumps(params, ensure_ascii=False)
                     db.commit()
             self._update_task_input_files(reserved_task.task_id, input_files)
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -210,6 +267,7 @@ class TaskQueueService:
                     'translated_filename': translated_file.filename,
                 },
             )
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -220,6 +278,7 @@ class TaskQueueService:
         try:
             input_path, original_filename = await self._save_single_upload(file, 'doc_translate', reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -248,6 +307,7 @@ class TaskQueueService:
         try:
             input_path, original_filename = await self._save_single_upload(file, 'business_licence', reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -258,6 +318,7 @@ class TaskQueueService:
         try:
             input_path, original_filename = await self._save_single_upload(file, 'pdf2docx', reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -275,6 +336,7 @@ class TaskQueueService:
                 input_path.write_bytes(await file.read())
                 saved_files.append({'index': index, 'path': str(input_path).replace('\\', '/'), 'original_filename': file.filename or input_path.name})
             self._update_task_input_files(reserved_task.task_id, {'files': saved_files})
+            self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -342,14 +404,103 @@ class TaskQueueService:
                 max_retry_count=self.MAX_AUTO_REQUEUE_ATTEMPTS,
             )
 
+    def _notify_dispatcher(self) -> None:
+        if not self._dispatch_event.is_set():
+            self._dispatch_event.set()
+
+    def _can_start_task_type(self, task_type: str) -> bool:
+        task_limit = self._task_type_limits.get(task_type, self._max_concurrent_tasks)
+        if self._running_counts.get(task_type, 0) >= task_limit:
+            return False
+
+        group_name = self.SHARED_TASK_GROUPS.get(task_type)
+        if not group_name:
+            return True
+
+        group_limit = self.SHARED_GROUP_LIMITS.get(group_name, task_limit)
+        return self._running_group_counts.get(group_name, 0) < group_limit
+
+    def _reserve_task_slot(self, task_id: str, task_type: str) -> None:
+        self._running_task_types[task_id] = task_type
+        self._running_counts[task_type] = self._running_counts.get(task_type, 0) + 1
+
+        group_name = self.SHARED_TASK_GROUPS.get(task_type)
+        if group_name:
+            self._running_group_counts[group_name] = self._running_group_counts.get(group_name, 0) + 1
+
+    def _release_task_slot(self, task_id: str) -> None:
+        task_type = self._running_task_types.pop(task_id, None)
+        if not task_type:
+            return
+
+        remaining = self._running_counts.get(task_type, 0) - 1
+        if remaining > 0:
+            self._running_counts[task_type] = remaining
+        else:
+            self._running_counts.pop(task_type, None)
+
+        group_name = self.SHARED_TASK_GROUPS.get(task_type)
+        if group_name:
+            group_remaining = self._running_group_counts.get(group_name, 0) - 1
+            if group_remaining > 0:
+                self._running_group_counts[group_name] = group_remaining
+            else:
+                self._running_group_counts.pop(group_name, None)
+
+    def _claim_next_dispatchable_task(self):
+        with SessionLocal() as db:
+            queued_tasks = task_repo.list_queued_tasks(db, limit=self._candidate_batch_size)
+            for queued_task in queued_tasks:
+                if not self._can_start_task_type(queued_task.task_type):
+                    continue
+                claimed_task = task_repo.claim_queued_task_by_task_id(db, queued_task.task_id)
+                if claimed_task:
+                    return claimed_task
+        return None
+
+    def _start_claimed_task(self, task_id: str, task_type: str) -> None:
+        self._reserve_task_slot(task_id, task_type)
+        runner = asyncio.create_task(self._execute_task(task_id), name=f'task-{task_type}-{task_id[:8]}')
+        self._running_tasks[task_id] = runner
+
+        def _on_done(done_task: asyncio.Task, *, claimed_task_id: str):
+            self._running_tasks.pop(claimed_task_id, None)
+            self._release_task_slot(claimed_task_id)
+            try:
+                done_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                self._append_task_log(claimed_task_id, f'[error] runner crashed: {exc}')
+            self._notify_dispatcher()
+
+        runner.add_done_callback(
+            lambda done_task, claimed_task_id=task_id: _on_done(done_task, claimed_task_id=claimed_task_id)
+        )
+
+    async def _dispatch_ready_tasks(self) -> bool:
+        dispatched_any = False
+        while (
+            not self._stop_event.is_set()
+            and len(self._running_tasks) < self._max_concurrent_tasks
+        ):
+            claimed_task = self._claim_next_dispatchable_task()
+            if not claimed_task:
+                break
+            dispatched_any = True
+            self._start_claimed_task(claimed_task.task_id, claimed_task.task_type)
+        return dispatched_any
+
     async def _worker_loop(self):
         while not self._stop_event.is_set():
-            with SessionLocal() as db:
-                task = task_repo.claim_next_queued_task(db)
-            if not task:
-                await asyncio.sleep(1)
+            dispatched_any = await self._dispatch_ready_tasks()
+            if dispatched_any:
                 continue
-            await self._execute_task(task.task_id)
+            self._dispatch_event.clear()
+            try:
+                await asyncio.wait_for(self._dispatch_event.wait(), timeout=self._poll_interval_seconds)
+            except asyncio.TimeoutError:
+                continue
 
     async def _execute_task(self, task_id: str):
         with SessionLocal() as db:

@@ -55,20 +55,47 @@ def count_tasks_ahead(db: Session, task: Task) -> int:
     return db.query(Task).filter(Task.status == 'queued', Task.created_at < task.created_at).count()
 
 
-def claim_next_queued_task(db: Session, task_type: Optional[str] = None) -> Optional[Task]:
+def list_queued_tasks(db: Session, *, limit: int = 20, task_type: Optional[str] = None) -> List[Task]:
     query = db.query(Task).filter(Task.status == 'queued', Task.cancel_requested.is_(False))
     if task_type:
         query = query.filter(Task.task_type == task_type)
-    task = query.order_by(Task.created_at.asc(), Task.id.asc()).first()
-    if not task:
+    return query.order_by(Task.created_at.asc(), Task.id.asc()).limit(limit).all()
+
+
+def claim_queued_task_by_task_id(db: Session, task_id: str) -> Optional[Task]:
+    task = get_task_by_task_id(db, task_id)
+    if not task or task.status != 'queued' or task.cancel_requested:
         return None
+
     now = _now()
-    updated_rows = db.query(Task).filter(Task.id == task.id, Task.status == 'queued').update({Task.status: 'running', Task.progress: 1, Task.message: 'Processing', Task.started_at: now, Task.updated_at: now, Task.error_message: None}, synchronize_session=False)
+    updated_rows = db.query(Task).filter(
+        Task.id == task.id,
+        Task.status == 'queued',
+        Task.cancel_requested.is_(False),
+    ).update(
+        {
+            Task.status: 'running',
+            Task.progress: 1,
+            Task.message: 'Processing',
+            Task.started_at: now,
+            Task.updated_at: now,
+            Task.error_message: None,
+        },
+        synchronize_session=False,
+    )
     if updated_rows != 1:
         db.rollback()
         return None
     db.commit()
     return get_task_by_task_id(db, task.task_id)
+
+
+def claim_next_queued_task(db: Session, task_type: Optional[str] = None) -> Optional[Task]:
+    tasks = list_queued_tasks(db, limit=1, task_type=task_type)
+    task = tasks[0] if tasks else None
+    if not task:
+        return None
+    return claim_queued_task_by_task_id(db, task.task_id)
 
 
 def update_task_progress(db: Session, task_id: str, *, progress: Optional[int] = None, message: Optional[str] = None, status: Optional[str] = None) -> Optional[Task]:
