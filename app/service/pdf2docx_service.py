@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.config import settings
+from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
@@ -112,6 +113,14 @@ async def execute_pdf2docx_task_from_path(
             title=input_file.stem,
         ),
     )
+
+    final_docx_path = ensure_unique_path(
+        task_output_dir / build_user_visible_filename(original_filename, ext=".docx"),
+        existing_path=docx_output_path,
+    )
+    if docx_output_path != final_docx_path:
+        docx_output_path.replace(final_docx_path)
+        docx_output_path = final_docx_path
 
     await _maybe_report(progress_callback, 95, "正在整理输出结果")
     return {

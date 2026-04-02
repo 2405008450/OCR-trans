@@ -15,6 +15,7 @@ from docx import Document
 from fastapi import UploadFile
 
 from app.core.config import settings
+from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import (
     GEMINI_ROUTE_OPENROUTER,
     ensure_gemini_route_configured,
@@ -813,7 +814,9 @@ def _run_number_check_sync(
     footer_stat = _apply_all_fixes(doc, footer_errors, "页脚", "footer", replace_and_revise_in_docx, revision_manager, task_id=task_id, progress_callback=progress_callback)
 
     doc.save(backup_copy_path)
-    final_doc_path = output_dir / "corrected.docx"
+    final_doc_path = ensure_unique_path(
+        output_dir / build_user_visible_filename(translated_filename, suffix="corrected", ext=".docx")
+    )
     shutil.copy2(backup_copy_path, final_doc_path)
 
     copied_reports, report_counts = _copy_report_outputs(report_paths, output_dir, output_dir.name)
@@ -827,7 +830,7 @@ def _run_number_check_sync(
         "original_filename": original_filename,
         "translated_filename": translated_filename,
         "model_name": resolved_model_name,
-        "corrected_docx": f"outputs/number_check/{output_dir.name}/corrected.docx",
+        "corrected_docx": f"outputs/number_check/{output_dir.name}/{final_doc_path.name}",
         "reports": copied_reports,
         "report_counts": report_counts,
         "stats": {
@@ -927,10 +930,12 @@ def _run_number_check_single_sync(
         footer_stat = _apply_all_fixes(doc, footer_errors, "页脚", "footer", replace_and_revise_in_docx, revision_manager, task_id=task_id)
 
         doc.save(backup_copy_path)
-        final_doc_path = output_dir / "corrected.docx"
+        final_doc_path = ensure_unique_path(
+            output_dir / build_user_visible_filename(single_filename, suffix="corrected", ext=".docx")
+        )
         shutil.copy2(backup_copy_path, final_doc_path)
 
-        result["corrected_docx"] = f"outputs/number_check/{output_dir.name}/corrected.docx"
+        result["corrected_docx"] = f"outputs/number_check/{output_dir.name}/{final_doc_path.name}"
         result["fix_stats"] = {
             "success": body_stat["success"] + header_stat["success"] + footer_stat["success"],
             "failed": body_stat["failed"] + header_stat["failed"] + footer_stat["failed"],

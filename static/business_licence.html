@@ -153,6 +153,31 @@
             min-width: 132px;
         }
 
+        body.embedded-shell {
+            background:
+                radial-gradient(circle at top left, rgba(14, 165, 233, 0.12), transparent 26%),
+                radial-gradient(circle at 88% 10%, rgba(16, 185, 129, 0.08), transparent 18%),
+                linear-gradient(145deg, rgba(4, 16, 27, 0.96) 0%, rgba(11, 26, 45, 0.92) 48%, rgba(16, 41, 66, 0.9) 100%);
+        }
+
+        body.embedded-shell::before {
+            display: block;
+            opacity: 0.55;
+        }
+
+        body.embedded-shell .upload-card,
+        body.embedded-shell .processing-card,
+        body.embedded-shell .result-header,
+        body.embedded-shell .result-grid,
+        body.embedded-shell .info-card,
+        body.embedded-shell .result-item {
+            background: rgba(255, 255, 255, 0.86);
+        }
+
+        body.embedded-shell .info-card.emphasis {
+            background: linear-gradient(180deg, rgba(14, 165, 233, 0.09), rgba(14, 165, 233, 0.035));
+        }
+
         @media (max-width: 640px) {
             .dialog-card {
                 padding: 22px;

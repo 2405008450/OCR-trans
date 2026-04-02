@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.core.config import settings
+from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
 
 
@@ -223,7 +224,11 @@ def _collect_reports(report_paths: Optional[Dict[str, str]], excel_paths: Option
     return reports, report_counts
 
 
-def _copy_final_output(result_path: Optional[str], output_dir: Path) -> tuple[Optional[str], Dict[str, str]]:
+def _copy_final_output(
+    result_path: Optional[str],
+    output_dir: Path,
+    preferred_filename: Optional[str] = None,
+) -> tuple[Optional[str], Dict[str, str]]:
     if not result_path:
         return None, {}
 
@@ -232,15 +237,19 @@ def _copy_final_output(result_path: Optional[str], output_dir: Path) -> tuple[Op
         return None, {}
 
     suffix = source.suffix.lower()
-    target_name = {
-        ".docx": "corrected.docx",
-        ".doc": "corrected.doc",
-        ".pdf": "annotated.pdf",
-        ".xlsx": "annotated.xlsx",
-        ".xls": "annotated.xls",
-        ".pptx": "annotated.pptx",
-    }.get(suffix, source.name)
-    target = output_dir / target_name
+    suffix_label = {
+        ".docx": "corrected",
+        ".doc": "corrected",
+        ".pdf": "annotated",
+        ".xlsx": "annotated",
+        ".xls": "annotated",
+        ".pptx": "annotated",
+    }.get(suffix)
+    if suffix_label:
+        target_name = build_user_visible_filename(preferred_filename or source.name, suffix=suffix_label, ext=suffix)
+    else:
+        target_name = source.name
+    target = ensure_unique_path(output_dir / target_name, existing_path=source)
 
     try:
         same_file = source.resolve() == target.resolve()
@@ -270,6 +279,9 @@ def run_zhongfanyi_task(
     original_path: Optional[str] = None,
     translated_path: Optional[str] = None,
     single_path: Optional[str] = None,
+    original_filename: Optional[str] = None,
+    translated_filename: Optional[str] = None,
+    single_filename: Optional[str] = None,
     use_ai_rule: bool = False,
     gemini_route: str = ZHONGFANYI_DEFAULT_GEMINI_ROUTE,
     ai_rule_file_path: Optional[str] = None,
@@ -315,7 +327,12 @@ def run_zhongfanyi_task(
         return _task_progress[task_id]
 
     _update_task(task_id, "正在整理输出文件...", 90)
-    output_web_path, output_payload = _copy_final_output(result_path, output_dir)
+    preferred_output_filename = single_filename if normalized_mode == ZHONGFANYI_MODE_SINGLE else (translated_filename or original_filename)
+    output_web_path, output_payload = _copy_final_output(
+        result_path,
+        output_dir,
+        preferred_filename=preferred_output_filename,
+    )
     reports, report_counts = _collect_reports(report_paths, excel_paths)
     total_issues = sum(report_counts.values())
 
@@ -330,12 +347,12 @@ def run_zhongfanyi_task(
         "total_issues": total_issues,
     }
     if normalized_mode == ZHONGFANYI_MODE_SINGLE and single_path:
-        result["single_filename"] = Path(single_path).name
+        result["single_filename"] = single_filename or Path(single_path).name
     if normalized_mode == ZHONGFANYI_MODE_DOUBLE:
         if original_path:
-            result["original_filename"] = Path(original_path).name
+            result["original_filename"] = original_filename or Path(original_path).name
         if translated_path:
-            result["translated_filename"] = Path(translated_path).name
+            result["translated_filename"] = translated_filename or Path(translated_path).name
     if output_web_path:
         result.update(output_payload)
 

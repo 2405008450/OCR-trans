@@ -77,10 +77,19 @@ Allowed tags:
 
 Formatting rules:
 - Prefer <p> over nested <div>.
-- Use tables for structured alignment when needed.
+- Before writing HTML, inspect the page as a 2D layout, not only as linear text.
+- Use tables aggressively for structured alignment, even when the source document has no visible table borders.
+- If two or more text blocks sit on the same visual row or horizontal band but are separated left/right, place them in the same table row with separate cells.
+- This rule applies to sparse forms, metadata headers, label/value pairs, signatures, names, dates, IDs, addresses, and any side-by-side content blocks.
+- Do NOT flatten left/right blocks from the same row into separate stacked paragraphs.
+- If one side contains multiple lines, keep them inside the same cell with <br> instead of splitting them into separate paragraphs.
+- If you are unsure whether a layout should be paragraphs or a table, prefer a borderless table that preserves the horizontal relationship.
+- For alignment-only layouts, use simple borderless tables such as:
+  <table style="width:100%; border:none;"><tr><td style="width:50%; border:none; vertical-align:top;">...</td><td style="width:50%; border:none; vertical-align:top;">...</td></tr></table>
+- Do not invent columns that are not present, but preserve every obvious horizontal grouping that appears in the source.
 - Keep styles minimal and inline only when necessary.
 - Only use simple inline styles such as:
-  text-align, font-size, font-family, font-weight, margin, text-indent
+  text-align, font-size, font-family, font-weight, margin, text-indent, width, vertical-align, border
 - Do not use:
   flex, grid, float, position, transform, rgba(), opacity, negative margins, external CSS, JavaScript, SVG, canvas
 - Avoid unnecessary nesting.

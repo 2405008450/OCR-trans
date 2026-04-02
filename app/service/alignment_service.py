@@ -26,6 +26,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.core.config import settings
+from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import (
     DEFAULT_GEMINI_TIMEOUT_SECONDS,
     ensure_gemini_route_configured,
@@ -1565,6 +1566,25 @@ def _is_reusable_alignment_excel(path: str) -> bool:
     return {"原文", "译文"}.issubset(columns)
 
 
+def _normalize_output_path(path: str | Path) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _finalize_alignment_output(output_path: str | Path, task_dir: str | Path, original_filename: Optional[str]) -> str:
+    source = Path(output_path)
+    if not source.exists():
+        return _normalize_output_path(source)
+
+    target = ensure_unique_path(
+        Path(task_dir) / build_user_visible_filename(original_filename or source.name, suffix="对齐结果", ext=source.suffix or ".xlsx"),
+        existing_path=source,
+    )
+    if source != target:
+        source.replace(target)
+        source = target
+    return _normalize_output_path(source)
+
+
 def _run_alignment_sync(
     original_path: str,
     translated_path: str,
@@ -1583,6 +1603,8 @@ def _run_alignment_sync(
     threshold_7: int = 150000,
     threshold_8: int = 175000,
     buffer_chars: int = 2000,
+    original_filename: Optional[str] = None,
+    translated_filename: Optional[str] = None,
 ):
     """同步执行对齐任务 - 线程安全版，支持多任务并发"""
     try:
@@ -1600,6 +1622,8 @@ def _run_alignment_sync(
         # 绝对路径
         original_path = os.path.abspath(original_path)
         translated_path = os.path.abspath(translated_path)
+        original_filename = original_filename or Path(original_path).name
+        translated_filename = translated_filename or Path(translated_path).name
 
         model_info = AVAILABLE_MODELS.get(model_name, AVAILABLE_MODELS[DEFAULT_MODEL])
         model_id = model_info['id']
@@ -1648,12 +1672,13 @@ def _run_alignment_sync(
                 source_lang=source_lang, target_lang=target_lang,
             )
             if success and os.path.exists(out_path):
-                rel = os.path.relpath(out_path, ".").replace("\\", "/")
+                final_output_path = _finalize_alignment_output(out_path, task_dir, original_filename)
+                rel = os.path.relpath(final_output_path, ".").replace("\\", "/")
                 _complete_task(task_id, result={
                     "output_excel": rel,
-                    "row_count": len(pd.read_excel(out_path)),
+                    "row_count": len(pd.read_excel(final_output_path)),
                     "file_type": "excel",
-                "gemini_route": gemini_route,
+                    "gemini_route": gemini_route,
                     "intermediate_files": _list_intermediate_files(temp_dir),
                 })
             else:
@@ -1847,8 +1872,9 @@ def _run_alignment_sync(
         print(f"[alignment] generated_excel_paths={generated_excel_paths}")
         if final_path and os.path.exists(final_path):
             _update_progress(task_id, 90, "正在整理最终结果...")
-            rel = os.path.relpath(final_path, ".").replace("\\", "/")
-            final_df = pd.read_excel(final_path)
+            final_output_path = _finalize_alignment_output(final_path, task_dir, original_filename)
+            rel = os.path.relpath(final_output_path, ".").replace("\\", "/")
+            final_df = pd.read_excel(final_output_path)
             row_count = len(final_df)
             if split_parts > 1:
                 issues = []
@@ -1900,6 +1926,8 @@ async def run_alignment_task(
     threshold_7: int = 150000,
     threshold_8: int = 175000,
     buffer_chars: int = 2000,
+    original_filename: Optional[str] = None,
+    translated_filename: Optional[str] = None,
     executor: Optional[Executor] = None,
 ):
     """在后台线程池中执行对齐任务"""
@@ -1915,5 +1943,6 @@ async def run_alignment_task(
             threshold_4=threshold_4, threshold_5=threshold_5,
             threshold_6=threshold_6, threshold_7=threshold_7,
             threshold_8=threshold_8, buffer_chars=buffer_chars,
+            original_filename=original_filename, translated_filename=translated_filename,
         ),
     )

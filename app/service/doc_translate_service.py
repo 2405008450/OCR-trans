@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from openai import OpenAI
 
 from app.core.config import settings
+from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
@@ -298,6 +299,14 @@ async def execute_doc_translate_task(
                 title=f"{stem}_{lang}",
             ),
         )
+
+        final_docx_path = ensure_unique_path(
+            task_output_dir / build_user_visible_filename(original_filename, suffix=lang, ext=".docx"),
+            existing_path=docx_path,
+        )
+        if docx_path != final_docx_path:
+            docx_path.replace(final_docx_path)
+            docx_path = final_docx_path
 
         results_per_lang[lang] = {
             "lang_code": lang,

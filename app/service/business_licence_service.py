@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from app.core.config import settings
+from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import (
     GEMINI_ROUTE_OPENROUTER,
     ensure_gemini_route_configured,
@@ -395,6 +396,14 @@ async def execute_business_licence_task(
         )
 
     await loop.run_in_executor(executor, _render_docx)
+
+    final_docx_path = ensure_unique_path(
+        output_dir / build_user_visible_filename(original_filename, suffix="translated", ext=".docx"),
+        existing_path=output_docx_path,
+    )
+    if output_docx_path != final_docx_path:
+        output_docx_path.replace(final_docx_path)
+        output_docx_path = final_docx_path
 
     await _maybe_report(progress_callback, 95, "正在整理营业执照输出文件")
     return {

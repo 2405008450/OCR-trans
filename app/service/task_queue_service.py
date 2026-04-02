@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional
 from fastapi import UploadFile
 
 from app.core.config import settings
-from app.core.file_naming import build_storage_filename
+from app.core.file_naming import build_storage_filename, build_user_visible_filename
 from app.db.session import SessionLocal
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
@@ -201,7 +201,15 @@ class TaskQueueService:
             translated_path = upload_dir / build_storage_filename(reserved_task.display_no, translated_file.filename, reserved_task.task_id, role='translated', ext=trans_ext)
             original_path.write_bytes(await original_file.read())
             translated_path.write_bytes(await translated_file.read())
-            self._update_task_input_files(reserved_task.task_id, {'original_path': str(original_path).replace('\\', '/'), 'translated_path': str(translated_path).replace('\\', '/')})
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {
+                    'original_path': str(original_path).replace('\\', '/'),
+                    'translated_path': str(translated_path).replace('\\', '/'),
+                    'original_filename': original_file.filename,
+                    'translated_filename': translated_file.filename,
+                },
+            )
             return reserved_task.task_id
         except Exception as exc:
             self._fail_reserved_task(reserved_task.task_id, exc)
@@ -457,6 +465,9 @@ class TaskQueueService:
                 original_path=input_files.get('original_path'),
                 translated_path=input_files.get('translated_path'),
                 single_path=input_files.get('single_path'),
+                original_filename=input_files.get('original_filename'),
+                translated_filename=input_files.get('translated_filename'),
+                single_filename=input_files.get('single_filename'),
                 use_ai_rule=params.get('use_ai_rule', False),
                 gemini_route=params.get('gemini_route', 'openrouter'),
                 ai_rule_file_path=params.get('ai_rule_file_path'),
@@ -469,7 +480,18 @@ class TaskQueueService:
     async def _execute_alignment(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'alignment started')
         from app.service import alignment_service
-        job = asyncio.create_task(alignment_service.run_alignment_task(original_path=input_files['original_path'], translated_path=input_files['translated_path'], task_id=task_id, display_no=display_no, executor=self._task_executor, **params))
+        job = asyncio.create_task(
+            alignment_service.run_alignment_task(
+                original_path=input_files['original_path'],
+                translated_path=input_files['translated_path'],
+                original_filename=input_files.get('original_filename'),
+                translated_filename=input_files.get('translated_filename'),
+                task_id=task_id,
+                display_no=display_no,
+                executor=self._task_executor,
+                **params,
+            )
+        )
         await self._mirror_progress(task_id, job, lambda: alignment_service.get_alignment_progress(task_id), update)
         await job
         status = alignment_service.get_alignment_progress(task_id) or {}
@@ -520,72 +542,87 @@ class TaskQueueService:
 
     @staticmethod
     def _extract_output_files(task_type: str, result: Optional[Dict[str, Any]], output_path: Optional[str], original_filename: Optional[str] = None) -> list:
-        from datetime import datetime as _dt
-        timestamp = _dt.now().strftime('%Y%m%d_%H%M%S')
-        stem = Path(original_filename or 'file').stem[:60]
-        if ' | ' in stem:
-            stem = stem.split(' | ')[0]
-        suffix = {'ocr': 'ocr', 'number_check': 'number_check', 'zhongfanyi': 'zhongfanyi', 'alignment': 'alignment', 'drivers_license': 'drivers_license', 'doc_translate': 'doc_translate', 'business_licence': 'business_licence', 'pdf2docx': 'pdf2docx'}.get(task_type, task_type)
-        def friendly(label: str, real_path: str) -> str:
-            return f'{stem}_{timestamp}_{suffix}_{label}{Path(real_path).suffix}'
+        def friendly(real_path: str, fallback_name: Optional[str] = None, fallback_suffix: Optional[str] = None) -> str:
+            basename = Path(real_path or '').name
+            if basename:
+                return basename
+            ext = Path(real_path or '').suffix or '.bin'
+            return build_user_visible_filename(fallback_name, suffix=fallback_suffix, ext=ext)
+
         files = []
         if not result:
             if output_path:
-                files.append({'name': friendly('output', output_path), 'path': output_path, 'type': 'output'})
+                files.append({'name': friendly(output_path, original_filename, 'output'), 'path': output_path, 'type': 'output'})
             return files
-        def add_result(key: str, label: str, ftype: str = 'output'):
+
+        def add_result(key: str, ftype: str = 'output', fallback_name: Optional[str] = None, fallback_suffix: Optional[str] = None):
             value = result.get(key)
             if value and isinstance(value, str):
-                files.append({'name': friendly(label, value), 'path': value, 'type': ftype})
+                files.append(
+                    {
+                        'name': friendly(value, fallback_name or original_filename, fallback_suffix or key),
+                        'path': value,
+                        'type': ftype,
+                    }
+                )
+
         if task_type == 'ocr':
             for item in result.get('results', []):
                 if isinstance(item, dict):
                     if item.get('translated_image'):
-                        files.append({'name': friendly('translated', item['translated_image']), 'path': item['translated_image'], 'type': 'output'})
+                        files.append({'name': friendly(item['translated_image'], original_filename, 'translated'), 'path': item['translated_image'], 'type': 'output'})
                     if item.get('visualization_image'):
-                        files.append({'name': friendly('visualization', item['visualization_image']), 'path': item['visualization_image'], 'type': 'output'})
+                        files.append({'name': friendly(item['visualization_image'], original_filename, 'visualization'), 'path': item['visualization_image'], 'type': 'output'})
         elif task_type == 'number_check':
-            add_result('corrected_docx', 'corrected_docx')
+            add_result('corrected_docx')
             reports = result.get('reports', {})
             if isinstance(reports, dict):
                 for label, path in reports.items():
                     if isinstance(path, str) and path:
-                        files.append({'name': friendly(label, path), 'path': path, 'type': 'report'})
+                        files.append({'name': friendly(path, original_filename, label), 'path': path, 'type': 'report'})
         elif task_type == 'zhongfanyi':
-            add_result('corrected_docx', 'corrected_docx')
-            add_result('annotated_pdf', 'annotated_pdf')
-            add_result('annotated_excel', 'annotated_excel')
-            add_result('annotated_pptx', 'annotated_pptx')
-            add_result('output_file', 'output')
+            add_result('corrected_docx')
+            add_result('annotated_pdf')
+            add_result('annotated_excel')
+            add_result('annotated_pptx')
+            add_result('output_file')
             reports = result.get('reports', {})
             if isinstance(reports, dict):
                 for label, path in reports.items():
                     if isinstance(path, str) and path:
-                        files.append({'name': friendly(label, path), 'path': path, 'type': 'report'})
+                        files.append({'name': friendly(path, original_filename, label), 'path': path, 'type': 'report'})
         elif task_type == 'alignment':
-            add_result('output_excel', 'output_excel')
+            add_result('output_excel')
         elif task_type == 'drivers_license':
             if result.get('processing_mode') == 'batch':
                 for item in result.get('items', []):
                     if isinstance(item, dict) and item.get('output_docx'):
-                        files.append({'name': friendly(item.get('input_filename') or 'drivers_license', item['output_docx']), 'path': item['output_docx'], 'type': 'output'})
+                        files.append({'name': friendly(item['output_docx'], item.get('input_filename'), 'translation'), 'path': item['output_docx'], 'type': 'output'})
             else:
-                add_result('output_docx', 'output_docx')
+                add_result('output_docx')
         elif task_type == 'doc_translate':
-            add_result('raw_output_txt', 'raw_output')
+            add_result('raw_output_txt')
             translations = result.get('translations', {})
             values = translations.values() if isinstance(translations, dict) else translations
             for item in values:
                 if isinstance(item, dict) and item.get('output_docx'):
-                    lang = item.get('lang_code') or item.get('lang') or 'lang'
-                    files.append({'name': friendly(f'translation_{lang}', item['output_docx']), 'path': item['output_docx'], 'type': 'output'})
+                    files.append({'name': friendly(item['output_docx'], original_filename, item.get('lang_code') or 'translation'), 'path': item['output_docx'], 'type': 'output'})
         elif task_type == 'business_licence':
-            add_result('output_docx', 'output_docx')
+            add_result('output_docx')
         elif task_type == 'pdf2docx':
-            add_result('output_docx', 'output_docx')
+            add_result('output_docx')
         if not files and output_path:
-            files.append({'name': friendly('output', output_path), 'path': output_path, 'type': 'output'})
-        return files
+            files.append({'name': friendly(output_path, original_filename, 'output'), 'path': output_path, 'type': 'output'})
+
+        deduped_files = []
+        seen = set()
+        for item in files:
+            key = (item.get('path'), item.get('type'))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_files.append(item)
+        return deduped_files
 
     async def _mirror_progress(self, task_id: str, job, getter: Callable[[], Optional[Dict[str, Any]]], update: Callable[[int, str], Any]):
         while not job.done():

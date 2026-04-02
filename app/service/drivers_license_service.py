@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from app.core.config import settings
+from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 SUPPORTED_PROCESSING_MODES = {
@@ -49,6 +50,21 @@ async def _maybe_report(progress_callback: Optional[ProgressCallback], progress:
 
 def _normalize_path(path: Path | str) -> str:
     return str(path).replace("\\", "/")
+
+
+def _finalize_output_docx(output_path: str | Path, output_dir: Path, original_filename: str) -> str:
+    source = Path(output_path)
+    if not source.exists():
+        return _normalize_path(source)
+
+    target = ensure_unique_path(
+        output_dir / build_user_visible_filename(original_filename, suffix="translation", ext=source.suffix or ".docx"),
+        existing_path=source,
+    )
+    if source != target:
+        source.replace(target)
+        source = target
+    return _normalize_path(source)
 
 
 def get_drivers_license_config() -> Dict[str, Any]:
@@ -130,6 +146,7 @@ async def execute_drivers_license_task(
     if processing_mode == "single":
         await _maybe_report(progress_callback, 15, "正在识别并生成驾驶证 Word...")
         output_path, logs = await loop.run_in_executor(executor, lambda: _run_single_sync(input_paths[0], output_dir))
+        output_path = _finalize_output_docx(output_path, output_dir, original_filenames[0])
         await _maybe_report(progress_callback, 95, "正在整理输出结果...")
         return {
             "task_id": task_id,
@@ -150,6 +167,7 @@ async def execute_drivers_license_task(
     if processing_mode == "merge":
         await _maybe_report(progress_callback, 15, f"正在合并处理 {len(input_paths)} 张驾驶证图片...")
         output_path, logs = await loop.run_in_executor(executor, lambda: _run_merge_sync(input_paths, output_dir))
+        output_path = _finalize_output_docx(output_path, output_dir, original_filenames[0])
         await _maybe_report(progress_callback, 95, "正在整理输出结果...")
         return {
             "task_id": task_id,
@@ -174,8 +192,9 @@ async def execute_drivers_license_task(
     items: List[Dict[str, Any]] = []
     success_count = 0
     fail_count = 0
+    original_name_by_path = dict(zip(input_paths, original_filenames))
     for path_str, result in result_map.items():
-        input_name = Path(path_str).name
+        input_name = original_name_by_path.get(path_str) or Path(path_str).name
         if isinstance(result, str) and result.startswith("ERROR"):
             fail_count += 1
             items.append(
@@ -187,11 +206,12 @@ async def execute_drivers_license_task(
             )
             continue
         success_count += 1
+        final_output = _finalize_output_docx(result, output_dir, input_name)
         items.append(
             {
                 "input_filename": input_name,
                 "status": "done",
-                "output_docx": _normalize_path(result),
+                "output_docx": final_output,
             }
         )
 
