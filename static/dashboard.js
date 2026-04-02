@@ -10,6 +10,17 @@ let currentKeyword = '';
 let listTimer = null;
 let detailTimer = null;
 let openTaskId = null;
+const SENSITIVE_LOG_PATTERNS = [
+  /\bopenrouter\b/i,
+  /\bgoogle\/gemini-[\w.-]+\b/i,
+  /\bGoogle gemini-3-flash-preview\b/i,
+  /\bGoogle Gemini 2\.5 Flash\b/i,
+  /\bGoogle Gemini 2\.5 Pro\b/i,
+  /\[alignment-llm\].*route=/i,
+  /\[alignment-llm\].*model=/i,
+  /Gemini\s*路线/i,
+  /^.*模型:.*gemini.*$/i,
+];
 
 const STATUS_BADGE = {
   queued: { cls: 'badge-queued', icon: 'fa-clock', text: '排队中' },
@@ -234,6 +245,8 @@ function renderDetail(task) {
   const errorHtml = task.status === 'failed' && task.error ? `<div class="detail-section"><h3><i class="fas fa-exclamation-triangle"></i> 错误信息</h3><div class="detail-error">${escHtml(task.error)}</div></div>` : '';
   const logHtml = task.stream_log ? `<div class="detail-section"><h3><i class="fas fa-terminal"></i> 运行日志</h3><pre class="detail-log">${escHtml(task.stream_log)}</pre></div>` : '';
 
+  const renderedLogHtml = buildSanitizedLogHtml(task.stream_log || '');
+
   document.getElementById('drawerContent').innerHTML = `
     <h2>${escHtml(task.display_no || '-')}</h2>
     <div class="drawer-subtitle">${escHtml(task.task_label || task.task_type || '-')} &middot; <span class="badge ${badge.cls}" style="font-size:12px"><i class="fas ${badge.icon}"></i> ${badge.text}</span></div>
@@ -264,7 +277,7 @@ function renderDetail(task) {
     ${inputHtml}
     ${outputHtml}
     ${errorHtml}
-    ${logHtml}
+    ${renderedLogHtml}
   `;
 }
 
@@ -292,6 +305,25 @@ function normalizeInputFiles(inputFiles) {
   }
 
   return results;
+}
+
+function sanitizeStreamLog(logText) {
+  if (!logText) return '';
+  return logText
+    .split(/\r?\n/)
+    .filter((line) => {
+      const normalized = line.trim();
+      if (!normalized) return true;
+      return !SENSITIVE_LOG_PATTERNS.some((pattern) => pattern.test(normalized));
+    })
+    .join('\n')
+    .trim();
+}
+
+function buildSanitizedLogHtml(logText) {
+  const sanitized = sanitizeStreamLog(logText);
+  if (!sanitized) return '';
+  return `<div class="detail-section"><h3><i class="fas fa-terminal"></i> 运行日志</h3><pre class="detail-log">${escHtml(sanitized)}</pre></div>`;
 }
 
 function downloadFile(taskId, filePath, friendlyName) {
@@ -422,4 +454,3 @@ function formatDateInEast8(date, withSeconds) {
 }
 
 init();
-

@@ -120,6 +120,17 @@ function formatEtaDate(date) {
 const DEFAULT_MODEL_NAME = 'Google gemini-3-flash-preview';
 let pollingTimer = null;
 let configData = null;
+const SENSITIVE_LOG_PATTERNS = [
+    /\bopenrouter\b/i,
+    /\bgoogle\/gemini-[\w.-]+\b/i,
+    /\bGoogle gemini-3-flash-preview\b/i,
+    /\bGoogle Gemini 2\.5 Flash\b/i,
+    /\bGoogle Gemini 2\.5 Pro\b/i,
+    /\[alignment-llm\].*route=/i,
+    /\[alignment-llm\].*model=/i,
+    /Gemini\s*路线/i,
+    /^.*模型:.*gemini.*$/i,
+];
 const MODEL_DISPLAY_NAMES = {
     'Google Gemini 2.5 Flash': '快速版V1',
     'Google Gemini 2.5 Pro': '增强版V1',
@@ -248,6 +259,32 @@ function getModelDisplayName(name) {
     return MODEL_DISPLAY_NAMES[name] || name;
 }
 
+function sanitizeStreamLog(logText) {
+    if (!logText) return '';
+    return logText
+        .split(/\r?\n/)
+        .filter((line) => {
+            const normalized = line.trim();
+            if (!normalized) return true;
+            return !SENSITIVE_LOG_PATTERNS.some((pattern) => pattern.test(normalized));
+        })
+        .join('\n')
+        .trim();
+}
+
+function renderStreamLog(logText) {
+    if (!streamLogWrap || !streamLogEl) return;
+    const sanitized = sanitizeStreamLog(logText);
+    if (!sanitized) {
+        streamLogWrap.style.display = 'none';
+        streamLogEl.textContent = '';
+        return;
+    }
+    streamLogWrap.style.display = 'block';
+    streamLogEl.textContent = sanitized;
+    streamLogEl.scrollTop = streamLogEl.scrollHeight;
+}
+
 modelSelect.addEventListener('change', updateModelInfo);
 geminiRouteSelect?.addEventListener('change', updateRouteInfo);
 sourceLangSelect.addEventListener('change', updateLangLabels);
@@ -357,11 +394,7 @@ async function pollStatus(taskId) {
         updateProgressUI(status.progress || 0, status.message || '正在处理...', status);
 
         const logText = status.stream_log || '';
-        if (logText) {
-            streamLogWrap.style.display = 'block';
-            streamLogEl.textContent = logText;
-            streamLogEl.scrollTop = streamLogEl.scrollHeight;
-        }
+        renderStreamLog(logText);
 
         if (status.status === 'done') {
             if (!status.result || !status.result.output_excel) {
@@ -372,17 +405,13 @@ async function pollStatus(taskId) {
             }
             stopPolling();
             if (status.result && status.result.stream_log) {
-                streamLogWrap.style.display = 'block';
-                streamLogEl.textContent = status.result.stream_log;
-                streamLogEl.scrollTop = streamLogEl.scrollHeight;
+                renderStreamLog(status.result.stream_log);
             }
             showResult(status.result);
         } else if (status.status === 'failed') {
             stopPolling();
             if (status.stream_log) {
-                streamLogWrap.style.display = 'block';
-                streamLogEl.textContent = status.stream_log;
-                streamLogEl.scrollTop = streamLogEl.scrollHeight;
+                renderStreamLog(status.stream_log);
             }
             // 不调用 resetPage，保留实时输出便于排查
             processingTitle.textContent = '对齐失败';

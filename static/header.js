@@ -49,7 +49,7 @@
                 <div class="brand-mark" style="width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: linear-gradient(135deg, rgba(56, 189, 248, 0.28), rgba(56, 189, 248, 0.62)); font-size: 20px; color: #fff;">
                     <i class="fas fa-layer-group"></i>
                 </div>
-                <div style="font-weight: 700; font-size: 17px; color: #fff;">AI 文档处理工作台</div>
+                <div style="font-weight: 700; font-size: 17px; color: #fff;">文档处理工作台</div>
             </div>
             <nav class="unified-top-nav">
                 ${navHtml}
