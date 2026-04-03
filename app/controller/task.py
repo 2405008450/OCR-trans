@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.db.session import SessionLocal
+from app.core.task_model_display import build_task_model_info
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
 from app.service.business_licence_service import (
@@ -112,6 +113,7 @@ async def task_detail(task_id: str):
         payload["input_files"] = json.loads(task.input_files_json or "{}")
         payload["output_files"] = json.loads(task.output_files_json or "[]")
         payload["result"] = json.loads(task.result_json or "null")
+        payload["model_info"] = build_task_model_info(task.task_type, payload["params"], payload["result"])
         payload["stream_log"] = task_queue_service._task_logs.get(task_id, "")
         return payload
 

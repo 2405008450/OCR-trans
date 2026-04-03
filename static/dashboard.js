@@ -231,6 +231,10 @@ function renderDetail(task) {
 
   const inputItems = normalizeInputFiles(task.input_files);
   const outputItems = Array.isArray(task.output_files) ? task.output_files : [];
+  const modelInfo = task.model_info && typeof task.model_info === 'object' ? task.model_info : null;
+  const modelItemHtml = modelInfo
+    ? `<div class="detail-item"><div class="dl">\u4f7f\u7528\u6a21\u578b</div><div class="dv">${escHtml(modelInfo.label || '-')}</div></div>`
+    : '';
 
   const inputHtml = inputItems.length ? `<div class="detail-section"><h3><i class="fas fa-file-import"></i> 输入文件</h3><div class="file-list">${inputItems.map((item) => {
     const name = item.name || (item.path || '').split('/').pop() || '输入文件';
@@ -266,6 +270,7 @@ function renderDetail(task) {
       <h3><i class="fas fa-info-circle"></i> 基本信息</h3>
       <div class="detail-grid">
         <div class="detail-item"><div class="dl">文件名</div><div class="dv">${escHtml(task.filename || '-')}</div></div>
+        ${modelItemHtml}
         <div class="detail-item"><div class="dl">耗时</div><div class="dv">${duration}</div></div>
         <div class="detail-item"><div class="dl">提交时间</div><div class="dv">${createdAt}</div></div>
         <div class="detail-item"><div class="dl">开始时间</div><div class="dv">${startedAt}</div></div>
