@@ -10,6 +10,7 @@ import time
 import subprocess
 import shutil
 from pathlib import Path
+from typing import Any
 
 from app.service.gemini_service import GEMINI_ROUTE_GOOGLE, generate_vision_html
 
@@ -22,7 +23,7 @@ try:
     from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml.ns import qn, nsdecls
-    from docx.oxml import parse_xml
+    from docx.oxml import OxmlElement, parse_xml
 except ImportError:
     print("请安装 python-docx: pip install python-docx")
     sys.exit(1)
@@ -204,7 +205,7 @@ def ocr_file(
 # 2. 混合格式解析与 DOCX 渲染引擎
 # ============================================================
 def normalize_to_word_html(raw_text: str, title: str = "Document") -> str:
-    """将 OCR/翻译结果整理为可交给 LibreOffice 转 Word 的完整 HTML。"""
+    """Normalize OCR/translation output into full HTML for LibreOffice DOCX conversion."""
     text = raw_text.strip()
     text = re.sub(r"^```(?:html|markdown)?\s*\n?", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\n?```\s*$", "", text)
@@ -222,7 +223,8 @@ def normalize_to_word_html(raw_text: str, title: str = "Document") -> str:
             segment = "".join(str(child) for child in body.contents).strip()
         else:
             segment = part
-        body_segments.append(segment)
+        normalized_segment, _table_specs = _normalize_html_tables_for_word(segment)
+        body_segments.append(normalized_segment)
 
     page_break_html = '<p style="page-break-before: always;"></p>'
     body_html = f"\n{page_break_html}\n".join(body_segments)
@@ -239,6 +241,280 @@ def normalize_to_word_html(raw_text: str, title: str = "Document") -> str:
         "</body>\n"
         "</html>\n"
     )
+
+
+def _parse_inline_style(style_text: str) -> dict[str, str]:
+    style_map: dict[str, str] = {}
+    for fragment in style_text.split(";"):
+        if ":" not in fragment:
+            continue
+        key, value = fragment.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            style_map[key] = value
+    return style_map
+
+
+def _serialize_inline_style(style_map: dict[str, str]) -> str:
+    return "; ".join(f"{key}: {value}" for key, value in style_map.items())
+
+
+def _extract_pct_width(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = re.fullmatch(r"\s*(\d{1,3})\s*%\s*", value)
+    if not match:
+        return None
+    return max(1, min(int(match.group(1)), 100))
+
+
+def _extract_table_alignment(table: Tag) -> str:
+    align = (table.get("align") or "").strip().lower()
+    if align in {"left", "center", "right"}:
+        return align
+
+    current: Tag | None = table
+    while isinstance(current, Tag):
+        style_map = _parse_inline_style(current.get("style", ""))
+        text_align = style_map.get("text-align", "").strip().lower()
+        if text_align in {"left", "center", "right"}:
+            return text_align
+        current = current.parent if isinstance(current.parent, Tag) else None
+
+    return "center"
+
+
+def _iter_table_rows(table: Tag) -> list[Tag]:
+    rows = table.find_all("tr", recursive=False)
+    if rows:
+        return rows
+
+    collected: list[Tag] = []
+    for section in table.find_all(["thead", "tbody", "tfoot"], recursive=False):
+        collected.extend(section.find_all("tr", recursive=False))
+    return collected
+
+
+def _extract_table_column_widths_pct(table: Tag) -> list[float]:
+    for row in _iter_table_rows(table):
+        widths: list[float] = []
+        cells = row.find_all(["td", "th"], recursive=False)
+        if not cells:
+            continue
+
+        for cell in cells:
+            cell_style = _parse_inline_style(cell.get("style", ""))
+            width_pct = _extract_pct_width(cell_style.get("width")) or _extract_pct_width(cell.get("width"))
+            if width_pct is None:
+                widths = []
+                break
+
+            colspan_raw = (cell.get("colspan") or "1").strip()
+            try:
+                colspan = max(int(colspan_raw), 1)
+            except ValueError:
+                colspan = 1
+
+            widths.extend([width_pct / colspan] * colspan)
+
+        if widths:
+            return widths
+
+    return []
+
+
+def _normalize_html_tables_for_word(html_fragment: str) -> tuple[str, list[dict[str, Any]]]:
+    soup = BeautifulSoup(html_fragment, "html.parser")
+    table_specs: list[dict[str, Any]] = []
+
+    for table in soup.find_all("table"):
+        table_style = _parse_inline_style(table.get("style", ""))
+        width_pct = _extract_pct_width(table_style.get("width")) or _extract_pct_width(table.get("width"))
+        if width_pct is None:
+            width_pct = 100
+
+        alignment = _extract_table_alignment(table)
+        border_value = table_style.get("border", "").strip().lower()
+        borderless = border_value == "none" or (table.get("border") or "").strip() == "0"
+
+        table_style["width"] = f"{width_pct}%"
+        table_style.setdefault("border-collapse", "collapse")
+        table_style.setdefault("table-layout", "fixed")
+        table_style.setdefault("margin-left", "auto")
+        table_style.setdefault("margin-right", "auto")
+        if borderless:
+            table_style["border"] = "none"
+            table["border"] = "0"
+
+        table["width"] = f"{width_pct}%"
+        table["align"] = alignment
+        table["cellpadding"] = table.get("cellpadding", "0")
+        table["cellspacing"] = table.get("cellspacing", "0")
+        table["style"] = _serialize_inline_style(table_style)
+
+        for cell in table.find_all(["td", "th"]):
+            cell_style = _parse_inline_style(cell.get("style", ""))
+            cell_style.setdefault("vertical-align", "top")
+            if borderless:
+                cell_style.setdefault("border", "none")
+            if cell_style:
+                cell["style"] = _serialize_inline_style(cell_style)
+
+        table_specs.append(
+            {
+                "align": alignment,
+                "width_pct": width_pct,
+                "column_widths_pct": _extract_table_column_widths_pct(table),
+            }
+        )
+
+    if soup.body:
+        return "".join(str(child) for child in soup.body.contents).strip(), table_specs
+    return str(soup).strip(), table_specs
+
+
+def _extract_table_layout_specs(html_text: str) -> list[dict[str, Any]]:
+    _normalized_html, table_specs = _normalize_html_tables_for_word(html_text)
+    return table_specs
+
+
+def _get_or_add_xml_child(parent, tag_name: str):
+    child = parent.find(qn(tag_name))
+    if child is None:
+        child = OxmlElement(tag_name)
+        parent.append(child)
+    return child
+
+
+def _set_table_preferred_width_pct(table, width_pct: int):
+    tbl_pr = table._tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        table._tbl.insert(0, tbl_pr)
+
+    tbl_w = _get_or_add_xml_child(tbl_pr, "w:tblW")
+    tbl_w.set(qn("w:type"), "pct")
+    tbl_w.set(qn("w:w"), str(max(1, min(width_pct, 100)) * 50))
+
+
+def _set_table_alignment(table, alignment: str):
+    tbl_pr = table._tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        table._tbl.insert(0, tbl_pr)
+
+    jc = _get_or_add_xml_child(tbl_pr, "w:jc")
+    jc.set(qn("w:val"), alignment if alignment in {"left", "center", "right"} else "center")
+
+    tbl_ind = tbl_pr.find(qn("w:tblInd"))
+    if tbl_ind is not None:
+        tbl_pr.remove(tbl_ind)
+
+
+def _enable_table_autofit(table):
+    if hasattr(table, "autofit"):
+        table.autofit = True
+    if hasattr(table, "allow_autofit"):
+        table.allow_autofit = True
+
+    tbl_pr = table._tbl.tblPr
+    if tbl_pr is None:
+        tbl_pr = OxmlElement("w:tblPr")
+        table._tbl.insert(0, tbl_pr)
+
+    tbl_layout = _get_or_add_xml_child(tbl_pr, "w:tblLayout")
+    tbl_layout.set(qn("w:type"), "autofit")
+
+
+def _set_table_grid_widths(table, widths_twips: list[int]):
+    tbl_grid = table._tbl.tblGrid
+    if tbl_grid is None:
+        tbl_grid = OxmlElement("w:tblGrid")
+        insert_at = 1 if table._tbl.tblPr is not None else 0
+        table._tbl.insert(insert_at, tbl_grid)
+    else:
+        for child in list(tbl_grid):
+            tbl_grid.remove(child)
+
+    for width in widths_twips:
+        grid_col = OxmlElement("w:gridCol")
+        grid_col.set(qn("w:w"), str(max(int(width), 1)))
+        tbl_grid.append(grid_col)
+
+
+def _set_cell_width_twips(cell, width_twips: int):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_w = tc_pr.find(qn("w:tcW"))
+    if tc_w is None:
+        tc_w = OxmlElement("w:tcW")
+        tc_pr.append(tc_w)
+    tc_w.set(qn("w:type"), "dxa")
+    tc_w.set(qn("w:w"), str(max(int(width_twips), 1)))
+
+
+def _get_cell_grid_span(cell) -> int:
+    tc_pr = cell._tc.tcPr
+    if tc_pr is None:
+        return 1
+
+    grid_span = tc_pr.find(qn("w:gridSpan"))
+    if grid_span is None:
+        return 1
+
+    try:
+        return max(int(grid_span.get(qn("w:val"))), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _apply_column_widths_to_table(table, column_widths_pct: list[float], content_width_twips: int):
+    if not column_widths_pct or content_width_twips <= 0:
+        return
+
+    total_pct = sum(column_widths_pct)
+    if total_pct <= 0:
+        return
+
+    normalized = [max(width, 0.0) / total_pct for width in column_widths_pct]
+    widths_twips = [max(int(round(content_width_twips * ratio)), 1) for ratio in normalized]
+    delta = content_width_twips - sum(widths_twips)
+    if widths_twips and delta:
+        widths_twips[-1] += delta
+
+    _set_table_grid_widths(table, widths_twips)
+
+    for row in table.rows:
+        col_idx = 0
+        for cell in row.cells:
+            span = _get_cell_grid_span(cell)
+            cell_width = sum(widths_twips[col_idx:col_idx + span]) or widths_twips[min(col_idx, len(widths_twips) - 1)]
+            _set_cell_width_twips(cell, cell_width)
+            col_idx += span
+
+
+def _postprocess_docx_tables(docx_path: str, table_specs: list[dict[str, Any]]):
+    if not table_specs:
+        return
+
+    document = Document(docx_path)
+    if not document.tables:
+        return
+
+    section = document.sections[0]
+    content_width_twips = int((section.page_width - section.left_margin - section.right_margin) / 635)
+
+    for index, table in enumerate(document.tables):
+        spec = table_specs[index] if index < len(table_specs) else {}
+        _set_table_preferred_width_pct(table, int(spec.get("width_pct", 100)))
+        _set_table_alignment(table, str(spec.get("align", "center")))
+        _enable_table_autofit(table)
+
+        column_widths_pct = spec.get("column_widths_pct") or []
+        if isinstance(column_widths_pct, list) and len(column_widths_pct) == len(table.columns):
+            _apply_column_widths_to_table(table, [float(item) for item in column_widths_pct], content_width_twips)
+
+    document.save(docx_path)
 
 
 def convert_html_to_docx_via_libreoffice(
@@ -294,6 +570,11 @@ def convert_html_to_docx_via_libreoffice(
 
     if expected_docx != output_file:
         expected_docx.replace(output_file)
+
+    try:
+        _postprocess_docx_tables(str(output_file), _extract_table_layout_specs(html_text))
+    except Exception as exc:
+        print(f"[warn] DOCX table post-processing failed; keeping LibreOffice output: {exc}")
 
     return str(output_file)
 
