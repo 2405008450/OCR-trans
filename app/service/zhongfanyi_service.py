@@ -296,7 +296,7 @@ def run_zhongfanyi_task(
         _complete_task(task_id, error=f"不支持的中翻译模式: {mode}")
         return _task_progress[task_id]
 
-    gemini_route = ensure_gemini_route_configured(ZHONGFANYI_DEFAULT_GEMINI_ROUTE)
+    gemini_route = ensure_gemini_route_configured(gemini_route)
     folder_name = display_no or task_id
     output_dir = Path(settings.OUTPUT_DIR) / "zhongfanyi" / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
