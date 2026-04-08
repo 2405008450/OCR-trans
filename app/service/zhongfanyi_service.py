@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-中翻译专检：对接 专检/中翻译/main.py，支持双文件模式、单文件双语模式与 Excel 报告导出。
+中翻译专检：对接 专检/中翻译V2/main.py，支持双文件模式、单文件双语模式与 Excel 报告导出。
 """
 import importlib.machinery
 import os
@@ -29,7 +29,7 @@ _task_progress: Dict[str, Dict[str, Any]] = {}
 _specialist_import_lock = threading.Lock()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ZHONGFANYI_ROOT = REPO_ROOT / "专检" / "中翻译"
+ZHONGFANYI_ROOT = REPO_ROOT / "专检" / "中翻译V2"
 _ALIASED_NAMESPACE_PACKAGES = (
     "llm",
     "llm.llm_project",
