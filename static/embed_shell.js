@@ -11,25 +11,50 @@
         document.body.classList.add('embedded-shell');
     }
 
-    function measureHeight() {
+    function getElementHeight(element) {
+        if (!element) {
+            return 0;
+        }
+
+        const rect = element.getBoundingClientRect();
         return Math.max(
-            document.documentElement.scrollHeight,
-            document.documentElement.offsetHeight,
-            document.body.scrollHeight,
-            document.body.offsetHeight
+            element.scrollHeight || 0,
+            element.offsetHeight || 0,
+            Math.ceil(rect.height || 0)
         );
     }
+
+    function measureHeight() {
+        const primaryRoot =
+            document.querySelector('.page, .container, main, .main-content') ||
+            document.body.firstElementChild;
+        const childHeights = Array.from(document.body.children).map((element) => getElementHeight(element));
+
+        return Math.max(
+            getElementHeight(primaryRoot),
+            ...childHeights,
+            0
+        );
+    }
+
+    let lastNotifiedHeight = 0;
 
     function notifyParent() {
         if (window.parent === window) {
             return;
         }
 
+        const nextHeight = measureHeight();
+        if (lastNotifiedHeight > 0 && Math.abs(nextHeight - lastNotifiedHeight) <= 1) {
+            return;
+        }
+        lastNotifiedHeight = nextHeight;
+
         window.parent.postMessage(
             {
                 type: 'certificate-translation:resize',
                 path: window.location.pathname,
-                height: measureHeight(),
+                height: nextHeight,
             },
             window.location.origin
         );

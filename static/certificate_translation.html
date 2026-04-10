@@ -520,7 +520,14 @@
                 return;
             }
 
-            iframe.style.height = `${Math.max(720, Math.ceil(height) + 8)}px`;
+            const targetHeight = Math.max(720, Math.ceil(height));
+            const currentHeight = Math.ceil(iframe.getBoundingClientRect().height || 0);
+
+            if (Math.abs(currentHeight - targetHeight) <= 1) {
+                return;
+            }
+
+            iframe.style.height = `${targetHeight}px`;
         });
 
         const initialTarget = normalizeTarget(new URLSearchParams(window.location.search).get('tab'));
