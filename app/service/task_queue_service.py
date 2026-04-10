@@ -197,14 +197,14 @@ class TaskQueueService:
             self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_zhongfanyi_task(self, *, mode: str, original_file: Optional[UploadFile], translated_file: Optional[UploadFile], single_file: Optional[UploadFile], use_ai_rule: bool, gemini_route: str, rule_file: Optional[UploadFile], session_rule_content: Optional[str]) -> str:
+    async def submit_zhongfanyi_task(self, *, mode: str, original_file: Optional[UploadFile], translated_file: Optional[UploadFile], single_file: Optional[UploadFile], use_ai_rule: bool, gemini_route: str, model_name: str, rule_file: Optional[UploadFile], session_rule_content: Optional[str]) -> str:
         if mode == zf_service.ZHONGFANYI_MODE_SINGLE:
             display_name = single_file.filename if single_file else 'single.docx'
         else:
             original_name = original_file.filename if original_file else 'original.docx'
             translated_name = translated_file.filename if translated_file else 'translated.docx'
             display_name = f'{original_name} | {translated_name}'
-        reserved_task = self._create_db_task('zhongfanyi', display_name, {'mode': mode, 'use_ai_rule': use_ai_rule, 'gemini_route': gemini_route, 'ai_rule_file_path': None, 'session_rule_text': (session_rule_content.strip() or None) if session_rule_content else None}, {})
+        reserved_task = self._create_db_task('zhongfanyi', display_name, {'mode': mode, 'use_ai_rule': use_ai_rule, 'gemini_route': gemini_route, 'model_name': model_name, 'ai_rule_file_path': None, 'session_rule_text': (session_rule_content.strip() or None) if session_rule_content else None}, {})
         try:
             upload_dir = Path(settings.UPLOAD_DIR) / 'zhongfanyi' / reserved_task.display_no
             upload_dir.mkdir(parents=True, exist_ok=True)
@@ -621,6 +621,7 @@ class TaskQueueService:
                 single_filename=input_files.get('single_filename'),
                 use_ai_rule=params.get('use_ai_rule', False),
                 gemini_route=params.get('gemini_route', 'openrouter'),
+                model_name=params.get('model_name', zf_service.ZHONGFANYI_DEFAULT_MODEL),
                 ai_rule_file_path=params.get('ai_rule_file_path'),
                 session_rule_text=params.get('session_rule_text'),
             )

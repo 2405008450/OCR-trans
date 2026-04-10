@@ -14,16 +14,39 @@ from typing import Any, Dict, Optional
 
 from app.core.config import settings
 from app.core.file_naming import build_user_visible_filename, ensure_unique_path
-from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
+from app.service.gemini_service import (
+    GEMINI_ROUTE_OPENROUTER,
+    ensure_gemini_route_configured,
+    resolve_model_for_route,
+)
 
 
 ZHONGFANYI_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
+ZHONGFANYI_DEFAULT_MODEL = "google/gemini-3.1-pro-preview"
 ZHONGFANYI_MODE_DOUBLE = "double"
 ZHONGFANYI_MODE_SINGLE = "single"
 ZHONGFANYI_SINGLE_FILE_EXTENSIONS = [".docx", ".doc", ".pdf", ".xlsx", ".xls", ".pptx"]
 ZHONGFANYI_DOUBLE_FILE_EXTENSIONS = [".docx", ".doc", ".pdf", ".xlsx", ".xls", ".pptx"]
 SECTION_DIR_NAMES = {"正文": "zhengwen", "页眉": "yemei", "页脚": "yejiao"}
 SECTION_COUNT_KEYS = {"正文": "body_issues", "页眉": "header_issues", "页脚": "footer_issues"}
+ZHONGFANYI_MODELS: Dict[str, Dict[str, str]] = {
+    "google/gemini-3-flash-preview": {
+        "label": "快速版V2",
+        "description": "速度更快，适合常规中翻专检场景。",
+    },
+    "google/gemini-3.1-pro-preview": {
+        "label": "增强版V2",
+        "description": "推理更强，适合复杂规则和上下文判断场景。",
+    },
+}
+ZHONGFANYI_MODEL_ALIASES: Dict[str, str] = {
+    "gemini-3-flash-preview": "google/gemini-3-flash-preview",
+    "google/gemini-3-flash-preview": "google/gemini-3-flash-preview",
+    "gemini 3 flash preview": "google/gemini-3-flash-preview",
+    "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "google/gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "gemini 3.1 pro preview": "google/gemini-3.1-pro-preview",
+}
 
 _task_progress: Dict[str, Dict[str, Any]] = {}
 _specialist_import_lock = threading.Lock()
@@ -59,6 +82,18 @@ def get_zhongfanyi_single_file_extensions() -> list[str]:
 
 def get_zhongfanyi_double_file_extensions() -> list[str]:
     return ZHONGFANYI_DOUBLE_FILE_EXTENSIONS
+
+
+def get_zhongfanyi_models() -> Dict[str, Dict[str, str]]:
+    return ZHONGFANYI_MODELS
+
+
+def normalize_zhongfanyi_model(model_name: Optional[str]) -> str:
+    candidate = (model_name or ZHONGFANYI_DEFAULT_MODEL).strip()
+    key = ZHONGFANYI_MODEL_ALIASES.get(candidate.lower(), candidate)
+    if key not in ZHONGFANYI_MODELS:
+        raise ValueError(f"不支持的中翻译专检模型: {model_name}")
+    return key
 
 
 def _register_namespace_package(name: str, package_root: Path) -> None:
@@ -192,7 +227,7 @@ def _normalize_report_count(path: Optional[str]) -> int:
         return 0
 
 
-def _inject_runtime_env(gemini_route: str) -> None:
+def _inject_runtime_env(gemini_route: str, model_name: str) -> None:
     if settings.GOOGLE_API_KEY:
         os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
     if settings.OPENROUTER_API_KEY:
@@ -204,6 +239,7 @@ def _inject_runtime_env(gemini_route: str) -> None:
         os.environ["OPENAI_BASE_URL"] = settings.OPENROUTER_BASE_URL
         os.environ["BASE_URL"] = settings.OPENROUTER_BASE_URL
     os.environ["GEMINI_ROUTE"] = gemini_route
+    os.environ["ZHONGFANYI_MODEL_NAME"] = resolve_model_for_route(model_name, GEMINI_ROUTE_OPENROUTER)
 
 
 def _collect_reports(report_paths: Optional[Dict[str, str]], excel_paths: Optional[Dict[str, str]]) -> tuple[Dict[str, str], Dict[str, int]]:
@@ -284,6 +320,7 @@ def run_zhongfanyi_task(
     single_filename: Optional[str] = None,
     use_ai_rule: bool = False,
     gemini_route: str = ZHONGFANYI_DEFAULT_GEMINI_ROUTE,
+    model_name: str = ZHONGFANYI_DEFAULT_MODEL,
     ai_rule_file_path: Optional[str] = None,
     session_rule_text: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -296,14 +333,15 @@ def run_zhongfanyi_task(
         _complete_task(task_id, error=f"不支持的中翻译模式: {mode}")
         return _task_progress[task_id]
 
-    gemini_route = ensure_gemini_route_configured(ZHONGFANYI_DEFAULT_GEMINI_ROUTE)
+    gemini_route = ensure_gemini_route_configured(gemini_route or ZHONGFANYI_DEFAULT_GEMINI_ROUTE)
+    model_name = normalize_zhongfanyi_model(model_name)
     folder_name = display_no or task_id
     output_dir = Path(settings.OUTPUT_DIR) / "zhongfanyi" / folder_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with _specialist_import_lock:
         _prepare_zhongfanyi_import_path()
-        _inject_runtime_env(gemini_route)
+        _inject_runtime_env(gemini_route, model_name)
         from zhongfanyi.main import run_full_pipeline
 
     input_path = single_path if normalized_mode == ZHONGFANYI_MODE_SINGLE else original_path
@@ -340,6 +378,7 @@ def run_zhongfanyi_task(
         "task_id": task_id,
         "mode": normalized_mode,
         "gemini_route": gemini_route,
+        "model_name": model_name,
         "reports": reports,
         "report_counts": report_counts,
         "stats": stats or {"success": 0, "failed": 0, "skipped": 0},

@@ -360,6 +360,7 @@ async def run_zhongfanyi(
     mode: Optional[str] = Query(None),
     use_ai_rule: bool = Query(False),
     gemini_route: str = Query("openrouter"),
+    model_name: str = Query(zf_service.ZHONGFANYI_DEFAULT_MODEL),
     rule_file: Optional[UploadFile] = File(None),
     session_rule_content: Optional[str] = Form(None),
 ):
@@ -389,6 +390,7 @@ async def run_zhongfanyi(
         single_file=single_file,
         use_ai_rule=use_ai_rule,
         gemini_route=gemini_route,
+        model_name=model_name,
         rule_file=rule_file,
         session_rule_content=session_rule_content,
     )
@@ -398,6 +400,8 @@ async def run_zhongfanyi(
 @router.get("/zhongfanyi/config")
 async def get_zhongfanyi_config():
     return {
+        "models": zf_service.get_zhongfanyi_models(),
+        "default_model": zf_service.ZHONGFANYI_DEFAULT_MODEL,
         "routes": get_gemini_routes(),
         "default_route": "openrouter",
         "default_mode": zf_service.get_zhongfanyi_default_mode(),

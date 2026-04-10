@@ -6,6 +6,8 @@ const modeSingleRadio = document.getElementById('modeSingle');
 const modeHint = document.getElementById('modeHint');
 const uploadDesc = document.getElementById('uploadDesc');
 const pageSubtitle = document.getElementById('pageSubtitle');
+const modelSelect = document.getElementById('modelSelect');
+const modelDesc = document.getElementById('modelDesc');
 const btnRunCheck = document.getElementById('btnRunCheck');
 const btnReset = document.getElementById('btnReset');
 
@@ -61,6 +63,7 @@ function bindEvents() {
     btnReset?.addEventListener('click', resetPage);
     modeDoubleRadio?.addEventListener('change', () => applyMode('double'));
     modeSingleRadio?.addEventListener('change', () => applyMode('single'));
+    modelSelect?.addEventListener('change', updateModelInfo);
 }
 
 async function loadConfig() {
@@ -77,6 +80,10 @@ async function loadConfig() {
     } catch (error) {
         console.error(error);
         modelConfig = {
+            'google/gemini-3-flash-preview': {
+                label: '快速版V2',
+                description: '速度更快，适合常规数字专检场景。',
+            },
             'gemini-3.1-pro-preview': {
                 label: '增强版V2',
                 description: '推理更强，适合复杂编号和上下文判断场景。',
@@ -95,6 +102,25 @@ async function loadConfig() {
     }
 
     singleFileInput.accept = singleFileExtensions.join(',');
+    renderModels();
+    updateModelInfo();
+}
+
+function renderModels() {
+    if (!modelSelect) return;
+    modelSelect.innerHTML = '';
+    Object.entries(modelConfig).forEach(([value, info]) => {
+        modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
+    });
+    const fallback = Object.keys(modelConfig)[0] || defaultModel;
+    modelSelect.value = modelConfig[defaultModel] ? defaultModel : fallback;
+}
+
+function updateModelInfo() {
+    if (!modelDesc) return;
+    const currentModel = modelSelect?.value || defaultModel;
+    const info = modelConfig[currentModel] || {};
+    modelDesc.textContent = info.description || '';
 }
 
 function getSelectedMode() {
@@ -255,7 +281,7 @@ async function runNumberCheck() {
         const params = new URLSearchParams({
             mode,
             gemini_route: defaultRoute,
-            model_name: defaultModel,
+            model_name: modelSelect?.value || defaultModel,
         });
 
         const resp = await fetch(`/task/number-check?${params.toString()}`, {
@@ -490,6 +516,10 @@ function resetPage() {
     resultSummary.textContent = '';
     resultStats.innerHTML = '';
     resultGrid.innerHTML = '';
+    if (modelSelect) {
+        modelSelect.value = modelConfig[defaultModel] ? defaultModel : (Object.keys(modelConfig)[0] || defaultModel);
+    }
+    updateModelInfo();
     applyMode(defaultMode);
 }
 

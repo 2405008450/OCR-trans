@@ -8,6 +8,7 @@ TASK_MODEL_FIELDS: dict[str, tuple[str, ...]] = {
     "doc_translate": ("ocr_model",),
     "number_check": ("model_name",),
     "pdf2docx": ("model",),
+    "zhongfanyi": ("model_name",),
 }
 
 _MODEL_ALIASES = {

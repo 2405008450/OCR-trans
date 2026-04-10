@@ -32,7 +32,7 @@ def ai_router(user_query, tools_metadata):
     """
     try:
         response = client.chat.completions.create(
-            model="google/gemini-3-flash-preview",  # 建议使用逻辑能力强的模型
+            model=os.getenv("ZHONGFANYI_MODEL_NAME", "google/gemini-3.1-pro-preview"),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_query}

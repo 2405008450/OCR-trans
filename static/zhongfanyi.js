@@ -6,6 +6,8 @@ const modeSingleRadio = document.getElementById('modeSingle');
 const modeHint = document.getElementById('modeHint');
 const uploadDesc = document.getElementById('uploadDesc');
 const pageSubtitle = document.getElementById('pageSubtitle');
+const modelSelect = document.getElementById('modelSelect');
+const modelDesc = document.getElementById('modelDesc');
 const useAiRuleCheckbox = document.getElementById('useAiRule');
 const ruleFileInput = document.getElementById('ruleFile');
 const btnRun = document.getElementById('btnRun');
@@ -32,9 +34,17 @@ const ruleContentArea = document.getElementById('ruleContent');
 
 const POLL_INTERVAL = 1500;
 const ETA_TIME_ZONE = 'Asia/Shanghai';
+const MODEL_DISPLAY_NAMES = {
+    'gemini-3-flash-preview': '快速版V2',
+    'google/gemini-3-flash-preview': '快速版V2',
+    'gemini-3.1-pro-preview': '增强版V2',
+    'google/gemini-3.1-pro-preview': '增强版V2',
+};
 
 let pollingTimer = null;
 let defaultRoute = 'openrouter';
+let modelConfig = {};
+let defaultModel = 'google/gemini-3.1-pro-preview';
 let defaultMode = 'double';
 let currentMode = 'double';
 let modeConfig = {};
@@ -61,6 +71,7 @@ function bindEvents() {
     btnReset?.addEventListener('click', resetPage);
     modeDoubleRadio?.addEventListener('change', () => applyMode('double'));
     modeSingleRadio?.addEventListener('change', () => applyMode('single'));
+    modelSelect?.addEventListener('change', updateModelInfo);
     document.getElementById('btnEditRule')?.addEventListener('click', openRuleEditor);
     document.addEventListener('click', (event) => {
         if (ruleEditorModal && event.target === ruleEditorModal) {
@@ -74,6 +85,8 @@ async function loadConfig() {
         const resp = await fetch('/task/zhongfanyi/config');
         if (!resp.ok) throw new Error(`配置加载失败: ${resp.status}`);
         const data = await resp.json();
+        modelConfig = data.models || {};
+        defaultModel = data.default_model || defaultModel;
         defaultRoute = data.default_route || defaultRoute;
         defaultMode = data.default_mode || defaultMode;
         modeConfig = data.modes || {};
@@ -81,6 +94,16 @@ async function loadConfig() {
         doubleFileExtensions = data.double_file_extensions || doubleFileExtensions;
     } catch (error) {
         console.error(error);
+        modelConfig = {
+            'google/gemini-3-flash-preview': {
+                label: '快速版V2',
+                description: '速度更快，适合常规中翻专检场景。',
+            },
+            'google/gemini-3.1-pro-preview': {
+                label: '增强版V2',
+                description: '推理更强，适合复杂规则和上下文判断场景。',
+            },
+        };
         modeConfig = {
             double: {
                 label: '双文件模式',
@@ -96,6 +119,25 @@ async function loadConfig() {
     singleFileInput.accept = singleFileExtensions.join(',');
     originalFileInput.accept = doubleFileExtensions.join(',');
     translatedFileInput.accept = doubleFileExtensions.join(',');
+    renderModels();
+    updateModelInfo();
+}
+
+function renderModels() {
+    if (!modelSelect) return;
+    modelSelect.innerHTML = '';
+    Object.entries(modelConfig).forEach(([value, info]) => {
+        modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
+    });
+    const fallback = Object.keys(modelConfig)[0] || defaultModel;
+    modelSelect.value = modelConfig[defaultModel] ? defaultModel : fallback;
+}
+
+function updateModelInfo() {
+    if (!modelDesc) return;
+    const currentModel = modelSelect?.value || defaultModel;
+    const info = modelConfig[currentModel] || {};
+    modelDesc.textContent = info.description || '';
 }
 
 function applyMode(mode) {
@@ -263,6 +305,7 @@ async function runZhongfanyi() {
             mode,
             use_ai_rule: useAiRule ? 'true' : 'false',
             gemini_route: defaultRoute,
+            model_name: modelSelect?.value || defaultModel,
         });
 
         const resp = await fetch(`/task/zhongfanyi?${params.toString()}`, {
@@ -384,11 +427,14 @@ function showResult(data) {
 
     const stats = data.stats || {};
     const reportCounts = data.report_counts || {};
+    const modelName = data.model_name || defaultModel;
     resultStats.innerHTML =
         `<div class="stat-card"><i class="fas fa-check"></i><h3>${stats.success ?? 0}</h3><p>成功修复</p></div>` +
         `<div class="stat-card"><i class="fas fa-times"></i><h3>${stats.failed ?? 0}</h3><p>替换失败</p></div>` +
         `<div class="stat-card"><i class="fas fa-forward"></i><h3>${stats.skipped ?? 0}</h3><p>跳过</p></div>` +
         `<div class="stat-card"><i class="fas fa-list-check"></i><h3>${data.total_issues ?? (reportCounts.body_issues ?? 0) + (reportCounts.header_issues ?? 0) + (reportCounts.footer_issues ?? 0)}</h3><p>报告问题数</p></div>`;
+
+    resultStats.innerHTML += `<div class="stat-card"><i class="fas fa-robot"></i><h3>${escapeHtml(getModelDisplayName(modelName))}</h3><p>模型</p></div>`;
 
     const links = [];
     appendOutputLink(links, data.corrected_docx, 'fa-file-word', '下载修复后文档');
@@ -446,6 +492,10 @@ function resetPage() {
     resultSummary.textContent = '';
     resultStats.innerHTML = '';
     resultGrid.innerHTML = '';
+    if (modelSelect) {
+        modelSelect.value = modelConfig[defaultModel] ? defaultModel : (Object.keys(modelConfig)[0] || defaultModel);
+    }
+    updateModelInfo();
     applyMode(defaultMode);
 }
 
@@ -508,6 +558,10 @@ function escapeHtml(value) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+}
+
+function getModelDisplayName(name) {
+    return MODEL_DISPLAY_NAMES[name] || modelConfig[name]?.label || name;
 }
 
 window.closeRuleEditor = closeRuleEditor;

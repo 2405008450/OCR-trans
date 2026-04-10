@@ -40,7 +40,7 @@ class rule:
         full_response = generate_text(
             system_prompt="你是一位精通中英金融互译的资深审校专家，擅长从各类银行文件中提炼翻译规则，不要篡改原文内容和改变原文意思。",
             user_prompt=prompt,
-            model="google/gemini-3-pro-preview",
+            model=os.getenv("ZHONGFANYI_MODEL_NAME", "google/gemini-3.1-pro-preview"),
             route=os.getenv("GEMINI_ROUTE", "openrouter"),
             temperature=0,
             max_output_tokens=65536,

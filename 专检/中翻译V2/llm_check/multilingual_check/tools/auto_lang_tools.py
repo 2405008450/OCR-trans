@@ -105,7 +105,7 @@ def _make_checker(rule_file: str, lang_name: str):
 
         try:
             res = client.chat.completions.create(
-                model="google/gemini-3-flash-preview",
+                model=os.getenv("ZHONGFANYI_MODEL_NAME", "google/gemini-3.1-pro-preview"),
                 messages=[{"role": "user", "content": combined_prompt}]
             )
             return res.choices[0].message.content

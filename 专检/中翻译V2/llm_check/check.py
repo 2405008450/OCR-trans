@@ -79,7 +79,7 @@ class Match:
         full_response = generate_text(
             system_prompt="你是中译英及其他语种译文合规审校员，只负责依据要求对译文做错误类型规则符合性检查与修改建议，不要自行修正、不要补全缺失信息。",
             user_prompt=prompt,
-            model="google/gemini-3-flash-preview",
+            model=os.getenv("ZHONGFANYI_MODEL_NAME", "google/gemini-3.1-pro-preview"),
             route=os.getenv("GEMINI_ROUTE", "openrouter"),
             temperature=0,
             max_output_tokens=65536,
