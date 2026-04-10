@@ -84,7 +84,7 @@ function handleFileSelect(e) {
 
 function addFiles(newFiles) {
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'image/tiff'];
-    const maxSize = 50 * 1024 * 1024;
+    const maxSize = 100 * 1024 * 1024;
 
     for (const file of newFiles) {
         if (!validTypes.includes(file.type) && !file.type.startsWith('image/')) {
@@ -92,7 +92,7 @@ function addFiles(newFiles) {
             continue;
         }
         if (file.size > maxSize) {
-            alert(`文件太大：${file.name}（最大 50MB）`);
+            alert(`文件太大：${file.name}（最大 100MB）`);
             continue;
         }
         if (!selectedFiles.some((f) => f.name === file.name && f.size === file.size)) {
@@ -398,12 +398,19 @@ function renderBatchTaskList(taskStates) {
     const doneCount = taskStates.filter((t) => t.status === 'done').length;
     const failedCount = taskStates.filter((t) => t.status === 'failed' || (t.submitStatus === 'FAILED')).length;
     const totalCount = taskStates.length;
+    const remainingCount = Math.max(totalCount - doneCount - failedCount, 0);
+    const allSettled = totalCount > 0 && remainingCount === 0;
+    const progressIcon = allSettled
+        ? '<i class="fas fa-check-circle" style="color:var(--success-color)"></i>'
+        : '<i class="fas fa-spinner fa-spin" style="color:var(--primary-color)"></i>';
+    const progressValue = allSettled ? totalCount : remainingCount;
+    const progressLabel = allSettled ? (failedCount > 0 ? '已结束' : '全部完成') : '处理中';
 
     const batchStatsEl = document.getElementById('batchStats');
     batchStatsEl.innerHTML = `
         <div class="stat-card"><i class="fas fa-files"></i><h3>${totalCount}</h3><p>总文件数</p></div>
         <div class="stat-card"><i class="fas fa-check-circle" style="color:var(--success-color)"></i><h3>${doneCount}</h3><p>已完成</p></div>
-        <div class="stat-card"><i class="fas fa-spinner fa-spin" style="color:var(--primary-color)"></i><h3>${totalCount - doneCount - failedCount}</h3><p>处理中</p></div>
+        <div class="stat-card">${progressIcon}<h3>${progressValue}</h3><p>${progressLabel}</p></div>
         ${failedCount > 0 ? `<div class="stat-card"><i class="fas fa-times-circle" style="color:var(--danger-color)"></i><h3>${failedCount}</h3><p>失败</p></div>` : ''}
     `;
 

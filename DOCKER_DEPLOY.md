@@ -1,5 +1,5 @@
 # Docker 部署指南
-
+uvicorn app.main:app --host 127.0.0.1 --port 8001 --proxy-headers --forwarded-allow-ips='*'
 目标服务器 IP：`43.160.215.225`，端口：`8001`
 
 ---

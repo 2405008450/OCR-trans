@@ -3,12 +3,14 @@ import json
 import os
 import tempfile
 import traceback
+import zipfile
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from app.db.session import SessionLocal
 from app.core.task_model_display import build_task_model_info
@@ -51,6 +53,12 @@ class RuleUpdateBody(BaseModel):
     content: str
 
 
+class BatchDownloadBody(BaseModel):
+    task_ids: List[str]
+    extensions: Optional[List[str]] = None
+    archive_name: Optional[str] = None
+
+
 def _safe_resolve(file_path: str) -> Path:
     path = Path(file_path)
     if not path.is_absolute():
@@ -77,6 +85,61 @@ def _task_to_dict(task) -> dict:
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
     }
+
+
+def _normalize_extensions(extensions: Optional[List[str]]) -> Optional[set[str]]:
+    if not extensions:
+        return None
+    normalized = set()
+    for item in extensions:
+        if not item:
+            continue
+        ext = str(item).strip().lower()
+        if not ext:
+            continue
+        if not ext.startswith("."):
+            ext = f".{ext}"
+        normalized.add(ext)
+    return normalized or None
+
+
+def _iter_task_output_files(task, allowed_extensions: Optional[set[str]] = None) -> list[dict]:
+    files = json.loads(task.output_files_json or "[]")
+    if not files and task.output_path:
+        files = [{"name": Path(task.output_path).name, "path": task.output_path, "type": "output"}]
+
+    matched: list[dict] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        file_path = item.get("path")
+        if not file_path:
+            continue
+        resolved = _safe_resolve(file_path)
+        if not resolved.exists() or not resolved.is_file():
+            continue
+        if allowed_extensions and resolved.suffix.lower() not in allowed_extensions:
+            continue
+        matched.append(
+            {
+                "resolved": resolved,
+                "display_name": Path(item.get("name") or resolved.name).name,
+            }
+        )
+    return matched
+
+
+def _build_archive_name(task, display_name: str, used_names: set[str]) -> str:
+    stem = Path(display_name).stem or "output"
+    suffix = Path(display_name).suffix
+    prefix = task.display_no or task.task_id or "task"
+    candidate = f"{prefix}_{stem}{suffix}"
+    index = 2
+    while candidate in used_names:
+        candidate = f"{prefix}_{stem}_{index}{suffix}"
+        index += 1
+    used_names.add(candidate)
+    return candidate
 
 
 
@@ -140,6 +203,52 @@ async def task_download(task_id: str, file_path: str = Query(...), download_name
     if not resolved.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(str(resolved), filename=download_name or resolved.name, media_type="application/octet-stream")
+
+
+@router.post("/batch-download")
+async def batch_download(body: BatchDownloadBody):
+    if not body.task_ids:
+        raise HTTPException(status_code=400, detail="At least one task_id is required")
+
+    allowed_extensions = _normalize_extensions(body.extensions)
+    tasks = []
+    with SessionLocal() as db:
+        for task_id in body.task_ids:
+            task = task_repo.get_task_by_task_id(db, task_id)
+            if task:
+                tasks.append(task)
+
+    archive_sources: list[tuple[Path, str]] = []
+    used_names: set[str] = set()
+    for task in tasks:
+        if task.status != "done":
+            continue
+        for item in _iter_task_output_files(task, allowed_extensions):
+            archive_name = _build_archive_name(task, item["display_name"], used_names)
+            archive_sources.append((item["resolved"], archive_name))
+
+    if not archive_sources:
+        raise HTTPException(status_code=400, detail="No matching output files found")
+
+    temp_dir = BASE_DIR / "outputs" / "_tmp_batch_downloads"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    download_name = (body.archive_name or "batch_outputs.zip").strip() or "batch_outputs.zip"
+    if not download_name.lower().endswith(".zip"):
+        download_name = f"{download_name}.zip"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip", dir=temp_dir) as temp_file:
+        archive_path = Path(temp_file.name)
+
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for source_path, archive_name in archive_sources:
+            zip_file.write(source_path, arcname=archive_name)
+
+    return FileResponse(
+        str(archive_path),
+        filename=download_name,
+        media_type="application/zip",
+        background=BackgroundTask(lambda path=archive_path: path.unlink(missing_ok=True)),
+    )
 
 
 @router.post("/run")

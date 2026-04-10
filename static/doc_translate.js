@@ -9,6 +9,7 @@ const fileStatus = document.getElementById('fileStatus');
 const btnRemove = document.getElementById('btnRemove');
 const btnProcess = document.getElementById('btnProcess');
 const btnNewTask = document.getElementById('btnNewTask');
+const btnBatchDownloadAll = document.getElementById('btnBatchDownloadAll');
 const modelSelect = document.getElementById('modelSelect');
 let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 const sourceLangSelect = document.getElementById('sourceLangSelect');
@@ -39,6 +40,7 @@ let streamLogWrap = null;
 let streamLogEl = null;
 let retryBtn = null;
 let batchPollingTimer = null;
+let batchTaskStates = [];
 
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 let etaHint = null;
@@ -137,6 +139,7 @@ function bindEvents() {
     btnProcess?.addEventListener('click', processFiles);
     btnNewTask?.addEventListener('click', resetPage);
     document.getElementById('btnBatchNewTask')?.addEventListener('click', resetPage);
+    btnBatchDownloadAll?.addEventListener('click', downloadAllBatchResults);
     sourceLangSelect?.addEventListener('change', renderTargetLanguages);
 }
 
@@ -313,15 +316,15 @@ async function processBatchFiles(targetLangs) {
 
 function startBatchPolling(tasks) {
     stopBatchPolling();
-    const taskStates = tasks.map((t) => ({
+    batchTaskStates = tasks.map((t) => ({
         filename: t.filename, task_id: t.task_id, submitStatus: t.status, error: t.error || null,
         status: t.status === 'ACCEPTED' ? 'queued' : 'failed', progress: 0,
         message: t.status === 'ACCEPTED' ? '排队中...' : (t.error || '提交失败'), result: null,
     }));
-    renderBatchTaskList(taskStates);
+    renderBatchTaskList(batchTaskStates);
     batchPollingTimer = setInterval(async () => {
         let allDone = true;
-        for (const task of taskStates) {
+        for (const task of batchTaskStates) {
             if (!task.task_id || ['done','failed','cancelled'].includes(task.status)) continue;
             allDone = false;
             try {
@@ -335,21 +338,60 @@ function startBatchPolling(tasks) {
                 else if (data.status === 'failed') { task.status = 'failed'; task.message = data.error || '处理失败'; }
             } catch (_) {}
         }
-        renderBatchTaskList(taskStates);
-        if (allDone || taskStates.every((t) => ['done','failed','cancelled'].includes(t.status) || !t.task_id)) stopBatchPolling();
+        renderBatchTaskList(batchTaskStates);
+        if (allDone || batchTaskStates.every((t) => ['done','failed','cancelled'].includes(t.status) || !t.task_id)) stopBatchPolling();
     }, 2500);
 }
 
-function stopBatchPolling() { if (batchPollingTimer) { clearInterval(batchPollingTimer); batchPollingTimer = null; } }
+function stopBatchPolling() {
+    if (batchPollingTimer) {
+        clearInterval(batchPollingTimer);
+        batchPollingTimer = null;
+    }
+}
+
+function getBatchDownloadableTaskIds() {
+    return batchTaskStates
+        .filter((task) => task.status === 'done' && hasBatchDocx(task))
+        .map((task) => task.task_id)
+        .filter(Boolean);
+}
+
+function hasBatchDocx(task) {
+    const translations = task?.result?.translations || {};
+    return Object.values(translations).some((item) => item?.output_docx);
+}
+
+function updateBatchDownloadButton() {
+    if (!btnBatchDownloadAll) return;
+    const readyTaskIds = getBatchDownloadableTaskIds();
+    if (!batchSection || batchSection.style.display === 'none' || readyTaskIds.length === 0) {
+        btnBatchDownloadAll.style.display = 'none';
+        btnBatchDownloadAll.disabled = true;
+        btnBatchDownloadAll.innerHTML = '<i class="fas fa-box-archive"></i> 全部下载';
+        return;
+    }
+
+    btnBatchDownloadAll.style.display = '';
+    btnBatchDownloadAll.disabled = false;
+    btnBatchDownloadAll.innerHTML = `<i class="fas fa-box-archive"></i> 全部下载（${readyTaskIds.length}）`;
+}
 
 function renderBatchTaskList(taskStates) {
     const doneCount = taskStates.filter((t) => t.status === 'done').length;
     const failedCount = taskStates.filter((t) => t.status === 'failed').length;
     const totalCount = taskStates.length;
+    const remainingCount = Math.max(totalCount - doneCount - failedCount, 0);
+    const allSettled = totalCount > 0 && remainingCount === 0;
+    const progressIcon = allSettled
+        ? '<i class="fas fa-check-circle" style="color:var(--success-color)"></i>'
+        : '<i class="fas fa-spinner fa-spin" style="color:var(--primary-color)"></i>';
+    const progressValue = allSettled ? totalCount : remainingCount;
+    const progressLabel = allSettled ? (failedCount > 0 ? '已结束' : '全部完成') : '处理中';
     document.getElementById('batchStats').innerHTML = `
         <div class="stat-card"><i class="fas fa-files"></i><h3>${totalCount}</h3><p>总文件数</p></div>
         <div class="stat-card"><i class="fas fa-check-circle" style="color:var(--success-color)"></i><h3>${doneCount}</h3><p>已完成</p></div>
-        <div class="stat-card"><i class="fas fa-spinner fa-spin" style="color:var(--primary-color)"></i><h3>${totalCount - doneCount - failedCount}</h3><p>处理中</p></div>
+        <div class="stat-card">${progressIcon}<h3>${progressValue}</h3><p>${progressLabel}</p></div>
         ${failedCount > 0 ? `<div class="stat-card"><i class="fas fa-times-circle" style="color:var(--danger-color)"></i><h3>${failedCount}</h3><p>失败</p></div>` : ''}
     `;
     document.getElementById('batchTaskList').innerHTML = taskStates.map((task) => {
@@ -380,6 +422,50 @@ function renderBatchTaskList(taskStates) {
             ${dlLinks ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${dlLinks}</div>` : ''}
         </div>`;
     }).join('');
+    updateBatchDownloadButton();
+}
+
+async function downloadAllBatchResults() {
+    const taskIds = getBatchDownloadableTaskIds();
+    if (!taskIds.length) {
+        alert('当前还没有可打包下载的已完成文档。');
+        return;
+    }
+
+    if (btnBatchDownloadAll) {
+        btnBatchDownloadAll.disabled = true;
+        btnBatchDownloadAll.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在打包...';
+    }
+
+    try {
+        const response = await fetch('/task/batch-download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                task_ids: taskIds,
+                extensions: ['.docx'],
+                archive_name: '通用证件批量结果.zip',
+            }),
+        });
+        if (!response.ok) {
+            const message = await safeReadError(response);
+            throw new Error(message || `打包失败: ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = '通用证件批量结果.zip';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        alert(`全部下载失败: ${error.message}`);
+    } finally {
+        updateBatchDownloadButton();
+    }
 }
 
 function startPolling(taskId) { stopPolling(); pollStatus(taskId); pollingTimer = setInterval(() => pollStatus(taskId), 2500); }
@@ -447,6 +533,7 @@ function resetPage() {
     clearFiles();
     stopPolling();
     stopBatchPolling();
+    batchTaskStates = [];
     clearLog();
     removeRetryButton();
     uploadSection.style.display = 'block';
@@ -454,6 +541,7 @@ function resetPage() {
     resultSection.style.display = 'none';
     batchSection.style.display = 'none';
     updateProgress(0, '等待开始处理');
+    updateBatchDownloadButton();
 }
 
 async function safeReadError(response) { try { const p = await response.json(); return p?.detail?.error || p?.detail || p?.message || ''; } catch (_) { return ''; } }
