@@ -14,6 +14,9 @@
         { href: '/alignment', icon: 'fa-object-group', text: '多语对照' },
         { href: '/zhongfanyi', icon: 'fa-spell-check', text: '中翻专检' },
     ];
+    const navActiveAliases = {
+        '/certificate-translation': ['/certificate-translation', '/ocr', '/doc-translate', '/drivers-license', '/business-licence'],
+    };
 
     const shell = window.AppShell || {};
     shell.buildId = APP_BUILD_ID;
@@ -281,20 +284,22 @@
             return;
         }
 
-        const topContainer = document.querySelector('.container, .page');
-        if (!topContainer) {
+        const shellSlot = document.getElementById('appShellSlot');
+        const shellHost = shellSlot?.querySelector('.app-shell-inner') || shellSlot || document.querySelector('.container, .page');
+        if (!shellHost) {
             return;
         }
 
         const currentPath = window.location.pathname;
         const navHtml = navItems
             .map((item) => {
-                const isActive = currentPath === item.href || currentPath.startsWith(item.href + '/');
+                const activePrefixes = navActiveAliases[item.href] || [item.href];
+                const isActive = activePrefixes.some((prefix) => currentPath === prefix || (prefix !== '/' && currentPath.startsWith(prefix + '/')));
                 return `<a href="${item.href}" class="${isActive ? 'active' : ''}"><i class="fas ${item.icon}"></i> ${item.text}</a>`;
             })
             .join('');
 
-        if (!topContainer.querySelector('.unified-global-topbar')) {
+        if (!shellHost.querySelector('.unified-global-topbar')) {
             const unifiedTopbar = document.createElement('header');
             unifiedTopbar.className = 'topbar unified-global-topbar';
             unifiedTopbar.innerHTML = `
@@ -308,7 +313,7 @@
                     ${navHtml}
                 </nav>
             `;
-            topContainer.insertBefore(unifiedTopbar, topContainer.firstChild);
+            shellHost.insertBefore(unifiedTopbar, shellHost.firstChild);
         }
 
         document.querySelectorAll('header.topbar:not(.unified-global-topbar)').forEach((header) => header.remove());
@@ -317,7 +322,7 @@
             header.classList.add('page-hero-header');
         });
 
-        injectRefreshNotice(topContainer);
+        injectRefreshNotice(shellHost);
         announceBuildUpdate();
     }
 
