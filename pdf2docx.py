@@ -7,12 +7,15 @@ import re
 import sys
 import os
 import time
-import subprocess
-import shutil
 from pathlib import Path
 from typing import Any
 
 from app.service.gemini_service import GEMINI_ROUTE_GOOGLE, generate_vision_html
+from app.service.libreoffice_service import (
+    LIBREOFFICE_PATH,
+    convert_to_docx_via_libreoffice,
+    resolve_libreoffice_path,
+)
 
 # ============================================================
 # 依赖检查与导入
@@ -38,8 +41,6 @@ except ImportError:
 # ============================================================
 # 1. LLM OCR 调用
 # ============================================================
-LIBREOFFICE_PATH = os.getenv("LIBREOFFICE_PATH", "").strip()
-
 SYS_PROMPT = """Convert the document into simple, Microsoft Word-safe HTML.
 
 Return only a complete HTML document. Do not include explanations. Do not use markdown. Do not wrap the output in code fences.
@@ -530,10 +531,6 @@ def convert_html_to_docx_via_libreoffice(
     html_file = Path(html_output_path) if html_output_path else output_file.with_suffix(".html")
     html_file.parent.mkdir(parents=True, exist_ok=True)
     html_file.write_text(html_text, encoding="utf-8")
-    user_profile_dir = html_file.parent / ".libreoffice-profile"
-    user_profile_dir.mkdir(parents=True, exist_ok=True)
-
-    libreoffice = _resolve_libreoffice_path(libreoffice_path)
 
     expected_docx = html_file.with_suffix(".docx")
     if expected_docx.exists():
@@ -541,74 +538,23 @@ def convert_html_to_docx_via_libreoffice(
     if output_file.exists() and output_file != expected_docx:
         output_file.unlink()
 
-    result = subprocess.run(
-        [
-            str(libreoffice),
-            f"-env:UserInstallation={user_profile_dir.resolve().as_uri()}",
-            "--headless",
-            "--convert-to",
-            "docx:Office Open XML Text",
-            "--outdir",
-            str(html_file.parent),
-            str(html_file),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+    docx_file = convert_to_docx_via_libreoffice(
+        input_path=html_file,
+        output_path=output_file,
+        libreoffice_path=libreoffice_path,
     )
-    if result.returncode != 0:
-        raise RuntimeError(
-            "LibreOffice 转换失败: "
-            f"returncode={result.returncode}, stdout={result.stdout}, stderr={result.stderr}"
-        )
-
-    if not expected_docx.exists():
-        raise RuntimeError(
-            "LibreOffice 未生成 DOCX 文件: "
-            f"stdout={result.stdout}, stderr={result.stderr}"
-        )
-
-    if expected_docx != output_file:
-        expected_docx.replace(output_file)
 
     try:
-        _postprocess_docx_tables(str(output_file), _extract_table_layout_specs(html_text))
+        _postprocess_docx_tables(str(docx_file), _extract_table_layout_specs(html_text))
     except Exception as exc:
         print(f"[warn] DOCX table post-processing failed; keeping LibreOffice output: {exc}")
 
-    return str(output_file)
+    return str(docx_file)
 
 
 def _resolve_libreoffice_path(configured_path: str | None = None) -> str:
-    """优先读取显式配置，其次从环境变量和 PATH 中查找 LibreOffice 可执行文件。"""
-    candidates: list[str] = []
-
-    for candidate in [
-        configured_path,
-        os.getenv("LIBREOFFICE_PATH", "").strip(),
-        r"C:\Program Files\LibreOffice\program\soffice.exe",
-        "/usr/bin/soffice",
-        "/usr/bin/libreoffice",
-        "soffice",
-        "libreoffice",
-    ]:
-        if candidate and candidate not in candidates:
-            candidates.append(candidate)
-
-    for candidate in candidates:
-        if any(sep in candidate for sep in ("/", "\\")) or Path(candidate).is_absolute():
-            if Path(candidate).exists():
-                return str(Path(candidate))
-            continue
-
-        resolved = shutil.which(candidate)
-        if resolved:
-            return resolved
-
-    raise FileNotFoundError(
-        "未找到 LibreOffice 可执行文件。请安装 LibreOffice，并在环境变量 LIBREOFFICE_PATH "
-        "中指定 soffice 路径，或确保 `soffice` 已加入 PATH。"
-    )
+    """兼容旧调用方，内部转到共享的 LibreOffice 解析逻辑。"""
+    return resolve_libreoffice_path(configured_path)
 
 
 def convert_text_to_word_via_libreoffice(

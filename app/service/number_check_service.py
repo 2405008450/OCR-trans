@@ -21,6 +21,7 @@ from app.service.gemini_service import (
     ensure_gemini_route_configured,
     resolve_model_for_route,
 )
+from app.service.libreoffice_service import convert_doc_to_docx_via_libreoffice
 
 
 _task_progress: Dict[str, Dict[str, Any]] = {}
@@ -300,15 +301,28 @@ def _normalize_path(path: str) -> str:
 
 def _validate_docx(file: UploadFile, label: str) -> None:
     ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext != ".docx":
-        raise ValueError(f"{label} 必须是 .docx 文件，当前为 {file.filename}")
+    if ext not in {".docx", ".doc"}:
+        raise ValueError(f"{label} 必须是 .docx 或 .doc 文件，当前为 {file.filename}")
 
 
 def _validate_single_file(file: UploadFile, label: str) -> None:
     ext = os.path.splitext(file.filename or "")[1].lower()
-    allowed = {".docx", ".pdf", ".xlsx", ".pptx"}
+    allowed = {".docx", ".doc", ".pdf", ".xlsx", ".pptx"}
     if ext not in allowed:
         raise ValueError(f"{label} 仅支持 {', '.join(sorted(allowed))}，当前为 {file.filename}")
+
+
+def _supports_revised_doc_output(ext: str) -> bool:
+    return ext.lower() in {".docx", ".doc"}
+
+
+def _convert_doc_input_if_needed(source: Path, work_dir: Path, role: str) -> Path:
+    if source.suffix.lower() != ".doc":
+        return source
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    target = work_dir / f"{role}.docx"
+    return Path(convert_doc_to_docx_via_libreoffice(source, target))
 
 
 def _prepare_specialized_import_path() -> None:
@@ -720,6 +734,12 @@ def _run_number_check_sync(
 
     effective_route = GEMINI_ROUTE_OPENROUTER
     resolved_model_name = resolve_model_for_route(model_name, effective_route)
+    converted_dir = output_dir / "converted_inputs"
+
+    if original_path.suffix.lower() == ".doc" or translated_path.suffix.lower() == ".doc":
+        _update_progress(task_id, 2, 7, "检测到 .doc 文件，正在转换为 .docx...")
+        original_path = _convert_doc_input_if_needed(original_path, converted_dir, "original")
+        translated_path = _convert_doc_input_if_needed(translated_path, converted_dir, "translated")
 
     with _specialist_import_lock:
         _prepare_specialized_import_path()
@@ -855,6 +875,10 @@ def _run_number_check_single_sync(
     """单文件模式：docx 生成修订版，其它格式生成报告。"""
     effective_route = GEMINI_ROUTE_OPENROUTER
     resolved_model_name = resolve_model_for_route(model_name, effective_route)
+    if single_path.suffix.lower() == ".doc":
+        _update_progress(task_id, 2, 6, "检测到 .doc 文件，正在转换为 .docx...")
+        single_path = _convert_doc_input_if_needed(single_path, output_dir / "converted_inputs", "single")
+
     total_steps = 6 if single_path.suffix.lower() == ".docx" else 5
 
     with _specialist_import_lock:
@@ -978,7 +1002,7 @@ async def run_number_check_task(
         task_id = str(uuid.uuid4())
 
     single_ext = os.path.splitext(single_file.filename or "")[1].lower() if single_file else ""
-    total_steps = 6 if normalized_mode == NUMBER_CHECK_MODE_SINGLE and single_ext == ".docx" else (5 if normalized_mode == NUMBER_CHECK_MODE_SINGLE else 7)
+    total_steps = 6 if normalized_mode == NUMBER_CHECK_MODE_SINGLE and _supports_revised_doc_output(single_ext) else (5 if normalized_mode == NUMBER_CHECK_MODE_SINGLE else 7)
     _init_task_progress(task_id, total_steps=total_steps)
     _emit_log(task_id, f"[config] mode={normalized_mode}, route={gemini_route}, model={model_name}")
 
@@ -1005,8 +1029,10 @@ async def run_number_check_task(
                 single_file.filename or single_path.name,
             )
 
-        original_path = upload_dir / "original.docx"
-        translated_path = upload_dir / "translated.docx"
+        original_ext = os.path.splitext(original_file.filename or "")[1].lower() or ".docx"
+        translated_ext = os.path.splitext(translated_file.filename or "")[1].lower() or ".docx"
+        original_path = upload_dir / f"original{original_ext}"
+        translated_path = upload_dir / f"translated{translated_ext}"
         with open(original_path, "wb") as f:
             f.write(await original_file.read())
         with open(translated_path, "wb") as f:

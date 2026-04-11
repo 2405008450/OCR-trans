@@ -19,6 +19,7 @@ from app.service.gemini_service import (
     ensure_gemini_route_configured,
     resolve_model_for_route,
 )
+from app.service.libreoffice_service import convert_doc_to_docx_via_libreoffice
 
 
 ZHONGFANYI_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
@@ -227,6 +228,19 @@ def _normalize_report_count(path: Optional[str]) -> int:
         return 0
 
 
+def _normalize_word_input_to_docx(path: Optional[str], work_dir: Path, role: str) -> Optional[str]:
+    if not path:
+        return path
+
+    source = Path(path)
+    if source.suffix.lower() != ".doc":
+        return str(source)
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    target = work_dir / f"{source.stem}_{role}.docx"
+    return convert_doc_to_docx_via_libreoffice(source, target)
+
+
 def _inject_runtime_env(gemini_route: str, model_name: str) -> None:
     if settings.GOOGLE_API_KEY:
         os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
@@ -344,10 +358,32 @@ def run_zhongfanyi_task(
         _inject_runtime_env(gemini_route, model_name)
         from zhongfanyi.main import run_full_pipeline
 
-    input_path = single_path if normalized_mode == ZHONGFANYI_MODE_SINGLE else original_path
-    if not input_path:
+    if not (single_path if normalized_mode == ZHONGFANYI_MODE_SINGLE else original_path):
         _complete_task(task_id, error="缺少输入文件")
         return _task_progress[task_id]
+
+    converted_input_dir = output_dir / "converted_inputs"
+    if normalized_mode == ZHONGFANYI_MODE_SINGLE:
+        if single_path and Path(single_path).suffix.lower() == ".doc":
+            _update_task(task_id, "检测到 .doc 文件，正在转换为 .docx...", 10)
+        try:
+            single_path = _normalize_word_input_to_docx(single_path, converted_input_dir, "single")
+        except Exception as exc:
+            _complete_task(task_id, error=f".doc 转换失败: {exc}")
+            return _task_progress[task_id]
+    else:
+        if (original_path and Path(original_path).suffix.lower() == ".doc") or (
+            translated_path and Path(translated_path).suffix.lower() == ".doc"
+        ):
+            _update_task(task_id, "检测到 .doc 文件，正在转换为 .docx...", 10)
+        try:
+            original_path = _normalize_word_input_to_docx(original_path, converted_input_dir, "original")
+            translated_path = _normalize_word_input_to_docx(translated_path, converted_input_dir, "translated")
+        except Exception as exc:
+            _complete_task(task_id, error=f".doc 转换失败: {exc}")
+            return _task_progress[task_id]
+
+    input_path = single_path if normalized_mode == ZHONGFANYI_MODE_SINGLE else original_path
 
     _update_task(task_id, "正在提取文本并执行中翻译专检...", 20)
     result_path, report_paths, excel_paths, stats = run_full_pipeline(

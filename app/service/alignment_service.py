@@ -32,6 +32,7 @@ from app.service.gemini_service import (
     ensure_gemini_route_configured,
     generate_text,
 )
+from app.service.libreoffice_service import convert_doc_to_docx_via_libreoffice
 
 # ── 全局配置 ──────────────────────────────────────────────
 ROW_BUCKET = 20_000
@@ -549,7 +550,7 @@ This is the third sentence after newline?
 # ── 文件工具 ──────────────────────────────────────────────
 def _get_file_type(file_path: str) -> str:
     ext = os.path.splitext(file_path)[1].lower()
-    return {'.docx': 'docx', '.pptx': 'pptx', '.xlsx': 'excel', '.xls': 'excel'}.get(ext, 'unknown')
+    return {'.docx': 'docx', '.doc': 'doc', '.pptx': 'pptx', '.xlsx': 'excel', '.xls': 'excel'}.get(ext, 'unknown')
 
 
 def _get_text_count(text: str, lang_name: str) -> int:
@@ -1570,6 +1571,17 @@ def _normalize_output_path(path: str | Path) -> str:
     return str(path).replace("\\", "/")
 
 
+def _convert_doc_path_for_alignment(input_path: str | Path, temp_dir: str | Path, role: str) -> str:
+    source = Path(input_path)
+    if source.suffix.lower() != ".doc":
+        return _normalize_output_path(source)
+
+    target_dir = Path(temp_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{source.stem}_{role}.docx"
+    return _normalize_output_path(convert_doc_to_docx_via_libreoffice(source, target))
+
+
 def _finalize_alignment_output(output_path: str | Path, task_dir: str | Path, original_filename: Optional[str]) -> str:
     source = Path(output_path)
     if not source.exists():
@@ -1629,6 +1641,8 @@ def _run_alignment_sync(
         model_id = model_info['id']
 
         file_type = memory_module.get_file_type(original_path)
+        original_ext = Path(original_path).suffix.lower()
+        translated_ext = Path(translated_path).suffix.lower()
         base_name = os.path.splitext(os.path.basename(original_path))[0]
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
@@ -1651,15 +1665,16 @@ def _run_alignment_sync(
         _update_progress(task_id, 8, "正在分析文档...")
 
         # .doc → .docx 转换
-        if file_type == 'doc':
-            _update_progress(task_id, 8, "检测到 .doc 文件，正在转换...")
-            converted_orig = memory_module.convert_doc_to_docx(original_path, temp_dir)
-            converted_trans = memory_module.convert_doc_to_docx(translated_path, temp_dir)
-            if converted_orig is None or converted_trans is None:
-                _complete_task(task_id, error="无法转换 .doc 文件，请安装 pywin32")
-                return
-            original_path = converted_orig
-            translated_path = converted_trans
+        if original_ext in {".doc", ".docx"} and translated_ext in {".doc", ".docx"}:
+            if original_ext == ".doc" or translated_ext == ".doc":
+                _update_progress(task_id, 8, "检测到 .doc 文件，正在转换...")
+                try:
+                    original_path = _convert_doc_path_for_alignment(original_path, temp_dir, "original")
+                    translated_path = _convert_doc_path_for_alignment(translated_path, temp_dir, "translated")
+                except Exception as exc:
+                    _log(f".doc 转换失败: {exc}")
+                    _complete_task(task_id, error="无法转换 .doc 文件，请检查 LibreOffice 是否已安装并正确配置")
+                    return
             file_type = 'docx'
 
         # ── Excel 双文件模式 ──

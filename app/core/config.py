@@ -8,15 +8,19 @@ except ImportError:
     load_dotenv = None
 
 try:
-    from pydantic_settings import BaseSettings
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+    _USE_SETTINGS_CONFIG_DICT = True
 except ImportError:
     try:
         from pydantic import BaseSettings
+        _USE_SETTINGS_CONFIG_DICT = False
     except ImportError:
         class BaseSettings:  # type: ignore[override]
             def __init__(self, **kwargs):
                 for key, value in kwargs.items():
                     setattr(self, key, value)
+
+        _USE_SETTINGS_CONFIG_DICT = False
 
 
 _ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -28,7 +32,7 @@ if load_dotenv and _ENV_FILE.exists():
 
 class Settings(BaseSettings):
     GLM_API_KEY: str = os.getenv("GLM_API_KEY", "")
-    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "sk-f2a71209abd64087a69147ab6a0bb2ec")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY", "")
@@ -58,10 +62,17 @@ class Settings(BaseSettings):
     TASK_QUEUE_CANDIDATE_BATCH_SIZE: int = int(os.getenv("TASK_QUEUE_CANDIDATE_BATCH_SIZE", "20"))
     TASK_QUEUE_TYPE_LIMITS_JSON: str = os.getenv("TASK_QUEUE_TYPE_LIMITS_JSON", "")
 
-    class Config:
-        env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
-        case_sensitive = True
-        extra = "ignore"
+    if _USE_SETTINGS_CONFIG_DICT:
+        model_config = SettingsConfigDict(
+            env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
+            case_sensitive=True,
+            extra="ignore",
+        )
+    else:
+        class Config:
+            env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
+            case_sensitive = True
+            extra = "ignore"
 
     @property
     def DEBUG_ENABLED(self) -> bool:

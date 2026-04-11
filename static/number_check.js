@@ -43,7 +43,8 @@ let defaultModel = 'gemini-3.1-pro-preview';
 let defaultMode = 'double';
 let currentMode = 'double';
 let modeConfig = {};
-let singleFileExtensions = ['.docx', '.pdf', '.xlsx', '.pptx'];
+let singleFileExtensions = ['.docx', '.doc', '.pdf', '.xlsx', '.pptx'];
+let doubleFileExtensions = ['.docx', '.doc'];
 let streamLogWrap = null;
 let streamLogEl = null;
 let etaHint = null;
@@ -77,6 +78,7 @@ async function loadConfig() {
         defaultMode = data.default_mode || defaultMode;
         modeConfig = data.modes || {};
         singleFileExtensions = data.single_file_extensions || singleFileExtensions;
+        doubleFileExtensions = data.double_file_extensions || doubleFileExtensions;
     } catch (error) {
         console.error(error);
         modelConfig = {
@@ -92,16 +94,18 @@ async function loadConfig() {
         modeConfig = {
             double: {
                 label: '双文件模式',
-                description: '上传原文和译文两个 DOCX 文件，输出修订版译文。',
+                description: '上传原文和译文两个 DOC / DOCX 文件，输出修订版译文。',
             },
             single: {
                 label: '单文件模式',
-                description: '上传一个双语对照文件；DOCX 可生成修订版。',
+                description: '上传一个双语对照文件；DOC / DOCX 可生成修订版。',
             },
         };
     }
 
     singleFileInput.accept = singleFileExtensions.join(',');
+    originalFileInput.accept = doubleFileExtensions.join(',');
+    translatedFileInput.accept = doubleFileExtensions.join(',');
     renderModels();
     updateModelInfo();
 }
@@ -141,11 +145,11 @@ function applyMode(mode) {
     const description = currentModeConfig.description || '';
     modeHint.textContent = description;
     pageSubtitle.textContent = singleMode
-        ? '上传一个双语对照文件，自动检查数值并在 DOCX 输出修订版'
-        : '上传原文与译文两个 DOCX，自动对比并批注修复';
+        ? '上传一个双语对照文件，自动检查数值并在 DOC / DOCX 输出修订版'
+        : '上传原文与译文两个 DOC / DOCX，自动对比并批注修复';
     uploadDesc.textContent = singleMode
         ? `当前为单文件模式，支持 ${singleFileExtensions.join(' / ')}`
-        : '当前为双文件模式，仅支持同时上传原文和译文 DOCX';
+        : `当前为双文件模式，支持 ${doubleFileExtensions.join(' / ')}`;
 }
 
 function ensureLogPanel() {

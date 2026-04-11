@@ -317,6 +317,8 @@ async def run_number_check(
 
 @router.get("/number-check/config")
 async def get_number_check_config():
+    double_file_extensions = [".docx", ".doc"]
+    single_file_extensions = [".docx", ".doc", ".pdf", ".xlsx", ".pptx"]
     return {
         "models": get_number_check_models(),
         "default_model": "gemini-3.1-pro-preview",
@@ -326,14 +328,15 @@ async def get_number_check_config():
         "modes": {
             "double": {
                 "label": "双文件模式",
-                "description": "上传原文和译文两个 DOCX 文件，输出修订版译文。",
+                "description": f"上传原文和译文两个 {' / '.join(double_file_extensions).upper().replace('.', '')} 文件，输出修订版译文。",
             },
             "single": {
                 "label": "单文件模式",
-                "description": "上传一个中英对照文件；DOCX 可生成修订版，其它格式仅输出报告。",
+                "description": "上传一个中英对照文件；DOC / DOCX 可生成修订版，其它格式仅输出报告。",
             },
         },
-        "single_file_extensions": [".docx", ".pdf", ".xlsx", ".pptx"],
+        "single_file_extensions": single_file_extensions,
+        "double_file_extensions": double_file_extensions,
     }
 
 
