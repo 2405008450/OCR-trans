@@ -142,6 +142,9 @@ def _prepare_zhongfanyi_import_path() -> None:
 
     for module_name in _LOCAL_PACKAGE_NAMES:
         _clear_stale_namespace_modules(module_name, ZHONGFANYI_ROOT)
+        package_root = ZHONGFANYI_ROOT / module_name
+        if package_root.is_dir():
+            _register_namespace_package(module_name, package_root)
     for alias in _ALIASED_NAMESPACE_PACKAGES:
         _clear_stale_namespace_modules(alias, ZHONGFANYI_ROOT)
         _register_namespace_package(alias, ZHONGFANYI_ROOT)
@@ -149,12 +152,10 @@ def _prepare_zhongfanyi_import_path() -> None:
     root_str = str(ZHONGFANYI_ROOT)
     parent_str = str(ZHONGFANYI_ROOT.parent)
     repo_root_str = str(REPO_ROOT)
-    if root_str not in sys.path:
-        sys.path.insert(0, root_str)
-    if parent_str not in sys.path:
-        sys.path.insert(0, parent_str)
-    if repo_root_str not in sys.path:
-        sys.path.insert(0, repo_root_str)
+    for path_str in (repo_root_str, parent_str, root_str):
+        while path_str in sys.path:
+            sys.path.remove(path_str)
+        sys.path.insert(0, path_str)
 
 
 def _init_task(task_id: str) -> None:

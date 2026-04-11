@@ -4,6 +4,10 @@
     const UPLOAD_TIMEOUT_MS = 240000;
     const REFRESH_HINT = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。';
     const REFRESH_HINT_HTML = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。';
+    const RELEASE_NOTES = [
+        '\u652f\u6301\u5bfc\u5165 .doc \u6587\u6863',
+        '\u652f\u6301\u6279\u91cf\u4e0b\u8f7d\u5904\u7406\u5b8c\u6210\u6587\u4ef6',
+    ];
     const originalFetch = window.fetch.bind(window);
     const navItems = [
         { href: '/', icon: 'fa-home', text: '首页' },
@@ -217,6 +221,109 @@
                 box-shadow: inset 0 -1px 0 rgba(255, 247, 237, 0.16);
                 vertical-align: middle;
             }
+            .shell-release-note {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 14px;
+                margin-bottom: 18px;
+                padding: 14px 18px;
+                border-radius: 14px;
+                border: 1px solid rgba(14, 165, 233, 0.18);
+                background: linear-gradient(135deg, rgba(11, 31, 52, 0.6), rgba(6, 17, 29, 0.5));
+                box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+                position: relative;
+                overflow: hidden;
+            }
+            .shell-release-note::before {
+                content: '';
+                position: absolute;
+                inset: 0 0 auto 0;
+                height: 4px;
+                background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+            }
+            .shell-release-note .release-icon {
+                width: 40px;
+                height: 40px;
+                border-radius: 12px;
+                display: grid;
+                place-items: center;
+                background: linear-gradient(135deg, #0284c7, #0369a1);
+                color: #ffffff;
+                font-size: 18px;
+                flex: 0 0 auto;
+            }
+            .shell-release-note .release-copy {
+                min-width: 0;
+                flex: 1 1 0;
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 10px 12px;
+            }
+            .shell-release-note .release-badge {
+                display: inline-flex;
+                align-items: center;
+                min-height: 24px;
+                padding: 0 10px;
+                margin: 0;
+                border-radius: 999px;
+                background: rgba(14, 165, 233, 0.18) !important;
+                border: 1px solid rgba(14, 165, 233, 0.32) !important;
+                color: #e0f2fe !important;
+                -webkit-text-fill-color: currentColor !important;
+                font-size: 12px;
+                font-weight: 900;
+                letter-spacing: 0.06em;
+                opacity: 1 !important;
+                flex: 0 0 auto;
+            }
+            .shell-release-note .release-title {
+                display: inline;
+                margin: 0;
+                color: #f0f9ff !important;
+                -webkit-text-fill-color: currentColor !important;
+                font-size: 15px;
+                font-weight: 800;
+                line-height: 1.5;
+                text-shadow: none;
+                opacity: 1 !important;
+                flex: 0 1 auto;
+            }
+            .shell-release-note .release-list {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin: 0;
+                padding: 0;
+                list-style: none;
+                flex: 1 1 100%;
+            }
+            .shell-release-note .release-list li {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 10px;
+                border-radius: 999px;
+                background: rgba(56, 189, 248, 0.12) !important;
+                border: 1px solid rgba(56, 189, 248, 0.16) !important;
+                color: #bae6fd !important;
+                -webkit-text-fill-color: currentColor !important;
+                opacity: 1 !important;
+                font-size: 14px;
+                font-weight: 700;
+                line-height: 1.4;
+                text-shadow: none;
+            }
+            .shell-release-note .release-list li::before {
+                content: '';
+                width: 6px;
+                height: 6px;
+                border-radius: 999px;
+                background: #38bdf8;
+                flex: 0 0 auto;
+            }
             .shell-build-toast {
                 position: fixed;
                 right: 18px;
@@ -261,6 +368,26 @@
                 }
                 .shell-refresh-notice .notice-text {
                     font-size: 13px;
+                }
+                .shell-release-note {
+                    align-items: flex-start;
+                    border-radius: 12px;
+                    padding: 14px 14px 14px 16px;
+                    gap: 12px;
+                }
+                .shell-release-note .release-copy {
+                    display: grid;
+                    gap: 8px;
+                }
+                .shell-release-note .release-title {
+                    font-size: 14px;
+                }
+                .shell-release-note .release-list {
+                    gap: 7px;
+                }
+                .shell-release-note .release-list li {
+                    font-size: 13px;
+                    padding: 6px 9px;
                 }
                 .shell-build-toast {
                     right: 10px;
@@ -323,6 +450,7 @@
         });
 
         injectRefreshNotice(shellHost);
+        injectReleaseNotice(shellHost);
         announceBuildUpdate();
     }
 
@@ -347,6 +475,32 @@
             topContainer.insertBefore(notice, topbar.nextSibling);
         } else {
             topContainer.appendChild(notice);
+        }
+    }
+
+    function injectReleaseNotice(topContainer) {
+        if (topContainer.querySelector('.shell-release-note')) {
+            return;
+        }
+
+        const note = document.createElement('section');
+        note.className = 'shell-release-note';
+        note.innerHTML = `
+            <div class="release-icon"><i class="fas fa-bullhorn"></i></div>
+            <div class="release-copy">
+                <div class="release-badge">\u6700\u8fd1\u66f4\u65b0</div>
+                <strong class="release-title">\u5f53\u524d\u7248\u672c\u5df2\u540c\u6b65\u4ee5\u4e0b\u5185\u5bb9</strong>
+                <ul class="release-list">
+                    ${RELEASE_NOTES.map((item) => `<li>${item}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+
+        const anchor = topContainer.querySelector('.shell-refresh-notice') || topContainer.querySelector('.unified-global-topbar');
+        if (anchor?.nextSibling) {
+            topContainer.insertBefore(note, anchor.nextSibling);
+        } else {
+            topContainer.appendChild(note);
         }
     }
 

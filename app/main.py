@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -207,6 +207,109 @@ APP_SHELL_BOOTSTRAP = f"""
         font-family: Consolas, "SFMono-Regular", "Liberation Mono", Menlo, monospace;
         box-shadow: inset 0 -1px 0 rgba(255, 247, 237, 0.16);
         vertical-align: middle;
+    }}
+    .shell-release-note {{
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-bottom: 18px;
+        padding: 14px 18px;
+        border-radius: 14px;
+        border: 1px solid rgba(14, 165, 233, 0.18);
+        background: linear-gradient(135deg, rgba(11, 31, 52, 0.6), rgba(6, 17, 29, 0.5));
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+        position: relative;
+        overflow: hidden;
+    }}
+    .shell-release-note::before {{
+        content: '';
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 4px;
+        background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+    }}
+    .shell-release-note .release-icon {{
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, #0284c7, #0369a1);
+        color: #ffffff;
+        font-size: 18px;
+        flex: 0 0 auto;
+    }}
+    .shell-release-note .release-copy {{
+        min-width: 0;
+        flex: 1 1 0;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px 12px;
+    }}
+    .shell-release-note .release-badge {{
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 10px;
+        margin: 0;
+        border-radius: 999px;
+        background: rgba(14, 165, 233, 0.18) !important;
+        border: 1px solid rgba(14, 165, 233, 0.32) !important;
+        color: #e0f2fe !important;
+        -webkit-text-fill-color: currentColor !important;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        opacity: 1 !important;
+        flex: 0 0 auto;
+    }}
+    .shell-release-note .release-title {{
+        display: inline;
+        margin: 0;
+        color: #f0f9ff !important;
+        -webkit-text-fill-color: currentColor !important;
+        font-size: 15px;
+        font-weight: 800;
+        line-height: 1.5;
+        text-shadow: none;
+        opacity: 1 !important;
+        flex: 0 1 auto;
+    }}
+    .shell-release-note .release-list {{
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        flex: 1 1 100%;
+    }}
+    .shell-release-note .release-list li {{
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(56, 189, 248, 0.12) !important;
+        border: 1px solid rgba(56, 189, 248, 0.16) !important;
+        color: #bae6fd !important;
+        -webkit-text-fill-color: currentColor !important;
+        opacity: 1 !important;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.4;
+        text-shadow: none;
+    }}
+    .shell-release-note .release-list li::before {{
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: #38bdf8;
+        flex: 0 0 auto;
     }}
     .shell-build-toast {{
         position: fixed;

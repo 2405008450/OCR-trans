@@ -437,34 +437,58 @@ function showResult(data) {
     resultStats.innerHTML += `<div class="stat-card"><i class="fas fa-robot"></i><h3>${escapeHtml(getModelDisplayName(modelName))}</h3><p>模型</p></div>`;
 
     const links = [];
-    appendOutputLink(links, data.corrected_docx, 'fa-file-word', '下载修复后文档');
-    appendOutputLink(links, data.annotated_pdf, 'fa-file-pdf', '下载批注版 PDF');
-    appendOutputLink(links, data.annotated_excel, 'fa-file-excel', '下载批注版 Excel');
-    appendOutputLink(links, data.annotated_pptx, 'fa-file-powerpoint', '下载批注版 PPTX');
+    appendOutputLink(links, data.task_id, data.corrected_docx, 'fa-file-word', '下载修复后文档');
+    appendOutputLink(links, data.task_id, data.annotated_pdf, 'fa-file-pdf', '下载批注版 PDF');
+    appendOutputLink(links, data.task_id, data.annotated_excel, 'fa-file-excel', '下载批注版 Excel');
+    appendOutputLink(links, data.task_id, data.annotated_pptx, 'fa-file-powerpoint', '下载批注版 PPTX');
     if (!links.length) {
-        appendOutputLink(links, data.output_file, 'fa-file-arrow-down', '下载输出文件');
+        appendOutputLink(links, data.task_id, data.output_file, 'fa-file-arrow-down', '下载输出文件');
     }
 
     const reports = data.reports || {};
-    appendReportLink(links, reports['正文_json'], 'fa-file-code', `正文报告 JSON${buildCountSuffix(reportCounts.body_issues)}`);
-    appendReportLink(links, reports['页眉_json'], 'fa-file-code', `页眉报告 JSON${buildCountSuffix(reportCounts.header_issues)}`);
-    appendReportLink(links, reports['页脚_json'], 'fa-file-code', `页脚报告 JSON${buildCountSuffix(reportCounts.footer_issues)}`);
-    appendReportLink(links, reports['正文_excel'], 'fa-file-excel', '正文报告 Excel');
-    appendReportLink(links, reports['页眉_excel'], 'fa-file-excel', '页眉报告 Excel');
-    appendReportLink(links, reports['页脚_excel'], 'fa-file-excel', '页脚报告 Excel');
+    appendReportLink(links, data.task_id, reports['正文_json'], 'fa-file-code', `正文报告 JSON${buildCountSuffix(reportCounts.body_issues)}`);
+    appendReportLink(links, data.task_id, reports['页眉_json'], 'fa-file-code', `页眉报告 JSON${buildCountSuffix(reportCounts.header_issues)}`);
+    appendReportLink(links, data.task_id, reports['页脚_json'], 'fa-file-code', `页脚报告 JSON${buildCountSuffix(reportCounts.footer_issues)}`);
+    appendReportLink(links, data.task_id, reports['正文_excel'], 'fa-file-excel', '正文报告 Excel');
+    appendReportLink(links, data.task_id, reports['页眉_excel'], 'fa-file-excel', '页眉报告 Excel');
+    appendReportLink(links, data.task_id, reports['页脚_excel'], 'fa-file-excel', '页脚报告 Excel');
 
     resultGrid.innerHTML = `<div class="result-item"><h3>输出文件</h3><div class="download-links">${links.join('')}</div></div>`;
 }
 
-function appendOutputLink(list, rawPath, icon, label) {
+function appendOutputLink(list, taskId, rawPath, icon, label) {
     if (!rawPath) return;
-    const path = `/${String(rawPath).replace(/^\/+/, '')}`;
-    list.push(`<a href="${path}" download class="download-btn"><i class="fas ${icon}"></i> ${escapeHtml(label)}</a>`);
+    const href = buildDownloadHref(taskId, rawPath);
+    const downloadName = extractFileName(rawPath);
+    list.push(`<a href="${escapeHtml(href)}" download="${escapeHtml(downloadName)}" class="download-btn"><i class="fas ${icon}"></i> ${escapeHtml(label)}</a>`);
 }
 
-function appendReportLink(list, rawPath, icon, label) {
+function appendReportLink(list, taskId, rawPath, icon, label) {
     if (!rawPath) return;
-    appendOutputLink(list, rawPath, icon, label);
+    appendOutputLink(list, taskId, rawPath, icon, label);
+}
+
+function buildDownloadHref(taskId, rawPath) {
+    const normalizedPath = String(rawPath || '').replace(/^\/+/, '');
+    if (!taskId) {
+        return `/${normalizedPath}`;
+    }
+    const params = new URLSearchParams({
+        file_path: normalizedPath,
+        download_name: extractFileName(normalizedPath),
+    });
+    return `/task/${encodeURIComponent(taskId)}/download?${params.toString()}`;
+}
+
+function extractFileName(rawPath) {
+    const normalized = String(rawPath || '').split(/[?#]/, 1)[0];
+    const parts = normalized.split('/');
+    const candidate = parts[parts.length - 1] || 'download';
+    try {
+        return decodeURIComponent(candidate);
+    } catch (_) {
+        return candidate;
+    }
 }
 
 function buildCountSuffix(value) {

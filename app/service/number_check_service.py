@@ -370,8 +370,9 @@ def _prepare_specialized_import_path() -> None:
         if stale:
             logger.info(f"[import] 清除了 {len(stale)} 个 {package_name}.* 缓存")
 
-    if specialized_root_str not in sys.path:
-        sys.path.insert(0, specialized_root_str)
+    while specialized_root_str in sys.path:
+        sys.path.remove(specialized_root_str)
+    sys.path.insert(0, specialized_root_str)
 
 
 def _count_report_errors(report_file: Path) -> int:
