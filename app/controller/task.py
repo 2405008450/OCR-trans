@@ -26,6 +26,7 @@ from app.service.business_licence_service import (
 from app.service.doc_translate_service import (
     DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
     DOC_TRANSLATE_DEFAULT_MODEL,
+    get_doc_translate_allowed_extensions,
     get_doc_translate_models,
     get_supported_languages,
 )
@@ -639,12 +640,12 @@ async def get_business_licence_status(task_id: str):
 
 @router.get("/doc-translate/config")
 async def get_doc_translate_config():
-    return {"models": get_doc_translate_models(), "default_model": DOC_TRANSLATE_DEFAULT_MODEL, "routes": get_gemini_routes(), "default_route": DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE, "languages": get_supported_languages()}
+    return {"models": get_doc_translate_models(), "default_model": DOC_TRANSLATE_DEFAULT_MODEL, "routes": get_gemini_routes(), "default_route": DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE, "languages": get_supported_languages(), "allowed_extensions": get_doc_translate_allowed_extensions()}
 
 
 @router.post("/doc-translate")
 async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE)):
-    allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
+    allowed_ext = set(get_doc_translate_allowed_extensions())
     if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, ocr_model=ocr_model, gemini_route=gemini_route)
@@ -653,7 +654,7 @@ async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = 
 
 @router.post("/doc-translate/batch")
 async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE)):
-    allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
+    allowed_ext = set(get_doc_translate_allowed_extensions())
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")
     if len(files) > 50:

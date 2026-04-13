@@ -36,6 +36,7 @@ let languageConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultRoute = 'openrouter';
+let allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tif', '.tiff', '.doc', '.docx'];
 let streamLogWrap = null;
 let streamLogEl = null;
 let retryBtn = null;
@@ -153,6 +154,9 @@ async function loadConfig() {
         languageConfig = data.languages || {};
         routeConfig = data.routes || {};
         defaultRoute = data.default_route || defaultRoute;
+        if (Array.isArray(data.allowed_extensions) && data.allowed_extensions.length > 0) {
+            allowedExtensions = data.allowed_extensions.map((ext) => String(ext).toLowerCase());
+        }
     } catch (error) {
         console.error(error);
         modelConfig = {
@@ -222,7 +226,6 @@ function handleDrop(e) {
 function handleFileSelect(e) { addFiles(Array.from(e.target.files)); }
 
 function addFiles(newFiles) {
-    const allowedExtensions = ['.pdf','.png','.jpg','.jpeg','.bmp','.gif','.webp','.tif','.tiff'];
     for (const file of newFiles) {
         const lowerName = file.name.toLowerCase();
         if (!allowedExtensions.some((ext) => lowerName.endsWith(ext))) { alert(`不支持的文件格式：${file.name}`); continue; }

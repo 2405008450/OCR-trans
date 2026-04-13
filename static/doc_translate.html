@@ -131,7 +131,7 @@
                 <div class="logo-mark"><i class="fas fa-language"></i></div>
                 <div>
                     <h1>通用证件翻译（不含人像）</h1>
-                    <p class="subtitle">上传 PDF 或图片，OCR 识别后通过 AI 翻译并导出 Word 文档，支持一对多语种。</p>
+                    <p class="subtitle">上传 PDF、图片或 Word 文档中的证件图片，OCR 识别后通过 AI 翻译并导出 Word 文档，支持一对多语种。</p>
                 </div>
             </div>
             <nav class="header-nav">
@@ -150,7 +150,7 @@
             <div>
                 <span class="section-kicker">AI Translate</span>
                 <h2>不可编辑文档 → 多语种 Word</h2>
-                <p>支持 PDF、PNG、JPG、BMP 等格式。先用视觉模型 OCR 提取内容，再通过 DeepSeek AI 翻译为目标语言，最后导出 Word 文档。可同时翻译为多种语言。</p>
+                <p>支持 PDF、PNG、JPG、BMP 以及 DOC / DOCX。Word 文档会先提取其中的图片，再逐张 OCR、翻译并导出 Word 文档。可同时翻译为多种语言。</p>
             </div>
             <div class="hero-metrics">
                 <div class="metric-card">
@@ -173,16 +173,16 @@
                                 <span class="section-kicker">Step 1</span>
                                 <h2>上传文件并配置翻译</h2>
                             </div>
-                            <div class="section-chip">PDF / Image</div>
+                            <div class="section-chip">PDF / Image / Word</div>
                         </div>
-                        <p class="upload-desc">支持 PDF 和常见图片格式。上传后选择 OCR 模型和目标翻译语言。</p>
+                        <p class="upload-desc">支持 PDF、常见图片以及 DOC / DOCX。Word 文档会自动提取内嵌图片后逐张处理。</p>
 
                         <div class="upload-area" id="uploadArea">
-                            <input type="file" id="fileInput" accept=".pdf,image/*" multiple hidden>
+                            <input type="file" id="fileInput" accept=".pdf,.doc,.docx,image/*" multiple hidden>
                             <div class="upload-placeholder" id="uploadPlaceholder">
                                 <i class="fas fa-cloud-arrow-up"></i>
-                                <p>拖拽文件到这里，或点击选择 PDF / 图片（支持多选）</p>
-                                <span>支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP、TIF</span>
+                                <p>拖拽文件到这里，或点击选择 PDF / 图片 / Word（支持多选）</p>
+                                <span>支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP、TIF、DOC、DOCX</span>
                             </div>
                             <div class="file-preview" id="filePreview" style="display: none;">
                                 <div class="file-info">
