@@ -51,20 +51,32 @@ def update_task_input_files(db: Session, task_id: str, input_files_json: str) ->
     return task
 
 
+def _dispatchable_queued_query(db: Session, *, task_type: Optional[str] = None):
+    query = db.query(Task).filter(
+        Task.status == 'queued',
+        Task.cancel_requested.is_(False),
+        Task.input_files_json.isnot(None),
+        Task.input_files_json != '',
+        Task.input_files_json != '{}',
+    )
+    if task_type:
+        query = query.filter(Task.task_type == task_type)
+    return query
+
+
 def count_tasks_ahead(db: Session, task: Task) -> int:
-    return db.query(Task).filter(Task.status == 'queued', Task.created_at < task.created_at).count()
+    return _dispatchable_queued_query(db).filter(Task.created_at < task.created_at).count()
 
 
 def list_queued_tasks(db: Session, *, limit: int = 20, task_type: Optional[str] = None) -> List[Task]:
-    query = db.query(Task).filter(Task.status == 'queued', Task.cancel_requested.is_(False))
-    if task_type:
-        query = query.filter(Task.task_type == task_type)
-    return query.order_by(Task.created_at.asc(), Task.id.asc()).limit(limit).all()
+    return _dispatchable_queued_query(db, task_type=task_type).order_by(Task.created_at.asc(), Task.id.asc()).limit(limit).all()
 
 
 def claim_queued_task_by_task_id(db: Session, task_id: str) -> Optional[Task]:
     task = get_task_by_task_id(db, task_id)
     if not task or task.status != 'queued' or task.cancel_requested:
+        return None
+    if (task.input_files_json or '').strip() in {'', '{}'}:
         return None
 
     now = _now()

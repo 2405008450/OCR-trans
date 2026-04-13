@@ -53,6 +53,8 @@ class TaskQueueService:
     SHARED_GROUP_LIMITS: Dict[str, int] = {
         'specialist_text': 1,
     }
+    INPUT_FILES_WAIT_SECONDS = 5.0
+    INPUT_FILES_POLL_INTERVAL_SECONDS = 0.2
 
     def __init__(self):
         self._worker_task: Optional[asyncio.Task] = None
@@ -397,6 +399,75 @@ class TaskQueueService:
         input_path.write_bytes(await file.read())
         return str(input_path).replace('\\', '/'), file.filename or input_path.name
 
+    @staticmethod
+    def _get_input_value(input_files: Dict[str, Any], *candidates: str):
+        for key in candidates:
+            value = input_files.get(key)
+            if value:
+                return value
+        return None
+
+    def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
+        if task_type in {'ocr', 'doc_translate', 'business_licence', 'pdf2docx'}:
+            return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
+
+        if task_type == 'drivers_license':
+            return [] if (input_files.get('files') or []) else ['files']
+
+        if task_type == 'alignment':
+            missing = []
+            if not self._get_input_value(input_files, 'original_path', 'original'):
+                missing.append('original_path')
+            if not self._get_input_value(input_files, 'translated_path', 'translated'):
+                missing.append('translated_path')
+            return missing
+
+        if task_type == 'number_check':
+            mode = params.get('mode', 'double')
+            if mode == 'single':
+                return [] if self._get_input_value(input_files, 'single_path') else ['single_path']
+            missing = []
+            if not self._get_input_value(input_files, 'original_path'):
+                missing.append('original_path')
+            if not self._get_input_value(input_files, 'translated_path'):
+                missing.append('translated_path')
+            return missing
+
+        if task_type == 'zhongfanyi':
+            mode = params.get('mode', zf_service.ZHONGFANYI_MODE_DOUBLE)
+            if mode == zf_service.ZHONGFANYI_MODE_SINGLE:
+                return [] if self._get_input_value(input_files, 'single_path') else ['single_path']
+            missing = []
+            if not self._get_input_value(input_files, 'original_path'):
+                missing.append('original_path')
+            if not self._get_input_value(input_files, 'translated_path'):
+                missing.append('translated_path')
+            return missing
+
+        return []
+
+    async def _ensure_task_input_files(self, task_id: str, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> Dict[str, Any]:
+        missing = self._get_missing_input_fields(task_type, params, input_files)
+        if not missing:
+            return input_files
+
+        self._append_task_log(task_id, f"[wait] waiting for input files: {', '.join(missing)}")
+        latest_input_files = dict(input_files)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.INPUT_FILES_WAIT_SECONDS
+
+        while missing and loop.time() < deadline:
+            await asyncio.sleep(self.INPUT_FILES_POLL_INTERVAL_SECONDS)
+            with SessionLocal() as db:
+                task = task_repo.get_task_by_task_id(db, task_id)
+                latest_input_files = json.loads(task.input_files_json or '{}') if task else {}
+            missing = self._get_missing_input_fields(task_type, params, latest_input_files)
+
+        if missing:
+            raise ValueError(f"task input files not ready: {', '.join(missing)}")
+
+        return latest_input_files
+
     def _requeue_interrupted_tasks(self):
         with SessionLocal() as db:
             task_repo.requeue_running_tasks(
@@ -512,6 +583,8 @@ class TaskQueueService:
             task_type = task.task_type
             filename = task.filename
             display_no = task.display_no
+
+        input_files = await self._ensure_task_input_files(task_id, task_type, params, input_files)
 
         async def update(progress: int, message: str):
             with SessionLocal() as db:
@@ -632,10 +705,16 @@ class TaskQueueService:
     async def _execute_alignment(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'alignment started')
         from app.service import alignment_service
+
+        original_path = self._get_input_value(input_files, 'original_path', 'original')
+        translated_path = self._get_input_value(input_files, 'translated_path', 'translated')
+        if not original_path or not translated_path:
+            raise ValueError('alignment task missing original/trans paths')
+
         job = asyncio.create_task(
             alignment_service.run_alignment_task(
-                original_path=input_files['original_path'],
-                translated_path=input_files['translated_path'],
+                original_path=original_path,
+                translated_path=translated_path,
                 original_filename=input_files.get('original_filename'),
                 translated_filename=input_files.get('translated_filename'),
                 task_id=task_id,

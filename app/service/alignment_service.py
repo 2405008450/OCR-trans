@@ -194,18 +194,22 @@ def _update_progress(task_id: str, progress: int, message: str, **extra):
 
 def _complete_task(task_id: str, *, result: dict = None, error: str = None):
     with _progress_lock:
+        stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
+        result_payload = None
+        if result is not None:
+            result_payload = dict(result)
+            result_payload["stream_log"] = stream_log
+
         if error:
-            stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
-            _task_progress[task_id] = {
+            payload = {
                 "status": "failed", "progress": 100, "message": "处理失败", "error": error,
                 "stream_log": stream_log,
             }
+            if result_payload is not None:
+                payload["result"] = result_payload
+            _task_progress[task_id] = payload
         else:
-            stream_log = _task_progress.get(task_id, {}).get("stream_log", "")
-            if result is not None:
-                result = dict(result)
-                result["stream_log"] = stream_log
-            _task_progress[task_id] = {"status": "done", "progress": 100, "message": "处理完成", "result": result}
+            _task_progress[task_id] = {"status": "done", "progress": 100, "message": "处理完成", "result": result_payload}
 
 
 def get_alignment_progress(task_id: str) -> Optional[dict]:
@@ -1760,7 +1764,6 @@ def _run_alignment_sync(
                     'anchor_orig': part_info_a[i] if part_info_a else None,
                     'anchor_trans': part_info_b[i] if part_info_b else None,
                 })
-                generated_excel_paths.append(out)
         else:
             out = os.path.join(task_dir, f"{base_name}_对齐结果.xlsx")
             ppt_prompt = memory_module.get_ppt_alignment_prompt(source_lang, target_lang) if file_type == 'pptx' else None
@@ -1769,7 +1772,6 @@ def _run_alignment_sync(
                 'anchor_orig': None, 'anchor_trans': None,
                 'system_prompt_override': ppt_prompt,
             })
-            generated_excel_paths.append(out)
 
         # ── AI 对齐 ──
         _update_progress(task_id, 30, f"AI 对齐中（共 {len(tasks_queue)} 个任务）...")
@@ -1792,6 +1794,8 @@ def _run_alignment_sync(
             print(f"[alignment]   output: {task['output']}")
             if split_parts > 1 and _is_reusable_alignment_excel(task['output']):
                 _log(f"任务 {idx + 1} 复用已有结果: {os.path.basename(task['output'])}")
+                if task['output'] not in generated_excel_paths:
+                    generated_excel_paths.append(task['output'])
                 continue
 
             # 诊断：直接用 memory 的 read_file_content 测试读取
@@ -1843,10 +1847,10 @@ def _run_alignment_sync(
             print(f"[alignment] 任务 {idx + 1} 结果: success={success}, output_exists={os.path.exists(task['output'])}")
             if success and os.path.exists(task['output']):
                 _log(f"任务 {idx + 1} 成功: {os.path.basename(task['output'])}")
+                if task['output'] not in generated_excel_paths:
+                    generated_excel_paths.append(task['output'])
             else:
                 _log(f"任务 {idx + 1} 失败: {os.path.basename(task['output'])}")
-                if task['output'] in generated_excel_paths:
-                    generated_excel_paths.remove(task['output'])
                 failed_task_names.append(os.path.basename(task['output']))
                 if split_parts > 1:
                     stop_following_tasks = True
@@ -1856,7 +1860,6 @@ def _run_alignment_sync(
                             f"Part{idx + 1} 多次失败，停止继续处理 Part{next_part_num}"
                         )
 
-        # ── 合并 ──
         _update_progress(task_id, 85, "合并与去重...")
         if generated_excel_paths:
             _log(f"成功生成的结果文件数: {len(generated_excel_paths)}")
@@ -1864,11 +1867,23 @@ def _run_alignment_sync(
                 _log(f"  - {os.path.basename(path)}")
 
         if stop_following_tasks:
+            partial_error = "分块对齐未全部完成"
+            if generated_excel_paths:
+                partial_error += "，已保留成功的中间结果。"
+            else:
+                partial_error += "。"
             _complete_task(
                 task_id,
+                result={
+                    "file_type": file_type,
+                    "gemini_route": gemini_route,
+                    "split_parts": split_parts,
+                    "successful_parts": [os.path.basename(path) for path in generated_excel_paths],
+                    "intermediate_files": _list_intermediate_files(temp_dir),
+                },
                 error=(
-                    "分块对齐未全部完成，已保留成功的中间结果。"
-                    f"失败分块：{', '.join(failed_task_names)}"
+                    partial_error
+                    + f"失败分块：{', '.join(failed_task_names)}"
                 ),
             )
             return
