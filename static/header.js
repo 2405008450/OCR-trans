@@ -7,6 +7,7 @@
     const RELEASE_NOTES = [
         '\u652f\u6301\u5bfc\u5165 .doc \u6587\u6863',
         '\u652f\u6301\u6279\u91cf\u4e0b\u8f7d\u5904\u7406\u5b8c\u6210\u6587\u4ef6',
+        '4月13日_通用证件模板增加部分小语种，支持一个文档中的多证件同步翻译处理'
     ];
     const originalFetch = window.fetch.bind(window);
     const navItems = [
