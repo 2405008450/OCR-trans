@@ -268,6 +268,22 @@ def _write_text_segments(output_dir: Path, segments: List[str]) -> List[Path]:
 # ============================================================
 # LLM 翻译：调用 DeepSeek API
 # ============================================================
+def _build_translation_system_prompt(source_lang: str, target_lang: str) -> str:
+    source_name = SUPPORTED_LANGUAGES.get(source_lang, {}).get("name", source_lang)
+    target_name = SUPPORTED_LANGUAGES.get(target_lang, {}).get("name", target_lang)
+    return f"""你是一个专业的文档翻译专家。请将以下文档内容从{source_name}翻译为{target_name}。
+
+翻译规则：
+1. 保留原文的所有格式标记（HTML 标签、Markdown 标记等），只翻译文字内容
+2. 保持原文的段落结构和排版
+3. 专有名词（如公司名称、人名、地名）应提供准确翻译
+4. 数字、编号等保持原格式不变
+5. 如果原文包含多语种对照、双语标签或同义重复项（如土耳其语+英语、中文+英语），输出时只保留目标语言版本，不要同时保留未翻译的对照文本
+6. 对于“护照/PASSPORT”“国籍/NATIONALITY”这类证件固定栏位，如果多个源语言表达的是同一含义，只输出一次目标语言译文
+7. 除证件号码、姓名拼写、机器可读码(MRZ)、URL、邮箱、品牌或机构官方缩写，以及用户明确要求保留的字段外，不要保留任何源语言原文
+8. 仅返回翻译后的内容，不要添加任何解释或注释"""
+
+
 def _translate_text_with_llm(
     raw_text: str,
     source_lang: str,
@@ -278,19 +294,8 @@ def _translate_text_with_llm(
     调用 DeepSeek API 翻译文本。
     分段处理防止超长文本导致单次调用失败。
     """
-    source_name = SUPPORTED_LANGUAGES.get(source_lang, {}).get("name", source_lang)
-    target_name = SUPPORTED_LANGUAGES.get(target_lang, {}).get("name", target_lang)
+    system_prompt = _build_translation_system_prompt(source_lang, target_lang)
 
-    system_prompt = f"""你是一个专业的文档翻译专家。请将以下文档内容从{source_name}翻译为{target_name}。
-
-翻译规则：
-1. 保留原文的所有格式标记（HTML 标签、Markdown 标记等），只翻译文字内容
-2. 保持原文的段落结构和排版
-3. 专有名词（如公司名称、人名、地名）应提供准确翻译
-4. 数字、编号等保持原格式不变
-5. 仅返回翻译后的内容，不要添加任何解释或注释"""
-
-    # 分段：每段不超过 6000 字符
     MAX_CHUNK_SIZE = 6000
     chunks = _split_text_into_chunks(raw_text, MAX_CHUNK_SIZE)
     translated_parts = []
