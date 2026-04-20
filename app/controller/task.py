@@ -691,19 +691,6 @@ async def run_pdf2docx(file: UploadFile = File(...), model: str = Query(PDF2DOCX
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
-    if ext == ".pdf":
-        try:
-            import fitz
-            content = await file.read()
-            pdf_doc = fitz.open(stream=content, filetype="pdf")
-            if len(pdf_doc) > 100:
-                raise HTTPException(status_code=400, detail="PDF has too many pages")
-            pdf_doc.close()
-            await file.seek(0)
-        except HTTPException:
-            raise
-        except Exception:
-            await file.seek(0)
     task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
@@ -721,19 +708,6 @@ async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Q
         if ext not in allowed_ext:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": "Unsupported file format"})
             continue
-        if ext == ".pdf":
-            try:
-                import fitz
-                content = await file.read()
-                pdf_doc = fitz.open(stream=content, filetype="pdf")
-                page_count = len(pdf_doc)
-                pdf_doc.close()
-                if page_count > 100:
-                    results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": f"PDF has too many pages ({page_count})"})
-                    continue
-                await file.seek(0)
-            except Exception:
-                await file.seek(0)
         try:
             task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
             results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})

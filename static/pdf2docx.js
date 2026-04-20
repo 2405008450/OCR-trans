@@ -4,6 +4,11 @@ let modelConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultRoute = 'openrouter';
+const NGINX_UPLOAD_LIMIT_MB = 100;
+const FRONTEND_UPLOAD_LIMIT_MB = 95;
+const FRONTEND_UPLOAD_LIMIT_BYTES = FRONTEND_UPLOAD_LIMIT_MB * 1024 * 1024;
+const NGINX_UPLOAD_LIMIT_LABEL = `${NGINX_UPLOAD_LIMIT_MB}MB`;
+const FRONTEND_UPLOAD_LIMIT_LABEL = `${FRONTEND_UPLOAD_LIMIT_MB}MB`;
 
 const MODEL_DISPLAY_NAMES = {
     'gemini-3.1-flash-lite-preview': '极速版V2',
@@ -196,27 +201,33 @@ function handleFileSelect(e) { addFiles(Array.from(e.target.files)); }
 
 function addFiles(newFiles) {
     const allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
+    const rejectedMessages = [];
+    let nextTotalBytes = getSelectedTotalBytes();
+
     for (const file of newFiles) {
         const lowerName = file.name.toLowerCase();
         if (!allowedExtensions.some((ext) => lowerName.endsWith(ext))) {
-            alert(`不支持的文件格式：${file.name}`);
+            rejectedMessages.push(`不支持的文件格式：${file.name}`);
+            continue;
+        }
+        if (file.size > FRONTEND_UPLOAD_LIMIT_BYTES) {
+            rejectedMessages.push(`“${file.name}”大小为 ${formatFileSize(file.size)}，已超过 ${FRONTEND_UPLOAD_LIMIT_LABEL} 前端限制。${getUploadLimitHint()}`);
             continue;
         }
         if (!selectedFiles.some((f) => f.name === file.name && f.size === file.size)) {
+            if (nextTotalBytes + file.size > FRONTEND_UPLOAD_LIMIT_BYTES) {
+                rejectedMessages.push(`加入“${file.name}”后，本次提交总大小将超过 ${FRONTEND_UPLOAD_LIMIT_LABEL}。${getUploadLimitHint()}`);
+                continue;
+            }
             selectedFiles.push(file);
+            nextTotalBytes += file.size;
         }
     }
+    if (rejectedMessages.length > 0) {
+        showPageLimitModal([...new Set(rejectedMessages)].join(' '));
+    }
     if (selectedFiles.length === 0) return;
-    fileName.textContent = selectedFiles.length === 1
-        ? `${selectedFiles[0].name} (${formatFileSize(selectedFiles[0].size)})`
-        : `已选择 ${selectedFiles.length} 个文件`;
-    if (fileStatus) fileStatus.textContent = selectedFiles.length === 1
-        ? '文件已就绪，可开始转换'
-        : `共 ${selectedFiles.length} 个文件，将逐个创建任务队列处理`;
-    uploadPlaceholder.style.display = 'none';
-    filePreview.style.display = 'flex';
-    btnProcess.disabled = false;
-    renderFileList();
+    syncSelectedFilesView();
 }
 
 function renderFileList() {
@@ -236,13 +247,7 @@ function renderFileList() {
 function removeFileAt(idx) {
     selectedFiles.splice(idx, 1);
     if (selectedFiles.length === 0) { clearFiles(); return; }
-    fileName.textContent = selectedFiles.length === 1
-        ? `${selectedFiles[0].name} (${formatFileSize(selectedFiles[0].size)})`
-        : `已选择 ${selectedFiles.length} 个文件`;
-    if (fileStatus) fileStatus.textContent = selectedFiles.length === 1
-        ? '文件已就绪，可开始转换'
-        : `共 ${selectedFiles.length} 个文件，将逐个创建任务队列处理`;
-    renderFileList();
+    syncSelectedFilesView();
 }
 
 function clearFiles() {
@@ -256,6 +261,11 @@ function clearFiles() {
 
 async function processFiles() {
     if (selectedFiles.length === 0) return;
+    const uploadLimitError = validateSelectedFiles();
+    if (uploadLimitError) {
+        showPageLimitModal(uploadLimitError);
+        return;
+    }
     if (selectedFiles.length === 1) { await processSingleFile(); return; }
     await processBatchFiles();
 }
@@ -271,7 +281,7 @@ async function processSingleFile() {
 
     if (!response.ok) {
         const detail = await safeReadError(response);
-        showPageLimitModal(detail || `提交失败: ${response.status}`);
+        showPageLimitModal(getUploadErrorMessage(response.status, detail));
         return;
     }
 
@@ -302,13 +312,13 @@ async function processBatchFiles() {
     try {
         const resp = await fetch(`/task/pdf2docx/batch?${params}`, { method: 'POST', body: formData });
         if (!resp.ok) {
-            let msg = `提交失败: ${resp.status}`;
-            try { const ed = await resp.json(); msg = ed?.detail?.error || ed?.detail || msg; } catch (_) {}
+            const detail = await safeReadError(resp);
+            const msg = getUploadErrorMessage(resp.status, detail);
             throw new Error(msg);
         }
         const data = await resp.json();
         startBatchPolling(data.tasks || []);
-    } catch (error) { alert(`批量提交失败: ${error.message}`); resetPage(); }
+    } catch (error) { showPageLimitModal(`批量提交失败：${error.message}`); resetPage(); }
 }
 
 function startBatchPolling(tasks) {
@@ -331,7 +341,12 @@ function startBatchPolling(tasks) {
                 task.status = data.status === 'processing' ? 'running' : data.status;
                 task.progress = data.progress || 0;
                 task.message = data.message || '';
-                if (data.status === 'done') { task.status = 'done'; task.progress = 100; task.result = data.result; }
+                if (data.status === 'done') {
+                    task.status = 'done';
+                    task.progress = 100;
+                    task.result = data.result;
+                    task.message = buildCompletedTaskMessage(data.result);
+                }
                 else if (data.status === 'failed') { task.status = 'failed'; task.message = data.error || '处理失败'; }
             } catch (_) {}
         }
@@ -508,16 +523,20 @@ function removeRetryButton() { if (retryBtn) { retryBtn.remove(); retryBtn = nul
 function showResult(result) {
     processingSection.style.display = 'none';
     resultSection.style.display = 'block';
+    const ocrStats = getOcrPageStats(result);
     resultStats.innerHTML = `
         <div class="stat-card"><i class="fas fa-file-alt"></i><h3>${escapeHtml(result.filename || '-')}</h3><p>源文件</p></div>
         <div class="stat-card"><i class="fas fa-robot"></i><h3>${escapeHtml(getModelDisplayName(result.model || '-'))}</h3><p>使用模型</p></div>
         <div class="stat-card"><i class="fas fa-file-word"></i><h3>DOCX</h3><p>输出格式</p></div>
         <div class="stat-card"><i class="fas fa-check-circle"></i><h3>成功</h3><p>任务状态</p></div>
+        ${ocrStats.totalPages ? `<div class="stat-card"><i class="fas fa-file-lines"></i><h3>${ocrStats.totalPages}</h3><p>总页数</p></div>` : ''}
+        ${ocrStats.totalPages ? `<div class="stat-card"><i class="fas fa-circle-minus"></i><h3>${ocrStats.blankPageCount}</h3><p>空白页</p></div>` : ''}
     `;
+    const blankSummary = buildBlankPageSummary(result);
     resultGrid.innerHTML = `<div class="result-item"><h3>下载结果</h3><div class="download-links">
         <a href="/${result.output_docx}" download class="download-btn"><i class="fas fa-file-word"></i> 下载 Word 文档</a>
         <a href="/${result.raw_output_txt}" download class="download-btn"><i class="fas fa-file-lines"></i> 下载原始 OCR 文本</a>
-    </div></div>`;
+    </div></div>${blankSummary ? `<div class="result-item"><h3>OCR 摘要</h3><p>${escapeHtml(blankSummary)}</p></div>` : ''}`;
 }
 
 function resetPage() {
@@ -533,6 +552,82 @@ function resetPage() {
     batchSection.style.display = 'none';
     updateProgress(0, '等待开始处理');
     updateBatchDownloadButton();
+}
+
+function syncSelectedFilesView() {
+    const totalBytes = getSelectedTotalBytes();
+    fileName.textContent = selectedFiles.length === 1
+        ? `${selectedFiles[0].name} (${formatFileSize(selectedFiles[0].size)})`
+        : `已选择 ${selectedFiles.length} 个文件（合计 ${formatFileSize(totalBytes)}）`;
+    if (fileStatus) fileStatus.textContent = selectedFiles.length === 1
+        ? `文件已就绪（${formatFileSize(totalBytes)} / ${FRONTEND_UPLOAD_LIMIT_LABEL}），可开始转换`
+        : `共 ${selectedFiles.length} 个文件，合计 ${formatFileSize(totalBytes)}，将逐个创建任务队列处理`;
+    uploadPlaceholder.style.display = 'none';
+    filePreview.style.display = 'flex';
+    btnProcess.disabled = false;
+    renderFileList();
+}
+
+function getSelectedTotalBytes() {
+    return selectedFiles.reduce((total, file) => total + (file?.size || 0), 0);
+}
+
+function getUploadLimitHint() {
+    return `当前 Nginx 上传上限约 ${NGINX_UPLOAD_LIMIT_LABEL}，请拆分文件后重试。`;
+}
+
+function validateSelectedFiles() {
+    const oversizedFile = selectedFiles.find((file) => file.size > FRONTEND_UPLOAD_LIMIT_BYTES);
+    if (oversizedFile) {
+        return `“${oversizedFile.name}”大小为 ${formatFileSize(oversizedFile.size)}，已超过 ${FRONTEND_UPLOAD_LIMIT_LABEL} 前端限制。${getUploadLimitHint()}`;
+    }
+
+    const totalBytes = getSelectedTotalBytes();
+    if (totalBytes > FRONTEND_UPLOAD_LIMIT_BYTES) {
+        return `当前选择文件合计 ${formatFileSize(totalBytes)}，已超过 ${FRONTEND_UPLOAD_LIMIT_LABEL} 前端限制。${getUploadLimitHint()}`;
+    }
+
+    return '';
+}
+
+function getUploadErrorMessage(status, detail) {
+    if (status === 413) {
+        return detail || `上传内容超过网关限制。当前 Nginx 上传上限约 ${NGINX_UPLOAD_LIMIT_LABEL}，请将单文件和单次提交总大小控制在 ${FRONTEND_UPLOAD_LIMIT_LABEL} 内。`;
+    }
+    return detail || `提交失败: ${status}`;
+}
+
+function getOcrPageStats(result) {
+    const totalPages = Number.isFinite(Number(result?.total_pages)) ? Math.max(0, Math.floor(Number(result.total_pages))) : 0;
+    const blankPages = Array.isArray(result?.blank_pages)
+        ? result.blank_pages
+            .map((page) => Number(page))
+            .filter((page) => Number.isFinite(page) && page > 0)
+            .map((page) => Math.floor(page))
+        : [];
+    const blankPageCount = Number.isFinite(Number(result?.blank_page_count))
+        ? Math.max(0, Math.floor(Number(result.blank_page_count)))
+        : blankPages.length;
+    return { totalPages, blankPageCount, blankPages };
+}
+
+function formatPageList(pages) {
+    return pages.length ? `第 ${pages.join('、')} 页` : '';
+}
+
+function buildBlankPageSummary(result) {
+    const { totalPages, blankPageCount, blankPages } = getOcrPageStats(result);
+    if (!totalPages) return '';
+    if (blankPageCount > 0) {
+        const pageList = formatPageList(blankPages);
+        return `本次 OCR 共处理 ${totalPages} 页，检测到空白页 ${blankPageCount} 页${pageList ? `（${pageList}）` : ''}。`;
+    }
+    return `本次 OCR 共处理 ${totalPages} 页，未检测到空白页。`;
+}
+
+function buildCompletedTaskMessage(result) {
+    const blankSummary = buildBlankPageSummary(result);
+    return blankSummary ? `处理完成；${blankSummary}` : '处理完成';
 }
 
 async function safeReadError(response) { try { const p = await response.json(); return p?.detail?.error || p?.detail || p?.message || ''; } catch (_) { return ''; } }

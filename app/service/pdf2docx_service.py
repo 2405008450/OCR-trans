@@ -45,6 +45,41 @@ def get_pdf2docx_models() -> Dict[str, Dict[str, str]]:
     return PDF2DOCX_MODELS
 
 
+def _normalize_ocr_payload(ocr_result: Any, fallback_total_pages: int = 0) -> Dict[str, Any]:
+    if isinstance(ocr_result, dict):
+        raw_text = str(ocr_result.get("text") or "")
+        blank_pages = [
+            int(page)
+            for page in (ocr_result.get("blank_pages") or [])
+            if str(page).strip().isdigit() and int(page) > 0
+        ]
+        blank_page_count = ocr_result.get("blank_page_count")
+        try:
+            blank_page_count = int(blank_page_count)
+        except (TypeError, ValueError):
+            blank_page_count = len(blank_pages)
+
+        total_pages = ocr_result.get("total_pages")
+        try:
+            total_pages = int(total_pages)
+        except (TypeError, ValueError):
+            total_pages = fallback_total_pages
+
+        return {
+            "text": raw_text,
+            "total_pages": max(total_pages, 0),
+            "blank_page_count": max(blank_page_count, len(blank_pages), 0),
+            "blank_pages": blank_pages,
+        }
+
+    return {
+        "text": str(ocr_result or ""),
+        "total_pages": max(int(fallback_total_pages or 0), 0),
+        "blank_page_count": 0,
+        "blank_pages": [],
+    }
+
+
 async def execute_pdf2docx_task_from_path(
     *,
     task_id: str,
@@ -85,19 +120,40 @@ async def execute_pdf2docx_task_from_path(
             )
             future.result(timeout=30)
 
-    raw_text = await loop.run_in_executor(
+    def ocr_status_callback(message: str):
+        if not progress_callback:
+            return
+        current = page_state.get("current", 0)
+        total = page_state.get("total", 0)
+        pct = 8 if not total else min(65, 5 + int(current / max(total, 1) * 60))
+        future = asyncio.run_coroutine_threadsafe(
+            progress_callback(pct, message),
+            loop,
+        )
+        future.result(timeout=30)
+
+    ocr_result = await loop.run_in_executor(
         executor,
         lambda: ocr_file(
             file_path=input_path,
             model=model,
             gemini_route=gemini_route,
             page_progress_callback=page_callback,
+            return_metadata=True,
+            ocr_status_callback=ocr_status_callback,
         ),
     )
+    ocr_payload = _normalize_ocr_payload(ocr_result, fallback_total_pages=page_state.get("total", 0))
+    raw_text = ocr_payload["text"]
 
-    total_pages = page_state.get("total", 0)
+    total_pages = ocr_payload["total_pages"] or page_state.get("total", 0)
+    blank_page_count = ocr_payload["blank_page_count"]
+    blank_pages = ocr_payload["blank_pages"]
     if total_pages:
-        pages_msg = f"OCR 完成（共 {total_pages} 页），正在整理中间文本"
+        if blank_page_count:
+            pages_msg = f"OCR 完成（共 {total_pages} 页，空白页 {blank_page_count} 页），正在整理中间文本"
+        else:
+            pages_msg = f"OCR 完成（共 {total_pages} 页，未检测到空白页），正在整理中间文本"
     else:
         pages_msg = "OCR 完成，正在整理中间文本"
     await _maybe_report(progress_callback, 70, pages_msg)
@@ -131,4 +187,7 @@ async def execute_pdf2docx_task_from_path(
         "raw_output_txt": _normalize_path(raw_output_path),
         "output_html": _normalize_path(html_output_path),
         "output_docx": _normalize_path(docx_output_path),
+        "total_pages": total_pages,
+        "blank_page_count": blank_page_count,
+        "blank_pages": blank_pages,
     }

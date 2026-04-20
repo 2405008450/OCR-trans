@@ -10,7 +10,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from app.service.gemini_service import GEMINI_ROUTE_GOOGLE, generate_vision_html
+from app.core.config import settings
+from app.service.gemini_service import (
+    GEMINI_ROUTE_GOOGLE,
+    GEMINI_ROUTE_OPENROUTER,
+    ensure_gemini_route_configured,
+    generate_vision_html,
+    normalize_gemini_route,
+)
 from app.service.libreoffice_service import (
     LIBREOFFICE_PATH,
     convert_to_docx_via_libreoffice,
@@ -63,6 +70,7 @@ Rules:
 - Preserve reading order.
 - Do not summarize or rewrite.
 - Do not invent missing text.
+- If a page has no readable text and no essential stamp/seal, return a full HTML document with an empty <body></body>.
 - Replace any sequence of 3 or more repeated characters used as visual separators or fill lines (e.g. -----, _____, ....., =====) with a single short placeholder: ___
 - For blank form fields shown as long lines (e.g. "Name: _____________"), keep only one short underscore placeholder: "Name: ___"
 - Do NOT reproduce decorative divider lines or page-wide rules; omit them entirely.
@@ -96,9 +104,12 @@ Formatting rules:
   flex, grid, float, position, transform, rgba(), opacity, negative margins, external CSS, JavaScript, SVG, canvas
 - Avoid unnecessary nesting.
 
-Images:
-- If an image is essential, represent it as a short text note like:
-  <p>[Logo]</p>
+Images / non-text visuals:
+- Extract only readable text and layout structure.
+- For charts, diagrams, logos, icons, photos, illustrations, handwriting, or other graphics, keep only the readable text that appears inside them.
+- Do NOT describe the visual itself.
+- Never output placeholders or descriptions such as [Image: ...], [Blank Page], [Chart], [Icon], [Logo], [Photo], or similar.
+- If a chart / icon / logo / illustration contains no readable text, omit it entirely.
 - Do not rely on external image paths unless explicitly provided and required.
 
 Output must be valid HTML that Microsoft Word can open directly.
@@ -114,6 +125,118 @@ Seals / stamps:
 - Example:
   <p style="color:#C00000; font-weight:bold;">[Official Seal]</p>"""
 
+OCR_FALLBACK_MODEL_ORDER = (
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+)
+OCR_BLANK_HINTS = {
+    "blank",
+    "blankpage",
+    "emptypage",
+    "nocontent",
+    "空白",
+    "空白页",
+    "空白页面",
+    "无内容",
+    "本页为空白",
+}
+
+
+def _emit_ocr_status(message: str, status_callback=None) -> None:
+    text = (message or "").strip()
+    if not text:
+        return
+    print(text, flush=True)
+    if status_callback:
+        status_callback(text)
+
+
+def _route_display_name(route: str) -> str:
+    return {
+        GEMINI_ROUTE_GOOGLE: "Google Vertex",
+        GEMINI_ROUTE_OPENROUTER: "OpenRouter",
+    }.get(route, route)
+
+
+def _route_is_available(route: str) -> bool:
+    try:
+        ensure_gemini_route_configured(route)
+        return True
+    except Exception:
+        return False
+
+
+def _build_ocr_route_candidates(gemini_route: str) -> list[str]:
+    normalized = normalize_gemini_route(gemini_route)
+    candidates: list[str] = []
+    for route in (
+        normalized,
+        GEMINI_ROUTE_GOOGLE if normalized != GEMINI_ROUTE_GOOGLE else GEMINI_ROUTE_OPENROUTER,
+    ):
+        if route not in candidates and _route_is_available(route):
+            candidates.append(route)
+    if not candidates and _route_is_available(normalized):
+        candidates.append(normalized)
+    return candidates or [normalized]
+
+
+def _build_ocr_model_candidates(model: str) -> list[str]:
+    if model in OCR_FALLBACK_MODEL_ORDER:
+        start_index = OCR_FALLBACK_MODEL_ORDER.index(model)
+        return list(OCR_FALLBACK_MODEL_ORDER[start_index:])
+
+    candidates = [model]
+    for fallback_model in OCR_FALLBACK_MODEL_ORDER[1:]:
+        if fallback_model not in candidates:
+            candidates.append(fallback_model)
+    return candidates
+
+
+def _build_ocr_attempt_plan(model: str, gemini_route: str, retries: int) -> list[dict[str, Any]]:
+    routes = _build_ocr_route_candidates(gemini_route)
+    models = _build_ocr_model_candidates(model)
+    plan: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for model_index, candidate_model in enumerate(models):
+        for route_index, candidate_route in enumerate(routes):
+            stage_key = (candidate_route, candidate_model)
+            if stage_key in seen:
+                continue
+            seen.add(stage_key)
+            stage_retries = retries if model_index == 0 and route_index == 0 else 1
+            plan.append(
+                {
+                    "route": candidate_route,
+                    "model": candidate_model,
+                    "retries": max(stage_retries, 1),
+                }
+            )
+    return plan
+
+
+def _is_blank_ocr_result(text: str) -> bool:
+    if not (text or "").strip():
+        return True
+
+    normalized = re.sub(r"^```(?:html|markdown)?\s*\n?", "", text.strip(), flags=re.IGNORECASE)
+    normalized = re.sub(r"\n?```\s*$", "", normalized)
+    normalized = re.sub(r"<page_break\s*/>", " ", normalized, flags=re.IGNORECASE)
+
+    soup = BeautifulSoup(normalized, "html.parser")
+    body = soup.find("body")
+    visible_text = " ".join(body.stripped_strings) if body else " ".join(soup.stripped_strings)
+    visible_text = visible_text.replace("\xa0", " ").strip()
+    if not visible_text:
+        return True
+
+    visible_text = re.sub(r"[\s\-_.,;:!?'\"`~|/\\()\[\]{}<>+=]+", "", visible_text)
+    if not visible_text:
+        return True
+
+    return visible_text.lower() in OCR_BLANK_HINTS
+
 
 def _ocr_single_image(
     img_b64: str,
@@ -121,27 +244,63 @@ def _ocr_single_image(
     model: str,
     gemini_route: str = GEMINI_ROUTE_GOOGLE,
     retries: int = 3,
+    status_callback=None,
 ) -> str:
-    """对单张图片（base64）调用 LLM OCR，失败自动重试"""
-    for attempt in range(retries):
-        try:
-            response_text = generate_vision_html(
-                system_prompt=SYS_PROMPT,
-                image_bytes=base64.standard_b64decode(img_b64),
-                mime_type=mime_type,
-                model=model,
-                route=gemini_route,
-                temperature=0,
+    """对单张图片调用 OCR，失败时按“原路线 -> 备用路线 -> 轻量模型”逐级降级。"""
+    image_bytes = base64.standard_b64decode(img_b64)
+    attempt_plan = _build_ocr_attempt_plan(model, gemini_route, retries)
+
+    for stage_index, stage in enumerate(attempt_plan):
+        route = stage["route"]
+        candidate_model = stage["model"]
+        stage_retries = stage["retries"]
+
+        if stage_index > 0:
+            _emit_ocr_status(
+                f"↘ OCR 降级到 {_route_display_name(route)} / {candidate_model}",
+                status_callback,
             )
-            print(response_text, end="", flush=True)
-            return response_text
-        except Exception as e:
-            if attempt < retries - 1:
-                wait = 3 * (attempt + 1)
-                print(f"\n⚠️ 请求失败({e.__class__.__name__})，{wait} 秒后重试 [{attempt + 1}/{retries}]...")
-                time.sleep(wait)
-            else:
-                raise
+
+        for attempt in range(stage_retries):
+            try:
+                response_text = generate_vision_html(
+                    system_prompt=SYS_PROMPT,
+                    image_bytes=image_bytes,
+                    mime_type=mime_type,
+                    model=candidate_model,
+                    route=route,
+                    temperature=0,
+                )
+                print(response_text, end="", flush=True)
+                if stage_index > 0:
+                    _emit_ocr_status(
+                        f"✅ OCR 已恢复：{_route_display_name(route)} / {candidate_model}",
+                        status_callback,
+                    )
+                return response_text
+            except Exception as exc:
+                if attempt < stage_retries - 1:
+                    wait = 3 * (attempt + 1)
+                    _emit_ocr_status(
+                        f"⚠️ OCR 请求失败（{exc.__class__.__name__}），{wait} 秒后重试 "
+                        f"[{attempt + 1}/{stage_retries}]...",
+                        status_callback,
+                    )
+                    time.sleep(wait)
+                    continue
+
+                if stage_index < len(attempt_plan) - 1:
+                    next_stage = attempt_plan[stage_index + 1]
+                    _emit_ocr_status(
+                        f"⚠️ OCR 请求失败（{exc.__class__.__name__}），准备切换到 "
+                        f"{_route_display_name(next_stage['route'])} / {next_stage['model']}",
+                        status_callback,
+                    )
+                    break
+
+                raise RuntimeError(
+                    f"OCR 失败，已用尽重试与降级策略：{exc}"
+                ) from exc
 
 
 def ocr_file(
@@ -150,7 +309,9 @@ def ocr_file(
     model: str = "google/gemini-3.1-pro-preview",
     gemini_route: str = GEMINI_ROUTE_GOOGLE,
     page_progress_callback=None,
-) -> str:
+    return_metadata: bool = False,
+    ocr_status_callback=None,
+) -> str | dict[str, Any]:
     """调用 LLM 对图片或 PDF 进行 OCR，返回混合 HTML/Markdown 文本。
     PDF 会逐页渲染为图片后分页发送，避免大文件直传超限。
     page_progress_callback(current_page, total_pages) 可选，用于报告逐页进度。
@@ -165,22 +326,54 @@ def ocr_file(
             sys.exit(1)
 
         doc = fitz.open(file_path)
-        total = len(doc)
-        all_results = []
+        try:
+            total = len(doc)
+            all_results = []
+            blank_pages: list[int] = []
 
-        for i, page in enumerate(doc):
-            print(f"\n🔄 正在处理第 {i + 1}/{total} 页...")
-            if page_progress_callback:
-                page_progress_callback(i + 1, total)
-            pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            img_b64 = base64.standard_b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode("utf-8")
-            text = _ocr_single_image(img_b64, "image/jpeg", model, gemini_route=gemini_route)
-            all_results.append(text)
-            if i < total - 1:
-                time.sleep(1)
+            for i, page in enumerate(doc):
+                page_no = i + 1
+                print(f"\n🔄 正在处理第 {page_no}/{total} 页...")
+                if page_progress_callback:
+                    page_progress_callback(page_no, total)
+
+                def page_status(message: str, current_page: int = page_no, total_pages: int = total):
+                    if ocr_status_callback:
+                        ocr_status_callback(f"第 {current_page}/{total_pages} 页：{message}")
+
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                img_b64 = base64.standard_b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode("utf-8")
+                text = _ocr_single_image(
+                    img_b64,
+                    "image/jpeg",
+                    model,
+                    gemini_route=gemini_route,
+                    status_callback=page_status,
+                )
+                if _is_blank_ocr_result(text):
+                    blank_pages.append(page_no)
+                    _emit_ocr_status(
+                        f"ℹ️ 第 {page_no}/{total} 页 OCR 输出为空，已计为空白页",
+                        ocr_status_callback,
+                    )
+                all_results.append(text)
+                if i < total - 1:
+                    time.sleep(1)
+        finally:
+            close = getattr(doc, "close", None)
+            if callable(close):
+                close()
 
         print("\n✅ PDF OCR 完成")
-        return "\n\n<page_break/>\n\n".join(all_results)
+        joined_text = "\n\n<page_break/>\n\n".join(all_results)
+        if return_metadata:
+            return {
+                "text": joined_text,
+                "total_pages": total,
+                "blank_page_count": len(blank_pages),
+                "blank_pages": blank_pages,
+            }
+        return joined_text
 
     else:
         mime_map = {
@@ -197,8 +390,23 @@ def ocr_file(
             img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
 
         print("🔄 正在调用 LLM 进行 OCR...")
-        result = _ocr_single_image(img_b64, mime_type, model, gemini_route=gemini_route)
+        result = _ocr_single_image(
+            img_b64,
+            mime_type,
+            model,
+            gemini_route=gemini_route,
+            status_callback=ocr_status_callback,
+        )
         print("\n✅ OCR 完成")
+        if return_metadata:
+            is_blank = _is_blank_ocr_result(result)
+            blank_pages = [1] if is_blank else []
+            return {
+                "text": result,
+                "total_pages": 1,
+                "blank_page_count": len(blank_pages),
+                "blank_pages": blank_pages,
+            }
         return result
 
 

@@ -60,14 +60,14 @@
                             </div>
                             <div class="section-chip">PDF / Image</div>
                         </div>
-                        <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试增强版。</p>
+                        <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试增强版。当前 Nginx 上传上限约 100MB，前端按 95MB 做预检。</p>
 
                         <div class="upload-area" id="uploadArea">
                             <input type="file" id="fileInput" accept=".pdf,image/*" multiple hidden>
                             <div class="upload-placeholder" id="uploadPlaceholder">
                                 <i class="fas fa-cloud-arrow-up"></i>
                                 <p>拖拽文件到这里，或点击选择 PDF / 图片（支持多选）</p>
-                                <span>支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP</span>
+                                <span>支持 PDF、PNG、JPG、JPEG、BMP、GIF、WEBP；单文件和单次提交总大小均需控制在 95MB 内</span>
                             </div>
                             <div class="file-preview" id="filePreview" style="display: none;">
                                 <div class="file-info">
@@ -182,7 +182,7 @@
         </main>
     </div>
 
-    <!-- 页数超限弹窗 -->
+    <!-- 通用提示弹窗 -->
     <div id="pagelimitModal" style="display:none; position:fixed; inset:0; z-index:9999;
          background:rgba(6,17,29,0.72); backdrop-filter:blur(4px);
          display:none; align-items:center; justify-content:center;">
