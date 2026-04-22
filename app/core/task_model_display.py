@@ -5,7 +5,7 @@ from typing import Any, Mapping, Optional
 TASK_MODEL_FIELDS: dict[str, tuple[str, ...]] = {
     "alignment": ("model_name",),
     "business_licence": ("model",),
-    "doc_translate": ("ocr_model",),
+    "doc_translate": ("translation_model", "ocr_model"),
     "number_check": ("model_name",),
     "pdf2docx": ("model",),
     "zhongfanyi": ("model_name",),
@@ -51,7 +51,7 @@ def build_task_model_info(
     params: Optional[Mapping[str, Any]],
     result: Optional[Mapping[str, Any]],
 ) -> Optional[dict[str, str]]:
-    field_candidates = list(TASK_MODEL_FIELDS.get(task_type or "", ())) + ["model_name", "ocr_model", "model"]
+    field_candidates = list(TASK_MODEL_FIELDS.get(task_type or "", ())) + ["translation_model", "model_name", "ocr_model", "model"]
     data_sources: tuple[tuple[str, Optional[Mapping[str, Any]]], ...] = (("params", params), ("result", result))
 
     raw_model = None

@@ -11,6 +11,7 @@
 
 import asyncio
 import posixpath
+import re
 import time
 import zipfile
 from concurrent.futures import Executor
@@ -75,7 +76,9 @@ DOC_TRANSLATE_MODELS: Dict[str, Dict[str, str]] = {
 }
 
 # DeepSeek 翻译模型
-DEEPSEEK_TRANSLATE_MODEL = "deepseek-chat"
+DEEPSEEK_TRANSLATE_MODEL = "deepseek-reasoner"
+DEEPSEEK_TRANSLATE_MAX_TOKENS = 32768
+DEEPSEEK_TRANSLATE_REQUEST_MAX_TOKENS = 32768
 
 DOC_TRANSLATE_ALLOWED_EXTENSIONS = (
     ".pdf",
@@ -265,6 +268,30 @@ def _write_text_segments(output_dir: Path, segments: List[str]) -> List[Path]:
     return paths
 
 
+_PAGE_BREAK_PATTERN = re.compile(r"\s*<page_break\s*/>\s*", flags=re.IGNORECASE)
+
+
+def _split_ocr_text_segments(raw_text: str) -> List[str]:
+    text = "" if raw_text is None else str(raw_text)
+    if "<page_break" not in text.lower():
+        stripped = text.strip()
+        return [stripped] if stripped else [""]
+
+    parts = _PAGE_BREAK_PATTERN.split(text)
+    if len(parts) <= 1:
+        stripped = text.strip()
+        return [stripped] if stripped else [""]
+    return [part.strip() for part in parts]
+
+
+def _normalize_deepseek_max_tokens(max_tokens: int) -> int:
+    try:
+        requested = int(max_tokens)
+    except (TypeError, ValueError):
+        requested = DEEPSEEK_TRANSLATE_REQUEST_MAX_TOKENS
+    return max(1, min(requested, DEEPSEEK_TRANSLATE_REQUEST_MAX_TOKENS))
+
+
 # ============================================================
 # LLM 翻译：调用 DeepSeek API
 # ============================================================
@@ -320,8 +347,7 @@ def _translate_text_with_llm(
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": chunk_text},
                     ],
-                    temperature=0.1,
-                    max_tokens=8192,
+                    max_tokens=_normalize_deepseek_max_tokens(DEEPSEEK_TRANSLATE_MAX_TOKENS),
                 )
                 result = response.choices[0].message.content or ""
                 translated_parts.append(result)
@@ -490,7 +516,12 @@ async def execute_doc_translate_task(
                 gemini_route=gemini_route,
             ),
         )
-        ocr_segments = [raw_text]
+        ocr_segments = _split_ocr_text_segments(raw_text)
+        if len(ocr_segments) > 1:
+            raw_part_paths = [
+                _normalize_path(path)
+                for path in _write_text_segments(task_output_dir / f"{stem}_raw_parts", ocr_segments)
+            ]
 
     raw_output_path = task_output_dir / f"{stem}_raw.txt"
     raw_output_path.write_text(raw_text, encoding="utf-8")
@@ -511,12 +542,13 @@ async def execute_doc_translate_task(
         if len(ocr_segments) > 1:
             total_segments = len(ocr_segments)
             translated_segments: List[str] = []
+            segment_label = "图片" if source_images else "页"
             for segment_index, segment_text in enumerate(ocr_segments, start=1):
                 segment_progress = lang_progress_base + int((segment_index - 1) / max(total_segments, 1) * 20)
                 await _maybe_report(
                     progress_callback,
                     min(segment_progress, 54),
-                    f"正在翻译为{lang_name}（图片 {segment_index}/{total_segments}）... ({idx + 1}/{total_langs})",
+                    f"正在翻译为{lang_name}（{segment_label} {segment_index}/{total_segments}）... ({idx + 1}/{total_langs})",
                 )
                 translated_segment = await loop.run_in_executor(
                     executor,
@@ -584,6 +616,7 @@ async def execute_doc_translate_task(
         "task_id": task_id,
         "filename": original_filename,
         "ocr_model": ocr_model,
+        "translation_model": DEEPSEEK_TRANSLATE_MODEL,
         "gemini_route": gemini_route,
         "source_lang": source_lang,
         "raw_output_txt": _normalize_path(raw_output_path),
