@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 文档翻译服务
 
@@ -74,11 +74,22 @@ DOC_TRANSLATE_MODELS: Dict[str, Dict[str, str]] = {
         "description": "更强调复杂版面与细节理解，适合高难度文档。",
     },
 }
+DOC_TRANSLATE_DEFAULT_MODE = "standard"
+DOC_TRANSLATE_TRANSLATE_MODES: Dict[str, Dict[str, str]] = {
+    "standard": {
+        "label": "标准翻译",
+        "description": "仅输出目标语言译文",
+    },
+    "bilingual": {
+        "label": "双语对照",
+        "description": "按原文和译文换行对照输出，目标语言内容原样保留",
+    },
+}
 
-# DeepSeek 翻译模型
-DEEPSEEK_TRANSLATE_MODEL = "deepseek-reasoner"
-DEEPSEEK_TRANSLATE_MAX_TOKENS = 32768
-DEEPSEEK_TRANSLATE_REQUEST_MAX_TOKENS = 32768
+# 文本翻译模型
+DOC_TRANSLATE_TRANSLATION_MODEL = "deepseek-v4-flash"
+DOC_TRANSLATE_TRANSLATION_MAX_TOKENS = 384000
+DOC_TRANSLATE_TRANSLATION_REQUEST_MAX_TOKENS = 384000
 
 DOC_TRANSLATE_ALLOWED_EXTENSIONS = (
     ".pdf",
@@ -130,8 +141,19 @@ def get_doc_translate_allowed_extensions() -> List[str]:
     return list(DOC_TRANSLATE_ALLOWED_EXTENSIONS)
 
 
+def get_doc_translate_modes() -> Dict[str, Dict[str, str]]:
+    return DOC_TRANSLATE_TRANSLATE_MODES
+
+
 def get_supported_languages() -> Dict[str, Dict[str, str]]:
     return SUPPORTED_LANGUAGES
+
+
+def normalize_doc_translate_mode(translate_mode: Optional[str]) -> str:
+    normalized = str(translate_mode or DOC_TRANSLATE_DEFAULT_MODE).strip().lower()
+    if normalized not in DOC_TRANSLATE_TRANSLATE_MODES:
+        raise ValueError(f"不支持的翻译模式: {translate_mode}")
+    return normalized
 
 
 def _is_word_file(path: Path) -> bool:
@@ -284,12 +306,12 @@ def _split_ocr_text_segments(raw_text: str) -> List[str]:
     return [part.strip() for part in parts]
 
 
-def _normalize_deepseek_max_tokens(max_tokens: int) -> int:
+def _normalize_translation_max_tokens(max_tokens: int) -> int:
     try:
         requested = int(max_tokens)
     except (TypeError, ValueError):
-        requested = DEEPSEEK_TRANSLATE_REQUEST_MAX_TOKENS
-    return max(1, min(requested, DEEPSEEK_TRANSLATE_REQUEST_MAX_TOKENS))
+        requested = DOC_TRANSLATE_TRANSLATION_REQUEST_MAX_TOKENS
+    return max(1, min(requested, DOC_TRANSLATE_TRANSLATION_REQUEST_MAX_TOKENS))
 
 
 # ============================================================
@@ -312,22 +334,50 @@ def _build_translation_system_prompt(source_lang: str, target_lang: str) -> str:
 9. 仅返回翻译后的内容，不要添加任何解释或注释"""
 
 
+def _build_bilingual_system_prompt(source_lang: str, target_lang: str) -> str:
+    source_name = SUPPORTED_LANGUAGES.get(source_lang, {}).get("name", source_lang)
+    target_name = SUPPORTED_LANGUAGES.get(target_lang, {}).get("name", target_lang)
+    return f"""你是一个专业的文档翻译专家。请对以下文档执行双语对照翻译。
+
+处理规则：
+1. 对于{source_name}内容：在原文下方紧跟一行{target_name}译文，形成“原文\\n译文”的逐段对照格式
+2. 对于已经是{target_name}的内容：原样保留，不要翻译，也不要重复补写对照内容
+3. 保留原文的所有格式标记（HTML 标签、Markdown 标记等），只翻译需要翻译的文字内容
+4. 保持原文的段落结构、分页标记和排版顺序不变
+5. 专有名词应提供准确翻译
+6. 数字、编号、证件号码、URL、邮箱、品牌或机构官方缩写保持原格式不变
+7. 日期格式保持原样
+8. 仅返回处理后的内容，不要添加任何解释或注释
+9. 双语对照格式示例：
+   原文段落A
+   Translation of paragraph A
+
+   原文段落B
+   Translation of paragraph B
+
+   Already English paragraph (kept as-is)"""
+
+
 def _translate_text_with_llm(
     raw_text: str,
     source_lang: str,
     target_lang: str,
     retries: int = 3,
+    translate_mode: str = DOC_TRANSLATE_DEFAULT_MODE,
 ) -> str:
     """
     调用 DeepSeek API 翻译文本。
     分段处理防止超长文本导致单次调用失败。
     """
-    system_prompt = _build_translation_system_prompt(source_lang, target_lang)
+    resolved_translate_mode = normalize_doc_translate_mode(translate_mode)
+    if resolved_translate_mode == "bilingual":
+        system_prompt = _build_bilingual_system_prompt(source_lang, target_lang)
+    else:
+        system_prompt = _build_translation_system_prompt(source_lang, target_lang)
 
     MAX_CHUNK_SIZE = 6000
     chunks = _split_text_into_chunks(raw_text, MAX_CHUNK_SIZE)
     translated_parts = []
-
     client = OpenAI(
         api_key=settings.DEEPSEEK_API_KEY,
         base_url=settings.DEEPSEEK_BASE_URL,
@@ -342,12 +392,12 @@ def _translate_text_with_llm(
         for attempt in range(retries):
             try:
                 response = client.chat.completions.create(
-                    model=DEEPSEEK_TRANSLATE_MODEL,
+                    model=DOC_TRANSLATE_TRANSLATION_MODEL,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": chunk_text},
                     ],
-                    max_tokens=_normalize_deepseek_max_tokens(DEEPSEEK_TRANSLATE_MAX_TOKENS),
+                    max_tokens=_normalize_translation_max_tokens(DOC_TRANSLATE_TRANSLATION_MAX_TOKENS),
                 )
                 result = response.choices[0].message.content or ""
                 translated_parts.append(result)
@@ -355,7 +405,7 @@ def _translate_text_with_llm(
             except Exception as e:
                 if attempt < retries - 1:
                     wait = 3 * (attempt + 1)
-                    print(f"⚠️ 翻译请求失败({e.__class__.__name__})，{wait}秒后重试 [{attempt + 1}/{retries}]...")
+                    print(f"⚠️ DeepSeek 翻译请求失败({e.__class__.__name__})，{wait}秒后重试 [{attempt + 1}/{retries}]...")
                     time.sleep(wait)
                 else:
                     raise RuntimeError(f"翻译失败（已重试 {retries} 次）: {e}")
@@ -418,6 +468,7 @@ async def execute_doc_translate_task(
     original_filename: str,
     source_lang: str = "zh",
     target_langs: List[str],
+    translate_mode: str = DOC_TRANSLATE_DEFAULT_MODE,
     ocr_model: str = DOC_TRANSLATE_DEFAULT_MODEL,
     gemini_route: str = DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
     progress_callback: Optional[ProgressCallback] = None,
@@ -439,6 +490,7 @@ async def execute_doc_translate_task(
     """
     if ocr_model not in DOC_TRANSLATE_MODELS:
         raise ValueError(f"不支持的 OCR 模型: {ocr_model}")
+    translate_mode = normalize_doc_translate_mode(translate_mode)
     gemini_route = ensure_gemini_route_configured(gemini_route)
     if not settings.DEEPSEEK_API_KEY:
         raise ValueError("未配置 DEEPSEEK_API_KEY，无法执行翻译")
@@ -552,7 +604,12 @@ async def execute_doc_translate_task(
                 )
                 translated_segment = await loop.run_in_executor(
                     executor,
-                    lambda txt=segment_text, l=lang: _translate_text_with_llm(txt, source_lang, l) if txt.strip() else "",
+                    lambda txt=segment_text, l=lang, mode=translate_mode: _translate_text_with_llm(
+                        txt,
+                        source_lang,
+                        l,
+                        translate_mode=mode,
+                    ) if txt.strip() else "",
                 )
                 translated_segments.append(translated_segment)
 
@@ -569,7 +626,12 @@ async def execute_doc_translate_task(
             )
             translated_text = await loop.run_in_executor(
                 executor,
-                lambda l=lang: _translate_text_with_llm(raw_text, source_lang, l),
+                lambda l=lang, mode=translate_mode: _translate_text_with_llm(
+                    raw_text,
+                    source_lang,
+                    l,
+                    translate_mode=mode,
+                ),
             )
 
         translated_txt_path = task_output_dir / f"{stem}_{lang}.txt"
@@ -616,12 +678,18 @@ async def execute_doc_translate_task(
         "task_id": task_id,
         "filename": original_filename,
         "ocr_model": ocr_model,
-        "translation_model": DEEPSEEK_TRANSLATE_MODEL,
+        "translation_model": DOC_TRANSLATE_TRANSLATION_MODEL,
         "gemini_route": gemini_route,
         "source_lang": source_lang,
+        "translate_mode": translate_mode,
         "raw_output_txt": _normalize_path(raw_output_path),
         "raw_parts": raw_part_paths,
         "source_image_count": len(source_images),
         "source_images": source_images,
         "translations": results_per_lang,
     }
+
+
+
+
+

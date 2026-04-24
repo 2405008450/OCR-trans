@@ -136,6 +136,7 @@ const MODEL_DISPLAY_NAMES = {
     'Google Gemini 2.5 Pro': '增强版V1',
     'Google gemini-3-flash-preview': '快速版V2',
     'Google: google/gemini-3.1-pro-preview': '增强版V2',
+    'DeepSeek-V4-Pro': 'DeepSeek-V4-Pro',
 };
 
 (async function init() {
@@ -218,6 +219,7 @@ function populateDefaults() {
     modelSelect.innerHTML = '';
     modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
+    modelSelect.add(new Option(getModelDisplayName('DeepSeek-V4-Pro'), 'DeepSeek-V4-Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
     geminiRouteSelect.innerHTML = '<option value="google">\u7ebf\u8def1</option><option value="openrouter">\u7ebf\u8def2</option>';
     geminiRouteSelect.value = "openrouter";
@@ -231,7 +233,7 @@ function updateModelInfo() {
     if (info) {
         modelDesc.textContent = info.description || '';
         modelIdDisplay.textContent = getModelDisplayName(name);
-        modelMaxOutput.textContent = info.max_output ? `${info.max_output.toLocaleString()} tokens` : '-';
+        modelMaxOutput.textContent = info.max_output_display || (info.max_output ? `${info.max_output.toLocaleString()} tokens` : '-');
     } else {
         modelDesc.textContent = '';
         modelIdDisplay.textContent = '-';

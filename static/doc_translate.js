@@ -13,6 +13,7 @@ const btnBatchDownloadAll = document.getElementById('btnBatchDownloadAll');
 const modelSelect = document.getElementById('modelSelect');
 let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 const sourceLangSelect = document.getElementById('sourceLangSelect');
+const translateModeGroup = document.getElementById('translateModeGroup');
 const targetLangGroup = document.getElementById('targetLangGroup');
 
 const uploadSection = document.getElementById('uploadSection');
@@ -33,9 +34,11 @@ let selectedFiles = [];
 let pollingTimer = null;
 let modelConfig = {};
 let languageConfig = {};
+let translateModeConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultRoute = 'openrouter';
+let defaultTranslateMode = 'standard';
 let allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tif', '.tiff', '.doc', '.docx'];
 let streamLogWrap = null;
 let streamLogEl = null;
@@ -152,6 +155,8 @@ async function loadConfig() {
         modelConfig = data.models || {};
         defaultModel = data.default_model || defaultModel;
         languageConfig = data.languages || {};
+        translateModeConfig = data.translate_modes || {};
+        defaultTranslateMode = data.default_translate_mode || defaultTranslateMode;
         routeConfig = data.routes || {};
         defaultRoute = data.default_route || defaultRoute;
         if (Array.isArray(data.allowed_extensions) && data.allowed_extensions.length > 0) {
@@ -165,10 +170,15 @@ async function loadConfig() {
         };
         routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };
         languageConfig = { zh:{name:'中文'}, en:{name:'英文'}, ja:{name:'日文'}, ko:{name:'韩文'}, es:{name:'西班牙文'}, fr:{name:'法文'}, de:{name:'德文'}, ru:{name:'俄文'} };
+        translateModeConfig = {
+            standard: { label: '标准翻译', description: '仅输出目标语言译文' },
+            bilingual: { label: '双语对照', description: '按原文和译文换行对照输出' },
+        };
     }
     renderModels();
     renderRoutes();
     renderSourceLanguages();
+    renderTranslateModes();
     renderTargetLanguages();
 }
 
@@ -187,6 +197,45 @@ function renderSourceLanguages() {
     sourceLangSelect.innerHTML = '';
     Object.entries(languageConfig).forEach(([code, info]) => sourceLangSelect.add(new Option(info.name, code)));
     sourceLangSelect.value = languageConfig.zh ? 'zh' : Object.keys(languageConfig)[0];
+}
+function renderTranslateModes() {
+    if (!translateModeGroup) return;
+    if (!translateModeConfig || Object.keys(translateModeConfig).length === 0) {
+        translateModeConfig = {
+            standard: { label: '标准翻译', description: '仅输出目标语言译文' },
+            bilingual: { label: '双语对照', description: '按原文和译文换行对照输出' },
+        };
+    }
+    const availableModes = Object.keys(translateModeConfig);
+    const currentValue = getSelectedTranslateMode();
+    const selectedValue = translateModeConfig[currentValue]
+        ? currentValue
+        : (translateModeConfig[defaultTranslateMode] ? defaultTranslateMode : availableModes[0]);
+    translateModeGroup.innerHTML = '';
+    Object.entries(translateModeConfig).forEach(([value, info]) => {
+        const chip = document.createElement('label');
+        chip.className = 'lang-chip';
+        if (info.description) chip.title = info.description;
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'translateMode';
+        radio.value = value;
+        radio.checked = value === selectedValue;
+        const checkIcon = document.createElement('span');
+        checkIcon.className = 'chip-check';
+        checkIcon.innerHTML = '<i class="fas fa-check"></i>';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = info.label || value;
+        chip.appendChild(radio);
+        chip.appendChild(checkIcon);
+        chip.appendChild(nameSpan);
+        chip.classList.toggle('active', radio.checked);
+        chip.addEventListener('click', (e) => {
+            e.preventDefault();
+            selectTranslateMode(value);
+        });
+        translateModeGroup.appendChild(chip);
+    });
 }
 function renderTargetLanguages() {
     targetLangGroup.innerHTML = '';
@@ -212,6 +261,19 @@ function renderTargetLanguages() {
 
 function getSelectedTargetLangs() {
     return Array.from(targetLangGroup.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+}
+function getSelectedTranslateMode() {
+    const checked = translateModeGroup?.querySelector('input[type="radio"]:checked');
+    return checked?.value || defaultTranslateMode;
+}
+function selectTranslateMode(mode) {
+    if (!translateModeGroup) return;
+    translateModeGroup.querySelectorAll('.lang-chip').forEach((chip) => {
+        const radio = chip.querySelector('input[type="radio"]');
+        const isActive = radio?.value === mode;
+        if (radio) radio.checked = isActive;
+        chip.classList.toggle('active', isActive);
+    });
 }
 function updateProcessButton() {
     btnProcess.disabled = !(selectedFiles.length > 0 && getSelectedTargetLangs().length > 0);
@@ -291,7 +353,7 @@ async function processSingleFile(targetLangs) {
     try {
         const formData = new FormData();
         formData.append('file', selectedFiles[0]);
-        const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
+        const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
         const response = await fetch(`/task/doc-translate?${params.toString()}`, { method: 'POST', body: formData });
         if (!response.ok) { const t = await safeReadError(response); throw new Error(t || `提交失败: ${response.status}`); }
         const data = await response.json();
@@ -305,7 +367,7 @@ async function processBatchFiles(targetLangs) {
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
 
-    const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
+    const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append('files', file));
 

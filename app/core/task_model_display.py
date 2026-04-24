@@ -18,6 +18,7 @@ _MODEL_ALIASES = {
     "google: google/gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
     "gemini-3-flash-preview": "google/gemini-3-flash-preview",
     "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "deepseek-v4-pro": "deepseek-v4-pro",
 }
 
 _MODEL_LABELS = {
@@ -26,6 +27,7 @@ _MODEL_LABELS = {
     "google/gemini-2.5-pro": "增强版V2",
     "google/gemini-3.1-pro-preview": "增强版V2",
     "gemini-3.1-flash-lite-preview": "极速版V2",
+    "deepseek-v4-pro": "DeepSeek-V4-Pro",
 }
 
 

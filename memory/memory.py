@@ -9,6 +9,7 @@ from lxml import etree
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from openai import OpenAI
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 import tkinter as tk
@@ -70,6 +71,12 @@ OPENROUTER_MODELS = {
 
 # 当前可用模型（根据提供商切换）
 AVAILABLE_MODELS = OPENROUTER_MODELS.copy()
+AVAILABLE_MODELS["DeepSeek-V4-Pro"] = {
+    "id": "deepseek-v4-pro",
+    "description": "DeepSeek 官方模型，适合长文对齐场景，最大输出 384K",
+    "max_output": 384000,
+    "provider": "deepseek"
+}
 DEFAULT_MODEL = "Google gemini-3-flash-preview"
 
 
@@ -1743,6 +1750,44 @@ def call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_toke
         return None
 
 
+def call_deepseek_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename=""):
+    """DeepSeek 文本调用"""
+    api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
+    if not api_key:
+        raise ValueError("未配置全局 .env 中的 DEEPSEEK_API_KEY")
+
+    base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip() or "https://api.deepseek.com"
+
+    try:
+        log_manager.log("请求 DeepSeek API...")
+        log_manager.log_stream("\n" + "=" * 50 + f" {filename} " + "=" * 50 + "\n")
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=600.0,
+        )
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.1,
+            max_tokens=max_output_tokens,
+        )
+        full_response_text = (response.choices[0].message.content or "").strip()
+        if full_response_text:
+            log_manager.log_stream(full_response_text)
+        log_manager.log_stream("\n" + "=" * 50 + " 输出结束 " + "=" * 50 + "\n")
+        return full_response_text
+
+    except Exception as e:
+        log_manager.log_exception("DeepSeek API调用失败", str(e))
+        import traceback
+        log_manager.log_exception("详细堆栈", traceback.format_exc())
+        return None
+
+
 def call_llm_stream(system_prompt, user_prompt, model_id, filename=""):
     """统一的LLM流式调用 - 自动检测提供商"""
     # 获取模型的最大输出 tokens 和提供商
@@ -1755,7 +1800,14 @@ def call_llm_stream(system_prompt, user_prompt, model_id, filename=""):
             provider = model_info.get('provider', 'openrouter')
             break
 
+    if str(model_id or "").strip().lower().startswith("deepseek-"):
+        provider = "deepseek"
+        max_output_tokens = max(max_output_tokens, 384000)
+
     log_manager.log(f"使用提供商: {provider}")
+
+    if provider == "deepseek":
+        return call_deepseek_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename)
 
     return call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_tokens, filename)
 
@@ -3234,6 +3286,12 @@ class DocumentAlignerGUI:
         provider = self.provider_var.get()
 
         AVAILABLE_MODELS = OPENROUTER_MODELS.copy()
+        AVAILABLE_MODELS["DeepSeek-V4-Pro"] = {
+            "id": "deepseek-v4-pro",
+            "description": "DeepSeek 官方模型，适合长文对齐场景，最大输出 384K",
+            "max_output": 384000,
+            "provider": "deepseek"
+        }
         default_model = "Google Gemini 2.5 Flash"
         self.provider_info_label.config(text="HTTP 协议，Gemini 模型")
 

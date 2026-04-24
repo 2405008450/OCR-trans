@@ -22,6 +22,7 @@ from lxml import etree
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from openai import OpenAI
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
@@ -76,6 +77,12 @@ AVAILABLE_MODELS = {
         "id": "google/gemini-3.1-pro-preview",
         "description": "最强推理，100万上下文，65K输出",
         "max_output": 65536,
+    },
+    "DeepSeek-V4-Pro": {
+        "id": "deepseek-v4-pro",
+        "description": "DeepSeek 官方模型，适合长文对齐场景，最大输出 384K。",
+        "max_output": 384000,
+        "max_output_display": "最大 384K",
     },
 }
 DEFAULT_MODEL = "Google gemini-3-flash-preview"
@@ -1092,23 +1099,53 @@ def _smart_split_with_buffer(src_path, num_parts, output_dir, lang_type, buffer_
 
 
 # ── LLM 调用 ─────────────────────────────────────────────
+def _is_deepseek_alignment_model(model_id: str) -> bool:
+    return str(model_id or "").strip().lower().startswith("deepseek-")
+
+
+
+def _call_deepseek_llm(system_prompt: str, user_prompt: str, model_id: str, max_output: int) -> str:
+    if not settings.DEEPSEEK_API_KEY:
+        raise ValueError("未配置 DEEPSEEK_API_KEY，无法使用 DeepSeek 模型")
+
+    client = OpenAI(
+        api_key=settings.DEEPSEEK_API_KEY,
+        base_url=settings.DEEPSEEK_BASE_URL,
+        timeout=DEFAULT_GEMINI_TIMEOUT_SECONDS,
+    )
+    response = client.chat.completions.create(
+        model=model_id,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.1,
+        max_tokens=max_output,
+    )
+    return (response.choices[0].message.content or "").strip()
+
+
+
 def _call_llm(system_prompt: str, user_prompt: str, model_id: str, max_output: int = 65536) -> Optional[str]:
     route = _get_current_gemini_route()
     try:
         print(f"[alignment-llm] route={route}, model={model_id}, sys_len={len(system_prompt)}, user_len={len(user_prompt)}")
-        full = generate_text(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=model_id,
-            route=route,
-            temperature=0.1,
-            max_output_tokens=max_output,
-            timeout=DEFAULT_GEMINI_TIMEOUT_SECONDS,
-        )
-        print(f"[alignment-llm] ??, ?? {len(full)} ??")
+        if _is_deepseek_alignment_model(model_id):
+            full = _call_deepseek_llm(system_prompt, user_prompt, model_id, max_output)
+        else:
+            full = generate_text(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model_id,
+                route=route,
+                temperature=0.1,
+                max_output_tokens=max_output,
+                timeout=DEFAULT_GEMINI_TIMEOUT_SECONDS,
+            )
+        print(f"[alignment-llm] completed, len={len(full)}")
         return full
     except Exception as e:
-        print(f"[alignment-llm] ????: {e}")
+        print(f"[alignment-llm] failed: {e}")
         import traceback as _tb
         _tb.print_exc()
         return None
@@ -1625,8 +1662,15 @@ def _run_alignment_sync(
     """同步执行对齐任务 - 线程安全版，支持多任务并发"""
     try:
         _update_progress(task_id, 5, "正在加载处理引擎...", stream_log="")
-        gemini_route = ensure_gemini_route_configured(gemini_route)
-        _set_current_gemini_route(gemini_route)
+        model_info = AVAILABLE_MODELS.get(model_name, AVAILABLE_MODELS[DEFAULT_MODEL])
+        model_id = model_info['id']
+        if _is_deepseek_alignment_model(model_id):
+            if not settings.DEEPSEEK_API_KEY:
+                raise ValueError("未配置 DEEPSEEK_API_KEY，无法使用 DeepSeek-V4-Pro")
+            runtime_route = "deepseek"
+        else:
+            runtime_route = ensure_gemini_route_configured(gemini_route)
+        _set_current_gemini_route(runtime_route)
 
         memory_module = _get_memory_module()
         _install_log_patches()
@@ -1640,9 +1684,6 @@ def _run_alignment_sync(
         translated_path = os.path.abspath(translated_path)
         original_filename = original_filename or Path(original_path).name
         translated_filename = translated_filename or Path(translated_path).name
-
-        model_info = AVAILABLE_MODELS.get(model_name, AVAILABLE_MODELS[DEFAULT_MODEL])
-        model_id = model_info['id']
 
         file_type = memory_module.get_file_type(original_path)
         original_ext = Path(original_path).suffix.lower()
@@ -1662,7 +1703,7 @@ def _run_alignment_sync(
         print(f"[alignment] lang: {source_lang} → {target_lang}")
         _log(f"语言对: {source_lang} → {target_lang}")
         _log(f"后处理分句: {'启用' if enable_post_split else '禁用'}")
-        _log(f"Gemini ???: {gemini_route}")
+        _log(f"LLM 通道: {'DeepSeek API' if runtime_route == 'deepseek' else f'Gemini {runtime_route}'}")
         _log(f"模型: {model_name} ({model_id})")
         _log(f"文件类型: {file_type.upper()}")
 
@@ -1685,7 +1726,7 @@ def _run_alignment_sync(
         if file_type == 'excel':
             _update_progress(task_id, 10, "Excel 双文件对齐模式...")
             out_path = os.path.join(task_dir, f"{base_name}_对齐结果.xlsx")
-            memory_module.set_gemini_route(gemini_route)
+            memory_module.set_gemini_route(runtime_route)
             success = memory_module.process_excel_dual_file_alignment(
                 original_path, translated_path, out_path, model_id,
                 source_lang=source_lang, target_lang=target_lang,
@@ -1697,7 +1738,7 @@ def _run_alignment_sync(
                     "output_excel": rel,
                     "row_count": len(pd.read_excel(final_output_path)),
                     "file_type": "excel",
-                    "gemini_route": gemini_route,
+                    "gemini_route": runtime_route,
                     "intermediate_files": _list_intermediate_files(temp_dir),
                 })
             else:
@@ -1820,7 +1861,7 @@ def _run_alignment_sync(
                         f"{os.path.basename(task['output'])}"
                     )
 
-                memory_module.set_gemini_route(gemini_route)
+                memory_module.set_gemini_route(runtime_route)
                 success = memory_module.run_llm_alignment(
                     task['original'],
                     task['trans'],
@@ -1876,7 +1917,7 @@ def _run_alignment_sync(
                 task_id,
                 result={
                     "file_type": file_type,
-                    "gemini_route": gemini_route,
+                    "gemini_route": runtime_route,
                     "split_parts": split_parts,
                     "successful_parts": [os.path.basename(path) for path in generated_excel_paths],
                     "intermediate_files": _list_intermediate_files(temp_dir),
@@ -1917,7 +1958,7 @@ def _run_alignment_sync(
                 "output_excel": rel,
                 "row_count": row_count,
                 "file_type": file_type,
-                "gemini_route": gemini_route,
+                "gemini_route": runtime_route,
                 "split_parts": split_parts,
                 "issues": issues[:10] if issues else [],
                 "intermediate_files": _list_intermediate_files(temp_dir),

@@ -275,8 +275,8 @@ class TaskQueueService:
             self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_doc_translate_task(self, *, file: UploadFile, source_lang: str, target_langs: str, ocr_model: str, gemini_route: str) -> str:
-        reserved_task = self._create_db_task('doc_translate', file.filename or 'input.bin', {'source_lang': source_lang, 'target_langs': target_langs, 'ocr_model': ocr_model, 'gemini_route': gemini_route}, {})
+    async def submit_doc_translate_task(self, *, file: UploadFile, source_lang: str, target_langs: str, translate_mode: str, ocr_model: str, gemini_route: str) -> str:
+        reserved_task = self._create_db_task('doc_translate', file.filename or 'input.bin', {'source_lang': source_lang, 'target_langs': target_langs, 'translate_mode': translate_mode, 'ocr_model': ocr_model, 'gemini_route': gemini_route}, {})
         try:
             input_path, original_filename = await self._save_single_upload(file, 'doc_translate', reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
@@ -750,7 +750,7 @@ class TaskQueueService:
     async def _execute_doc_translate(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'doc translate started')
         target_langs = [lang.strip() for lang in params.get('target_langs', 'en').split(',') if lang.strip()]
-        return await execute_doc_translate_task(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', source_lang=params.get('source_lang', 'zh'), target_langs=target_langs, ocr_model=params.get('ocr_model', 'google/gemini-3-flash-preview'), gemini_route=params.get('gemini_route', 'openrouter'), progress_callback=update, executor=self._task_executor)
+        return await execute_doc_translate_task(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', source_lang=params.get('source_lang', 'zh'), target_langs=target_langs, translate_mode=params.get('translate_mode', 'standard'), ocr_model=params.get('ocr_model', 'google/gemini-3-flash-preview'), gemini_route=params.get('gemini_route', 'openrouter'), progress_callback=update, executor=self._task_executor)
 
     async def _execute_business_licence(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'business licence started')
@@ -867,4 +867,3 @@ class TaskQueueService:
 
 task_queue_service = TaskQueueService()
 ocr_task_queue = task_queue_service
-
