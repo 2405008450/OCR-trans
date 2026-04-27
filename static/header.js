@@ -15,7 +15,7 @@
         { href: '/', icon: 'fa-home', text: '首页' },
         { href: '/dashboard', icon: 'fa-gauge-high', text: '工作台' },
         { href: '/certificate-translation', icon: 'fa-id-card', text: '证件翻译聚合' },
-        { href: '/pdf2docx', icon: 'fa-file-word', text: '文档预处理' },
+        { href: '/pdf2docx', icon: 'fa-file-word', text: '不可编辑预处理' },
         { href: '/number-check', icon: 'fa-check-double', text: '数字专检' },
         { href: '/alignment', icon: 'fa-object-group', text: '多语对照' },
         { href: '/zhongfanyi', icon: 'fa-spell-check', text: '中翻专检' },

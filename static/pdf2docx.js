@@ -445,7 +445,7 @@ async function downloadAllBatchResults() {
             body: JSON.stringify({
                 task_ids: taskIds,
                 extensions: ['.docx'],
-                archive_name: '文档预处理批量结果.zip',
+                archive_name: '不编辑预处理批量结果.zip',
             }),
         });
         if (!response.ok) {

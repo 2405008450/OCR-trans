@@ -237,25 +237,75 @@ function renderTranslateModes() {
         translateModeGroup.appendChild(chip);
     });
 }
+// 语言分组配置（按地区）
+const LANG_GROUPS = [
+    { label: '东亚', codes: ['zh', 'zh-TW', 'ja', 'ko'] },
+    { label: '东南亚', codes: ['th', 'vi', 'id', 'ms', 'fil', 'my', 'km', 'lo'] },
+    { label: '南亚', codes: ['hi', 'bn', 'ur', 'ta', 'te', 'ml', 'si', 'ne'] },
+    { label: '西亚 / 中东', codes: ['ar', 'fa', 'he', 'tr', 'az', 'ka', 'am'] },
+    { label: '中亚', codes: ['kk', 'uz', 'ky', 'tg', 'tk', 'mn'] },
+    { label: '西欧', codes: ['en', 'fr', 'de', 'es', 'pt', 'it', 'nl', 'sv', 'no', 'da', 'fi', 'is', 'ga', 'cy', 'eu', 'ca', 'gl'] },
+    { label: '东欧', codes: ['ru', 'pl', 'uk', 'cs', 'sk', 'hu', 'ro', 'bg', 'hr', 'sr', 'sl', 'bs', 'mk', 'sq', 'el', 'lt', 'lv', 'et', 'be'] },
+    { label: '非洲', codes: ['sw', 'yo', 'ig', 'ha', 'zu', 'so'] },
+    { label: '美洲', codes: ['pt-BR', 'es-419', 'qu', 'ht'] },
+];
+
+function makeChip(code, info, sourceLang) {
+    const chip = document.createElement('label');
+    chip.className = 'lang-chip';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = code;
+    if (code === 'en' && sourceLang !== 'en') { checkbox.checked = true; chip.classList.add('active'); }
+    const checkIcon = document.createElement('span');
+    checkIcon.className = 'chip-check';
+    checkIcon.innerHTML = '<i class="fas fa-check"></i>';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = info.name;
+    chip.appendChild(checkbox);
+    chip.appendChild(checkIcon);
+    chip.appendChild(nameSpan);
+    chip.addEventListener('click', (e) => {
+        e.preventDefault();
+        checkbox.checked = !checkbox.checked;
+        chip.classList.toggle('active', checkbox.checked);
+        updateProcessButton();
+    });
+    return chip;
+}
+
 function renderTargetLanguages() {
     targetLangGroup.innerHTML = '';
     const sourceLang = sourceLangSelect.value;
-    Object.entries(languageConfig).forEach(([code, info]) => {
-        if (code === sourceLang) return;
-        const chip = document.createElement('label');
-        chip.className = 'lang-chip';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox'; checkbox.value = code;
-        if (code === 'en') { checkbox.checked = true; chip.classList.add('active'); }
-        const checkIcon = document.createElement('span');
-        checkIcon.className = 'chip-check';
-        checkIcon.innerHTML = '<i class="fas fa-check"></i>';
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = info.name;
-        chip.appendChild(checkbox); chip.appendChild(checkIcon); chip.appendChild(nameSpan);
-        chip.addEventListener('click', (e) => { e.preventDefault(); checkbox.checked = !checkbox.checked; chip.classList.toggle('active', checkbox.checked); updateProcessButton(); });
-        targetLangGroup.appendChild(chip);
+    const rendered = new Set();
+
+    LANG_GROUPS.forEach((group) => {
+        const codesInGroup = group.codes.filter((c) => c !== sourceLang && languageConfig[c]);
+        if (codesInGroup.length === 0) return;
+
+        const groupLabel = document.createElement('div');
+        groupLabel.style.cssText = 'width:100%;margin-top:10px;margin-bottom:2px;font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--text-secondary,#94a3b8);text-transform:uppercase;';
+        groupLabel.textContent = group.label;
+        targetLangGroup.appendChild(groupLabel);
+
+        codesInGroup.forEach((code) => {
+            rendered.add(code);
+            targetLangGroup.appendChild(makeChip(code, languageConfig[code], sourceLang));
+        });
     });
+
+    // 未被分进任何组的语言（兜底）
+    const extras = Object.keys(languageConfig).filter((c) => c !== sourceLang && !rendered.has(c));
+    if (extras.length > 0) {
+        const groupLabel = document.createElement('div');
+        groupLabel.style.cssText = 'width:100%;margin-top:10px;margin-bottom:2px;font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--text-secondary,#94a3b8);text-transform:uppercase;';
+        groupLabel.textContent = '其他';
+        targetLangGroup.appendChild(groupLabel);
+        extras.forEach((code) => {
+            targetLangGroup.appendChild(makeChip(code, languageConfig[code], sourceLang));
+        });
+    }
+
     updateProcessButton();
 }
 

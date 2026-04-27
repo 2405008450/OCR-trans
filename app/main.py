@@ -30,7 +30,7 @@ GLOBAL_NAV_ITEMS = [
     ("/", "fa-home", "首页"),
     ("/dashboard", "fa-gauge-high", "工作台"),
     ("/certificate-translation", "fa-id-card", "证件翻译聚合"),
-    ("/pdf2docx", "fa-file-word", "文档预处理"),
+    ("/pdf2docx", "fa-file-word", "不可编辑预处理"),
     ("/number-check", "fa-check-double", "数字专检"),
     ("/alignment", "fa-object-group", "多语对照"),
     ("/zhongfanyi", "fa-spell-check", "中翻专检"),

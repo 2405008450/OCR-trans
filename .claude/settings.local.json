@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(pip install:*)",
-      "Bash(conda run -n ocr_lama pip show zai-sdk)"
+      "Bash(conda run -n ocr_lama pip show zai-sdk)",
+      "Bash(python -c:*)"
     ]
   }
 }
