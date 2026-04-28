@@ -7,7 +7,8 @@
     const RELEASE_NOTES = [
         '\u652f\u6301\u5bfc\u5165 .doc \u6587\u6863',
         '\u652f\u6301\u6279\u91cf\u4e0b\u8f7d\u5904\u7406\u5b8c\u6210\u6587\u4ef6',
-        '4月20日_解除pdf2docx页数限制，文件大小限制为95M以下'
+        '4月20日_解除pdf2docx页数限制，文件大小限制为95M以下',
+        '4月28日_增加通用证件翻译70+语种，记忆增加dsv4p模型'
 
     ];
     const originalFetch = window.fetch.bind(window);
