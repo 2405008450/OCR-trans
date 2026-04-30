@@ -143,6 +143,17 @@ OCR_BLANK_HINTS = {
 }
 
 
+class OCRIncompleteResultError(RuntimeError):
+    pass
+
+
+def _strip_optional_code_fence(text: str) -> str:
+    normalized = (text or "").strip()
+    normalized = re.sub(r"^```(?:html|markdown)?\s*\n?", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\n?```\s*$", "", normalized)
+    return normalized.strip()
+
+
 def _emit_ocr_status(message: str, status_callback=None) -> None:
     text = (message or "").strip()
     if not text:
@@ -150,6 +161,12 @@ def _emit_ocr_status(message: str, status_callback=None) -> None:
     print(text, flush=True)
     if status_callback:
         status_callback(text)
+
+
+def _ocr_exception_message(exc: Exception) -> str:
+    if isinstance(exc, OCRIncompleteResultError):
+        return "OCR 输出疑似被截断"
+    return f"OCR 请求失败（{exc.__class__.__name__}）"
 
 
 def _route_display_name(route: str) -> str:
@@ -220,8 +237,7 @@ def _is_blank_ocr_result(text: str) -> bool:
     if not (text or "").strip():
         return True
 
-    normalized = re.sub(r"^```(?:html|markdown)?\s*\n?", "", text.strip(), flags=re.IGNORECASE)
-    normalized = re.sub(r"\n?```\s*$", "", normalized)
+    normalized = _strip_optional_code_fence(text)
     normalized = re.sub(r"<page_break\s*/>", " ", normalized, flags=re.IGNORECASE)
 
     soup = BeautifulSoup(normalized, "html.parser")
@@ -236,6 +252,24 @@ def _is_blank_ocr_result(text: str) -> bool:
         return True
 
     return visible_text.lower() in OCR_BLANK_HINTS
+
+
+def _is_likely_truncated_ocr_result(text: str) -> bool:
+    normalized = _strip_optional_code_fence(text)
+    if not normalized:
+        return False
+
+    lower = normalized.lower()
+    looks_like_full_html = any(marker in lower for marker in ("<!doctype html", "<html", "<body"))
+    if not looks_like_full_html:
+        return False
+
+    if "<body" in lower and "</body>" not in lower:
+        return True
+    if "<html" in lower and "</html>" not in lower:
+        return True
+
+    return False
 
 
 def _ocr_single_image(
@@ -271,6 +305,8 @@ def _ocr_single_image(
                     route=route,
                     temperature=0,
                 )
+                if _is_likely_truncated_ocr_result(response_text):
+                    raise OCRIncompleteResultError("OCR 输出疑似被截断：HTML 未完整闭合")
                 print(response_text, end="", flush=True)
                 if stage_index > 0:
                     _emit_ocr_status(
@@ -279,10 +315,14 @@ def _ocr_single_image(
                     )
                 return response_text
             except Exception as exc:
-                if attempt < stage_retries - 1:
+                retry_same_stage = attempt < stage_retries - 1 and not isinstance(
+                    exc,
+                    OCRIncompleteResultError,
+                )
+                if retry_same_stage:
                     wait = 3 * (attempt + 1)
                     _emit_ocr_status(
-                        f"⚠️ OCR 请求失败（{exc.__class__.__name__}），{wait} 秒后重试 "
+                        f"⚠️ {_ocr_exception_message(exc)}，{wait} 秒后重试 "
                         f"[{attempt + 1}/{stage_retries}]...",
                         status_callback,
                     )
@@ -292,7 +332,7 @@ def _ocr_single_image(
                 if stage_index < len(attempt_plan) - 1:
                     next_stage = attempt_plan[stage_index + 1]
                     _emit_ocr_status(
-                        f"⚠️ OCR 请求失败（{exc.__class__.__name__}），准备切换到 "
+                        f"⚠️ {_ocr_exception_message(exc)}，准备切换到 "
                         f"{_route_display_name(next_stage['route'])} / {next_stage['model']}",
                         status_callback,
                     )

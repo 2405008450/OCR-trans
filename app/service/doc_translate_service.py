@@ -17,7 +17,7 @@ import zipfile
 from concurrent.futures import Executor
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
 from openai import OpenAI
@@ -181,6 +181,7 @@ DOC_TRANSLATE_OCR_IMAGE_EXTENSIONS = {
     ".tiff",
 }
 DOCX_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+DOCX_WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 DOCX_OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 DOCX_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 DOCX_VML_NS = "urn:schemas-microsoft-com:vml"
@@ -243,7 +244,10 @@ def _read_docx_image_relationships(zip_file: zipfile.ZipFile, part_name: str) ->
     except KeyError:
         return {}
 
-    root = ET.fromstring(rels_xml)
+    try:
+        root = ET.fromstring(rels_xml)
+    except ET.ParseError:
+        return {}
     rel_tag = f"{{{DOCX_REL_NS}}}Relationship"
     image_relationships: Dict[str, str] = {}
     for rel in root.findall(rel_tag):
@@ -298,6 +302,157 @@ def _iter_docx_image_targets(zip_file: zipfile.ZipFile):
             target = relationships.get(rel_id or "")
             if target:
                 yield target
+
+
+def _iter_docx_content_parts(zip_file: zipfile.ZipFile) -> List[str]:
+    part_names = ["word/document.xml"]
+    part_names.extend(
+        sorted(
+            name
+            for name in zip_file.namelist()
+            if (
+                (name.startswith("word/header") or name.startswith("word/footer"))
+                and name.endswith(".xml")
+            )
+        )
+    )
+    part_names.extend(
+        name
+        for name in ("word/footnotes.xml", "word/endnotes.xml")
+        if name in zip_file.namelist()
+    )
+    return [name for name in part_names if name in zip_file.namelist()]
+
+
+def _normalize_word_text_segment(text: str) -> str:
+    normalized = (text or "").replace("\r", "\n").replace("\xa0", " ")
+    lines = [re.sub(r"[ \t]+$", "", line) for line in normalized.splitlines()]
+    normalized = "\n".join(lines)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _append_word_text_segment(segments: List[Dict[str, Any]], text_parts: List[str]) -> None:
+    text = _normalize_word_text_segment("".join(text_parts))
+    text_parts.clear()
+    if text:
+        segments.append({"type": "text", "text": text})
+
+
+def _extract_docx_part_segments(
+    zip_file: zipfile.ZipFile,
+    part_name: str,
+    output_dir: Path,
+    image_start_index: int,
+) -> Tuple[List[Dict[str, Any]], int, List[str]]:
+    relationships = _read_docx_image_relationships(zip_file, part_name)
+    try:
+        root = ET.fromstring(zip_file.read(part_name))
+    except ET.ParseError as exc:
+        return [], image_start_index, [f"Word 内容 XML 解析失败，已跳过 {part_name}: {exc}"]
+
+    w_text_tag = f"{{{DOCX_WORD_NS}}}t"
+    w_tab_tag = f"{{{DOCX_WORD_NS}}}tab"
+    w_break_tag = f"{{{DOCX_WORD_NS}}}br"
+    w_carriage_return_tag = f"{{{DOCX_WORD_NS}}}cr"
+    w_paragraph_tag = f"{{{DOCX_WORD_NS}}}p"
+    w_table_cell_tag = f"{{{DOCX_WORD_NS}}}tc"
+    w_table_row_tag = f"{{{DOCX_WORD_NS}}}tr"
+    drawing_text_tag = f"{{{DOCX_DRAWING_NS}}}t"
+    blip_tag = f"{{{DOCX_DRAWING_NS}}}blip"
+    image_tag = f"{{{DOCX_VML_NS}}}imagedata"
+    embed_attr = f"{{{DOCX_OFFICE_REL_NS}}}embed"
+    link_attr = f"{{{DOCX_OFFICE_REL_NS}}}link"
+    id_attr = f"{{{DOCX_OFFICE_REL_NS}}}id"
+
+    segments: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    text_parts: List[str] = []
+    image_index = image_start_index
+
+    def walk(node: ET.Element) -> None:
+        nonlocal image_index
+        tag = node.tag
+
+        if tag in {w_text_tag, drawing_text_tag}:
+            if node.text:
+                text_parts.append(node.text)
+            return
+
+        if tag == w_tab_tag:
+            text_parts.append("\t")
+            return
+
+        if tag in {w_break_tag, w_carriage_return_tag}:
+            text_parts.append("\n")
+            return
+
+        if tag in {blip_tag, image_tag}:
+            rel_id = node.get(embed_attr) or node.get(link_attr) or node.get(id_attr)
+            target_name = relationships.get(rel_id or "")
+            _append_word_text_segment(segments, text_parts)
+            if target_name:
+                try:
+                    image_blob = zip_file.read(target_name)
+                except KeyError:
+                    warnings.append(f"Word 图片资源缺失，已跳过: {target_name}")
+                    return
+
+                image_path = _write_embedded_image(image_blob, target_name, output_dir, image_index)
+                if image_path is None:
+                    warnings.append(f"Word 图片格式暂不支持 OCR，已跳过: {target_name}")
+                    return
+
+                segments.append(
+                    {
+                        "type": "image",
+                        "path": image_path,
+                        "target": target_name,
+                    }
+                )
+                image_index += 1
+            return
+
+        for child in node:
+            walk(child)
+
+        if tag == w_paragraph_tag:
+            text_parts.append("\n")
+        elif tag == w_table_cell_tag:
+            text_parts.append("\t")
+        elif tag == w_table_row_tag:
+            text_parts.append("\n")
+
+    walk(root)
+    _append_word_text_segment(segments, text_parts)
+    return segments, image_index, warnings
+
+
+def _extract_word_segments_for_translation(
+    docx_path: Path,
+    output_dir: Path,
+) -> Tuple[List[Dict[str, Any]], List[Path], List[str]]:
+    segments: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    image_index = 1
+
+    with zipfile.ZipFile(docx_path) as zip_file:
+        for part_name in _iter_docx_content_parts(zip_file):
+            part_segments, image_index, part_warnings = _extract_docx_part_segments(
+                zip_file,
+                part_name,
+                output_dir,
+                image_index,
+            )
+            segments.extend(part_segments)
+            warnings.extend(part_warnings)
+
+    image_paths = [
+        segment["path"]
+        for segment in segments
+        if segment.get("type") == "image" and isinstance(segment.get("path"), Path)
+    ]
+    return segments, image_paths, warnings
 
 
 def _write_embedded_image(blob: bytes, original_name: str, output_dir: Path, index: int) -> Optional[Path]:
@@ -395,8 +550,11 @@ def _build_translation_system_prompt(source_lang: str, target_lang: str) -> str:
 5. 如果原文包含多语种对照、双语标签或同义重复项（如土耳其语+英语、中文+英语），输出时只保留目标语言版本，不要同时保留未翻译的对照文本
 6. 对于“护照/PASSPORT”“国籍/NATIONALITY”这类证件固定栏位，如果多个源语言表达的是同一含义，只输出一次目标语言译文
 7. 除证件号码、姓名拼写、机器可读码(MRZ)、URL、邮箱、品牌或机构官方缩写，以及用户明确要求保留的字段外，不要保留任何源语言原文
-8. 日期格式如'08.12.2020'等需要翻译成目标语种常用日期格式
-9. 仅返回翻译后的内容，不要添加任何解释或注释"""
+8. 日期格式需要翻译成目标语种常用日期格式，但必须严格遵守源文档国家/语种的日期顺序，不要猜测或改写数字
+9. 法文/法国或欧盟驾驶证中的点分短日期通常是“日.月.年”（DD.MM.YY 或 DD.MM.YYYY），两位年份在最后一段；例如“10.01.13”应译为“2013年1月10日”
+10. 看到“19.01.13”这类三段两位点分数字时，除非上下文明确第一段是年份，否则禁止译为“2019年01月13日”；应按证件上下文核对为日.月.年，无法确认时保留原格式
+11. 驾驶证字段编号（如 1、2、3、4a、4b、10、11、12）与日期相邻时，字段编号不是日期的一部分
+12. 仅返回翻译后的内容，不要添加任何解释或注释"""
 
 
 def _build_bilingual_system_prompt(source_lang: str, target_lang: str) -> str:
@@ -411,7 +569,7 @@ def _build_bilingual_system_prompt(source_lang: str, target_lang: str) -> str:
 4. 保持原文的段落结构、分页标记和排版顺序不变
 5. 专有名词应提供准确翻译
 6. 数字、编号、证件号码、URL、邮箱、品牌或机构官方缩写保持原格式不变
-7. 日期格式保持原样
+7. 日期格式保持原样；尤其不要把法文/法国或欧盟驾驶证中的“DD.MM.YY”误改写为“YY.MM.DD”
 8. 仅返回处理后的内容，不要添加任何解释或注释
 9. 双语对照格式示例：
    原文段落A
@@ -573,49 +731,85 @@ async def execute_doc_translate_task(
     source_images: List[str] = []
     ocr_segments: List[str] = []
     raw_part_paths: List[str] = []
+    processing_warnings: List[str] = []
+    source_segment_label = "页"
 
     if _is_word_file(input_file):
-        word_image_dir = task_output_dir / f"{stem}_word_images"
+        source_segment_label = "Word 片段"
+        word_asset_dir = task_output_dir / f"{stem}_word_assets"
         if input_file.suffix.lower() == ".doc":
             await _maybe_report(progress_callback, 5, "正在转换 Word 文档格式...")
         else:
-            await _maybe_report(progress_callback, 5, "正在提取 Word 文档中的图片...")
+            await _maybe_report(progress_callback, 5, "正在读取 Word 文档内容...")
 
         prepared_word_path = await loop.run_in_executor(
             executor,
-            lambda: _prepare_word_input_for_ocr(input_file, word_image_dir),
+            lambda: _prepare_word_input_for_ocr(input_file, word_asset_dir),
         )
-        await _maybe_report(progress_callback, 10, "正在提取 Word 文档中的图片...")
-        extracted_images = await loop.run_in_executor(
+        await _maybe_report(progress_callback, 10, "正在提取 Word 正文和图片...")
+        word_segments, extracted_images, word_warnings = await loop.run_in_executor(
             executor,
-            lambda: _extract_word_images_for_ocr(prepared_word_path, word_image_dir),
+            lambda: _extract_word_segments_for_translation(prepared_word_path, word_asset_dir),
         )
+        processing_warnings.extend(word_warnings)
 
-        if not extracted_images:
-            raise ValueError("Word 文档中未找到可处理的图片")
-
+        text_segment_count = sum(1 for segment in word_segments if segment.get("type") == "text")
         total_images = len(extracted_images)
-        await _maybe_report(progress_callback, 12, f"已提取 {total_images} 张图片，开始逐张 OCR...")
 
-        for image_index, image_path in enumerate(extracted_images, start=1):
-            image_progress = 12 + int(image_index / max(total_images, 1) * 20)
+        if not word_segments:
+            detail = f"；{processing_warnings[0]}" if processing_warnings else ""
+            raise ValueError(f"Word 文档中未找到可处理的文本或图片{detail}")
+
+        if total_images:
+            await _maybe_report(
+                progress_callback,
+                12,
+                f"已读取 {text_segment_count} 段文本、提取 {total_images} 张图片，开始逐张 OCR...",
+            )
+        else:
+            await _maybe_report(progress_callback, 12, f"已读取 {text_segment_count} 段 Word 文本...")
+
+        image_counter = 0
+        failed_image_count = 0
+        for segment in word_segments:
+            if segment.get("type") == "text":
+                ocr_segments.append(segment.get("text") or "")
+                continue
+
+            image_path = segment.get("path")
+            if not isinstance(image_path, Path):
+                continue
+
+            image_counter += 1
+            image_progress = 12 + int(image_counter / max(total_images, 1) * 20)
             await _maybe_report(
                 progress_callback,
                 min(image_progress, 32),
-                f"正在处理 Word 图片 {image_index}/{total_images}...",
+                f"正在处理 Word 图片 {image_counter}/{total_images}...",
             )
-            part_text = await loop.run_in_executor(
-                executor,
-                lambda path=str(image_path): ocr_file(
-                    file_path=path,
-                    model=ocr_model,
-                    gemini_route=gemini_route,
-                ),
-            )
+            try:
+                part_text = await loop.run_in_executor(
+                    executor,
+                    lambda path=str(image_path): ocr_file(
+                        file_path=path,
+                        model=ocr_model,
+                        gemini_route=gemini_route,
+                    ),
+                )
+            except Exception as exc:
+                failed_image_count += 1
+                warning = f"Word 图片 {image_counter}/{total_images} OCR 失败，已继续处理后续内容: {exc}"
+                processing_warnings.append(warning)
+                await _maybe_report(progress_callback, min(image_progress, 32), warning)
+                ocr_segments.append("")
+                continue
+
             ocr_segments.append(part_text or "")
 
         if not any(segment.strip() for segment in ocr_segments):
-            raise ValueError("Word 文档中的图片未识别出可用文本")
+            if failed_image_count:
+                raise ValueError(f"Word 文档未识别出可用文本，{failed_image_count} 张图片 OCR 失败")
+            raise ValueError("Word 文档中未识别出可用文本")
 
         source_images = [_normalize_path(path) for path in extracted_images]
         raw_part_paths = [
@@ -659,7 +853,7 @@ async def execute_doc_translate_task(
         if len(ocr_segments) > 1:
             total_segments = len(ocr_segments)
             translated_segments: List[str] = []
-            segment_label = "图片" if source_images else "页"
+            segment_label = source_segment_label
             for segment_index, segment_text in enumerate(ocr_segments, start=1):
                 segment_progress = lang_progress_base + int((segment_index - 1) / max(total_segments, 1) * 20)
                 await _maybe_report(
@@ -751,6 +945,7 @@ async def execute_doc_translate_task(
         "raw_parts": raw_part_paths,
         "source_image_count": len(source_images),
         "source_images": source_images,
+        "warnings": processing_warnings,
         "translations": results_per_lang,
     }
 
