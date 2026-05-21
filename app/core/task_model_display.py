@@ -16,16 +16,24 @@ _MODEL_ALIASES = {
     "google gemini 2.5 pro": "google/gemini-2.5-pro",
     "google gemini-3-flash-preview": "google/gemini-3-flash-preview",
     "google: google/gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "google: google/gemini-3.5-flash": "google/gemini-3.5-flash",
     "gemini-3-flash-preview": "google/gemini-3-flash-preview",
+    "gemini-3.5-flash": "google/gemini-3.5-flash",
+    "google gemini-3.5-flash": "google/gemini-3.5-flash",
     "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite": "google/gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
+    "google/gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
     "deepseek-v4-pro": "deepseek-v4-pro",
 }
 
 _MODEL_LABELS = {
     "google/gemini-2.5-flash": "快速版V2",
     "google/gemini-3-flash-preview": "快速版V2",
+    "google/gemini-3.5-flash": "新模型",
     "google/gemini-2.5-pro": "增强版V2",
     "google/gemini-3.1-pro-preview": "增强版V2",
+    "google/gemini-3.1-flash-lite": "极速版V2",
     "gemini-3.1-flash-lite-preview": "极速版V2",
     "deepseek-v4-pro": "DeepSeek-V4-Pro",
 }

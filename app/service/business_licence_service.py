@@ -39,6 +39,10 @@ BUSINESS_LICENCE_MODELS: Dict[str, Dict[str, str]] = {
         "label": "快速版V2",
         "description": "速度更快，适合常规营业执照图片。",
     },
+    "google/gemini-3.5-flash": {
+        "label": "新模型",
+        "description": "OpenRouter 新模型，适合常规营业执照图片。",
+    },
 }
 
 BUSINESS_LICENCE_SYSTEM_PROMPT = ""

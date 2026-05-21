@@ -3,6 +3,7 @@ OCR 图片 → 混合 HTML/Markdown → 格式化 Word 文档 (一步到位)
 """
 
 import base64
+import io
 import re
 import sys
 import os
@@ -12,6 +13,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.service.gemini_service import (
+    GEMINI_ROUTE_AISTUDIO,
     GEMINI_ROUTE_GOOGLE,
     GEMINI_ROUTE_OPENROUTER,
     ensure_gemini_route_configured,
@@ -127,8 +129,9 @@ Seals / stamps:
 
 OCR_FALLBACK_MODEL_ORDER = (
     "google/gemini-3.1-pro-preview",
+    "google/gemini-3.5-flash",
     "google/gemini-3-flash-preview",
-    "gemini-3.1-flash-lite-preview",
+    "google/gemini-3.1-flash-lite",
 )
 OCR_BLANK_HINTS = {
     "blank",
@@ -172,6 +175,7 @@ def _ocr_exception_message(exc: Exception) -> str:
 def _route_display_name(route: str) -> str:
     return {
         GEMINI_ROUTE_GOOGLE: "Google Vertex",
+        GEMINI_ROUTE_AISTUDIO: "Google AI Studio",
         GEMINI_ROUTE_OPENROUTER: "OpenRouter",
     }.get(route, route)
 
@@ -187,10 +191,25 @@ def _route_is_available(route: str) -> bool:
 def _build_ocr_route_candidates(gemini_route: str) -> list[str]:
     normalized = normalize_gemini_route(gemini_route)
     candidates: list[str] = []
-    for route in (
-        normalized,
-        GEMINI_ROUTE_GOOGLE if normalized != GEMINI_ROUTE_GOOGLE else GEMINI_ROUTE_OPENROUTER,
-    ):
+    preferred_routes = {
+        GEMINI_ROUTE_OPENROUTER: (
+            GEMINI_ROUTE_OPENROUTER,
+            GEMINI_ROUTE_AISTUDIO,
+            GEMINI_ROUTE_GOOGLE,
+        ),
+        GEMINI_ROUTE_AISTUDIO: (
+            GEMINI_ROUTE_AISTUDIO,
+            GEMINI_ROUTE_GOOGLE,
+            GEMINI_ROUTE_OPENROUTER,
+        ),
+        GEMINI_ROUTE_GOOGLE: (
+            GEMINI_ROUTE_GOOGLE,
+            GEMINI_ROUTE_AISTUDIO,
+            GEMINI_ROUTE_OPENROUTER,
+        ),
+    }.get(normalized, (normalized, GEMINI_ROUTE_AISTUDIO, GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_OPENROUTER))
+
+    for route in preferred_routes:
         if route not in candidates and _route_is_available(route):
             candidates.append(route)
     if not candidates and _route_is_available(normalized):
@@ -199,12 +218,8 @@ def _build_ocr_route_candidates(gemini_route: str) -> list[str]:
 
 
 def _build_ocr_model_candidates(model: str) -> list[str]:
-    if model in OCR_FALLBACK_MODEL_ORDER:
-        start_index = OCR_FALLBACK_MODEL_ORDER.index(model)
-        return list(OCR_FALLBACK_MODEL_ORDER[start_index:])
-
     candidates = [model]
-    for fallback_model in OCR_FALLBACK_MODEL_ORDER[1:]:
+    for fallback_model in OCR_FALLBACK_MODEL_ORDER:
         if fallback_model not in candidates:
             candidates.append(fallback_model)
     return candidates
@@ -272,6 +287,23 @@ def _is_likely_truncated_ocr_result(text: str) -> bool:
     return False
 
 
+def _image_has_visible_text_like_content(image_bytes: bytes) -> bool:
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            gray = image.convert("L")
+            gray.thumbnail((900, 900))
+            histogram = gray.histogram()
+    except Exception:
+        return False
+
+    total = sum(histogram) or 1
+    dark_pixels = sum(histogram[:190])
+    very_dark_pixels = sum(histogram[:150])
+    return (dark_pixels / total) >= 0.004 or (very_dark_pixels / total) >= 0.0015
+
+
 def _ocr_single_image(
     img_b64: str,
     mime_type: str,
@@ -282,6 +314,7 @@ def _ocr_single_image(
 ) -> str:
     """对单张图片调用 OCR，失败时按“原路线 -> 备用路线 -> 轻量模型”逐级降级。"""
     image_bytes = base64.standard_b64decode(img_b64)
+    image_has_visible_content = _image_has_visible_text_like_content(image_bytes)
     attempt_plan = _build_ocr_attempt_plan(model, gemini_route, retries)
 
     for stage_index, stage in enumerate(attempt_plan):
@@ -307,6 +340,8 @@ def _ocr_single_image(
                 )
                 if _is_likely_truncated_ocr_result(response_text):
                     raise OCRIncompleteResultError("OCR 输出疑似被截断：HTML 未完整闭合")
+                if image_has_visible_content and _is_blank_ocr_result(response_text):
+                    raise OCRIncompleteResultError("OCR 输出为空，但图片包含明显可见内容")
                 print(response_text, end="", flush=True)
                 if stage_index > 0:
                     _emit_ocr_status(

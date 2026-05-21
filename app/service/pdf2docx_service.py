@@ -13,7 +13,7 @@ PDF2DOCX_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
 PDF2DOCX_DEFAULT_MODEL = "google/gemini-3-flash-preview"
 
 PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
-    "gemini-3.1-flash-lite-preview": {
+    "google/gemini-3.1-flash-lite": {
         "label": "极速版V2",
         "description": "更轻量的 OCR 模型，适合追求速度的 PDF / 图片转 Word 场景。",
     },
@@ -21,10 +21,19 @@ PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
         "label": "Google Gemini 3 Flash Preview",
         "description": "速度更快，适合常规 PDF / 图片转 Word 场景。",
     },
+    "google/gemini-3.5-flash": {
+        "label": "新模型",
+        "description": "OpenRouter 新模型，适合常规 PDF / 图片转 Word 场景。",
+    },
     "google/gemini-3.1-pro-preview": {
         "label": "Google Gemini 3.1 Pro Preview",
         "description": "更强的复杂版面与细节理解能力，适合高难度文档。",
     },
+}
+
+PDF2DOCX_MODEL_ALIASES = {
+    "gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
+    "google/gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
 }
 
 
@@ -43,6 +52,11 @@ def _normalize_path(path: Path) -> str:
 
 def get_pdf2docx_models() -> Dict[str, Dict[str, str]]:
     return PDF2DOCX_MODELS
+
+
+def normalize_pdf2docx_model(model: Optional[str]) -> str:
+    candidate = (model or PDF2DOCX_DEFAULT_MODEL).strip()
+    return PDF2DOCX_MODEL_ALIASES.get(candidate, candidate)
 
 
 def _normalize_ocr_payload(ocr_result: Any, fallback_total_pages: int = 0) -> Dict[str, Any]:
@@ -91,6 +105,7 @@ async def execute_pdf2docx_task_from_path(
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
+    model = normalize_pdf2docx_model(model)
     if model not in PDF2DOCX_MODELS:
         raise ValueError(f"不支持的模型: {model}")
     gemini_route = ensure_gemini_route_configured(gemini_route)

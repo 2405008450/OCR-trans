@@ -90,6 +90,7 @@ async function loadConfig() {
         modelConfig = {
             'google/gemini-3.1-pro-preview': { label: '增强版V2' },
             'google/gemini-3-flash-preview': { label: '快速版V2' },
+            'google/gemini-3.5-flash': { label: '新模型' },
         };
         routeConfig = {
             openrouter: { label: '线路2（OpenRouter）' },
@@ -104,7 +105,8 @@ function renderModels() {
     modelSelect.innerHTML = '';
     const modelOrder = {
         'google/gemini-3-flash-preview': 0,
-        'google/gemini-3.1-pro-preview': 1,
+        'google/gemini-3.5-flash': 1,
+        'google/gemini-3.1-pro-preview': 2,
     };
 
     Object.entries(modelConfig)

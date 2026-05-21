@@ -199,6 +199,43 @@ def mark_cancelled(db: Session, task_id: str) -> Optional[Task]:
     return task
 
 
+def _trim_optional_text(value: Optional[str], max_length: int) -> Optional[str]:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+    return trimmed[:max_length]
+
+
+def update_task_feedback(
+    db: Session,
+    task_id: str,
+    *,
+    marked: bool,
+    category: Optional[str] = None,
+    note: Optional[str] = None,
+) -> Optional[Task]:
+    task = get_task_by_task_id(db, task_id)
+    if not task:
+        return None
+
+    now = _now()
+    task.feedback_marked = bool(marked)
+    if marked:
+        task.feedback_category = _trim_optional_text(category, 80) or 'exception'
+        task.feedback_note = _trim_optional_text(note, 2000)
+        task.feedback_marked_at = now
+    else:
+        task.feedback_category = None
+        task.feedback_note = None
+        task.feedback_marked_at = None
+    task.updated_at = now
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def requeue_running_tasks(db: Session, *, task_type: Optional[str] = None, max_retry_count: int = 1) -> Dict[str, int]:
     query = db.query(Task).filter(Task.status == 'running')
     if task_type:
@@ -240,7 +277,7 @@ def requeue_running_tasks(db: Session, *, task_type: Optional[str] = None, max_r
     return summary
 
 
-def list_tasks(db: Session, *, status: Optional[str] = None, task_type: Optional[str] = None, keyword: Optional[str] = None, page: int = 1, page_size: int = 20) -> Tuple[List[Task], int]:
+def list_tasks(db: Session, *, status: Optional[str] = None, task_type: Optional[str] = None, keyword: Optional[str] = None, feedback_marked: Optional[bool] = None, page: int = 1, page_size: int = 20) -> Tuple[List[Task], int]:
     query = db.query(Task)
     if status:
         statuses = [s.strip() for s in status.split(',') if s.strip()]
@@ -250,6 +287,10 @@ def list_tasks(db: Session, *, status: Optional[str] = None, task_type: Optional
         query = query.filter(Task.task_type == task_type)
     if keyword:
         query = query.filter(Task.filename.ilike(f'%{keyword}%'))
+    if feedback_marked is True:
+        query = query.filter(Task.feedback_marked.is_(True))
+    elif feedback_marked is False:
+        query = query.filter(Task.feedback_marked.is_(False))
     total = query.count()
     tasks = query.order_by(Task.created_at.desc(), Task.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return tasks, total
@@ -260,4 +301,5 @@ def count_by_status(db: Session) -> Dict[str, Any]:
     counts = {row[0]: row[1] for row in rows}
     type_rows = db.query(Task.task_type, func.count(Task.id)).group_by(Task.task_type).all()
     by_type = {row[0]: row[1] for row in type_rows}
-    return {'total': sum(counts.values()), 'queued': counts.get('queued', 0), 'running': counts.get('running', 0), 'done': counts.get('done', 0), 'failed': counts.get('failed', 0), 'cancelled': counts.get('cancelled', 0), 'by_type': by_type}
+    feedback_marked = db.query(func.count(Task.id)).filter(Task.feedback_marked.is_(True)).scalar() or 0
+    return {'total': sum(counts.values()), 'queued': counts.get('queued', 0), 'running': counts.get('running', 0), 'done': counts.get('done', 0), 'failed': counts.get('failed', 0), 'cancelled': counts.get('cancelled', 0), 'feedback_marked': feedback_marked, 'by_type': by_type}

@@ -11,11 +11,14 @@ const NGINX_UPLOAD_LIMIT_LABEL = `${NGINX_UPLOAD_LIMIT_MB}MB`;
 const FRONTEND_UPLOAD_LIMIT_LABEL = `${FRONTEND_UPLOAD_LIMIT_MB}MB`;
 
 const MODEL_DISPLAY_NAMES = {
+    'google/gemini-3.1-flash-lite': '极速版V2',
     'gemini-3.1-flash-lite-preview': '极速版V2',
     'google/gemini-3.1-flash-lite-preview': '极速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
+    'google/gemini-3.5-flash': '新模型',
     'google/gemini-3.1-pro-preview': '增强版V2',
     'Google Gemini 3 Flash Preview': '快速版V2',
+    '新模型': '新模型',
     'Google Gemini 3.1 Pro Preview': '增强版V2',
 };
 
@@ -164,8 +167,9 @@ async function loadConfig() {
         console.error(error);
         routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };
         modelConfig = {
-            'gemini-3.1-flash-lite-preview': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
+            'google/gemini-3.1-flash-lite': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规场景。' },
+            'google/gemini-3.5-flash': { label: '新模型', description: 'OpenRouter 新模型，适合常规场景。' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '更强的复杂版面理解能力。' },
         };
     }

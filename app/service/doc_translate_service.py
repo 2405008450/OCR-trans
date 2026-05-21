@@ -134,6 +134,10 @@ DOC_TRANSLATE_MODELS: Dict[str, Dict[str, str]] = {
         "label": "快速版V2",
         "description": "速度更快，适合常规 PDF / 图片文档。",
     },
+    "google/gemini-3.5-flash": {
+        "label": "新模型",
+        "description": "OpenRouter 新模型，适合常规 PDF / 图片文档。",
+    },
     "google/gemini-3.1-pro-preview": {
         "label": "增强版V2",
         "description": "更强调复杂版面与细节理解，适合高难度文档。",

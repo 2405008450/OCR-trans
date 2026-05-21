@@ -129,6 +129,7 @@
         .stat-pill.s-running .num { color: var(--cyan); }
         .stat-pill.s-done .num { color: var(--green); }
         .stat-pill.s-failed .num { color: var(--rose); }
+        .stat-pill.s-feedback .num { color: #fcd34d; }
         .stat-pill.s-cancelled .num { color: #94a3b8; }
 
         .toolbar {
@@ -224,6 +225,8 @@
         .badge-done { background: rgba(34, 197, 94, 0.15); color: #86efac; }
         .badge-failed { background: rgba(251, 113, 133, 0.15); color: #fda4af; }
         .badge-cancelled { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+        .badge-feedback { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+        .badge-feedback-muted { background: rgba(148, 163, 184, 0.12); color: #94a3b8; }
 
         .mini-progress {
             width: 80px;
@@ -260,6 +263,29 @@
             color: var(--text);
             cursor: pointer;
             font-size: 12px;
+        }
+
+        .action-cell {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .btn-feedback-table {
+            padding: 5px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(245, 158, 11, 0.32);
+            background: rgba(245, 158, 11, 0.1);
+            color: #fcd34d;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .btn-feedback-table.is-marked {
+            border-color: rgba(251, 113, 133, 0.42);
+            background: rgba(251, 113, 133, 0.13);
+            color: #fda4af;
         }
 
         .pagination {
@@ -483,6 +509,76 @@
             word-break: break-all;
         }
 
+        .feedback-panel {
+            padding: 14px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .feedback-panel.is-marked {
+            background: rgba(245, 158, 11, 0.09);
+            border-color: rgba(245, 158, 11, 0.22);
+        }
+
+        .feedback-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .feedback-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn-feedback,
+        .btn-feedback-secondary {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .btn-feedback {
+            border: 1px solid rgba(245, 158, 11, 0.38);
+            background: rgba(245, 158, 11, 0.13);
+            color: #fcd34d;
+        }
+
+        .btn-feedback-secondary {
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            background: rgba(148, 163, 184, 0.1);
+            color: #cbd5e1;
+        }
+
+        .feedback-meta {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        .feedback-note {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 12px;
+            color: #f8fafc;
+            line-height: 1.65;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: rgba(6, 17, 29, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
         .btn-cancel {
             display: inline-flex;
             align-items: center;
@@ -505,6 +601,103 @@
             color: #fda4af;
             cursor: pointer;
             font-size: 12px;
+        }
+
+        .feedback-modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1200;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            background: rgba(3, 12, 24, 0.66);
+        }
+
+        .feedback-modal-overlay.open {
+            display: flex;
+        }
+
+        .feedback-modal {
+            width: min(520px, 100%);
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, #10243a 0%, #081827 100%);
+            box-shadow: var(--shadow);
+            padding: 22px;
+        }
+
+        .feedback-modal-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+
+        .feedback-modal h2 {
+            font-size: 20px;
+            margin-bottom: 6px;
+        }
+
+        .feedback-modal p {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .feedback-close {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            cursor: pointer;
+            display: grid;
+            place-items: center;
+        }
+
+        .feedback-field {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
+        .feedback-field label {
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .feedback-field select,
+        .feedback-field textarea {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            outline: none;
+            font-size: 14px;
+        }
+
+        .feedback-field select {
+            min-height: 42px;
+            padding: 0 12px;
+        }
+
+        .feedback-field textarea {
+            min-height: 128px;
+            resize: vertical;
+            padding: 12px;
+            line-height: 1.6;
+        }
+
+        .feedback-modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
         @media(max-width: 768px) {
@@ -555,6 +748,7 @@
             <div class="stat-pill s-running" data-filter="running"><span class="num" id="statRunning">-</span><span class="label">处理中</span></div>
             <div class="stat-pill s-done" data-filter="done"><span class="num" id="statDone">-</span><span class="label">已完成</span></div>
             <div class="stat-pill s-failed" data-filter="failed"><span class="num" id="statFailed">-</span><span class="label">失败</span></div>
+            <div class="stat-pill s-feedback" data-feedback="true"><span class="num" id="statFeedback">-</span><span class="label">已标记异常</span></div>
             <div class="stat-pill s-cancelled" data-filter="cancelled"><span class="num" id="statCancelled">-</span><span class="label">已取消</span></div>
         </div>
 
@@ -582,6 +776,7 @@
                         <th>任务类型</th>
                         <th>文件名</th>
                         <th>状态</th>
+                        <th>异常标记</th>
                         <th>进度</th>
                         <th>提交时间</th>
                         <th>操作</th>
@@ -602,6 +797,37 @@
     <div class="drawer" id="drawer">
         <button class="drawer-close" id="drawerClose"><i class="fas fa-times"></i></button>
         <div id="drawerContent"></div>
+    </div>
+
+    <div class="feedback-modal-overlay" id="feedbackModal">
+        <div class="feedback-modal">
+            <div class="feedback-modal-head">
+                <div>
+                    <h2>标记任务异常</h2>
+                    <p>这条反馈会保存在任务记录里，方便后续开发人员定位和优化。</p>
+                </div>
+                <button class="feedback-close" id="feedbackClose" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="feedback-field">
+                <label for="feedbackCategory">异常类型</label>
+                <select id="feedbackCategory">
+                    <option value="processing_exception">处理结果异常</option>
+                    <option value="format_issue">格式或版式异常</option>
+                    <option value="accuracy_issue">识别或翻译准确性异常</option>
+                    <option value="download_issue">下载或文件异常</option>
+                    <option value="performance_issue">处理过慢或卡住</option>
+                    <option value="other">其他问题</option>
+                </select>
+            </div>
+            <div class="feedback-field">
+                <label for="feedbackNote">情况说明</label>
+                <textarea id="feedbackNote" maxlength="2000" placeholder="请简要描述你看到的问题，例如哪一页、哪一段、输出文件哪里不对。"></textarea>
+            </div>
+            <div class="feedback-modal-actions">
+                <button class="btn-feedback-secondary" id="feedbackCancel" type="button">取消</button>
+                <button class="btn-feedback" id="feedbackSubmit" type="button"><i class="fas fa-flag"></i> 保存标记</button>
+            </div>
+        </div>
     </div>
 
     <script src="/static/dashboard.js"></script>

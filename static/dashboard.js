@@ -7,9 +7,12 @@ let currentPageSize = 20;
 let currentStatusFilter = '';
 let currentTypeFilter = '';
 let currentKeyword = '';
+let currentFeedbackFilter = '';
 let listTimer = null;
 let detailTimer = null;
 let openTaskId = null;
+let feedbackTaskId = null;
+let feedbackSubmitting = false;
 const SENSITIVE_LOG_PATTERNS = [
   /\bopenrouter\b/i,
   /\bgoogle\/gemini-[\w.-]+\b/i,
@@ -28,6 +31,16 @@ const STATUS_BADGE = {
   done: { cls: 'badge-done', icon: 'fa-check', text: '已完成' },
   failed: { cls: 'badge-failed', icon: 'fa-xmark', text: '失败' },
   cancelled: { cls: 'badge-cancelled', icon: 'fa-ban', text: '已取消' },
+};
+
+const FEEDBACK_CATEGORY_TEXT = {
+  processing_exception: '处理结果异常',
+  format_issue: '格式或版式异常',
+  accuracy_issue: '识别或翻译准确性异常',
+  download_issue: '下载或文件异常',
+  performance_issue: '处理过慢或卡住',
+  exception: '处理结果异常',
+  other: '其他问题',
 };
 
 function init() {
@@ -52,7 +65,8 @@ function init() {
     pill.addEventListener('click', () => {
       document.querySelectorAll('.stat-pill').forEach((item) => item.classList.remove('active'));
       pill.classList.add('active');
-      currentStatusFilter = pill.dataset.filter;
+      currentStatusFilter = pill.dataset.filter || '';
+      currentFeedbackFilter = pill.dataset.feedback || '';
       currentPage = 1;
       loadList();
     });
@@ -60,6 +74,12 @@ function init() {
 
   document.getElementById('drawerOverlay').addEventListener('click', closeDrawer);
   document.getElementById('drawerClose').addEventListener('click', closeDrawer);
+  document.getElementById('feedbackClose').addEventListener('click', closeFeedbackModal);
+  document.getElementById('feedbackCancel').addEventListener('click', closeFeedbackModal);
+  document.getElementById('feedbackModal').addEventListener('click', (event) => {
+    if (event.target.id === 'feedbackModal') closeFeedbackModal();
+  });
+  document.getElementById('feedbackSubmit').addEventListener('click', submitFeedbackMark);
 
   loadAll();
   startListPolling();
@@ -91,6 +111,7 @@ async function loadStats(silent) {
     document.getElementById('statRunning').textContent = data.running ?? 0;
     document.getElementById('statDone').textContent = data.done ?? 0;
     document.getElementById('statFailed').textContent = data.failed ?? 0;
+    document.getElementById('statFeedback').textContent = data.feedback_marked ?? 0;
     document.getElementById('statCancelled').textContent = data.cancelled ?? 0;
   } catch (error) {
     if (!silent) console.error('loadStats', error);
@@ -103,6 +124,7 @@ async function loadList(silent) {
     if (currentStatusFilter) params.set('status', currentStatusFilter);
     if (currentTypeFilter) params.set('task_type', currentTypeFilter);
     if (currentKeyword) params.set('keyword', currentKeyword);
+    if (currentFeedbackFilter) params.set('feedback_marked', currentFeedbackFilter);
 
     const response = await fetch(`/task/list?${params.toString()}`);
     if (!response.ok) return;
@@ -130,18 +152,26 @@ function renderTable(items) {
     const createdAt = task.created_at ? formatTime(task.created_at) : '-';
     const fileName = escHtml(task.filename || '-');
     const shortName = fileName.length > 40 ? `${fileName.slice(0, 37)}...` : fileName;
-    return `<tr data-id="${task.task_id}" onclick="openDetail('${task.task_id}')">
+    const feedback = normalizeFeedback(task.feedback);
+    const taskId = escJsString(task.task_id || '');
+    const feedbackLabel = feedback.marked ? feedbackCategoryText(feedback.category) : '未标记';
+    const feedbackCell = feedback.marked
+      ? `<span class="badge badge-feedback" title="${escAttr(feedback.note || feedbackLabel)}"><i class="fas fa-flag"></i> 已标记</span>`
+      : `<span class="badge badge-feedback-muted"><i class="far fa-flag"></i> 未标记</span>`;
+    return `<tr data-id="${escAttr(task.task_id || '')}" onclick="openDetail('${taskId}')">
       <td>${escHtml(task.display_no || '-')}</td>
       <td>${escHtml(task.task_label || task.task_type)}</td>
       <td class="cell-filename" title="${fileName}">${shortName}</td>
       <td><span class="badge ${badge.cls}"><i class="fas ${badge.icon}"></i> ${badge.text}</span></td>
+      <td>${feedbackCell}</td>
       <td><div class="mini-progress"><div class="mini-progress-fill" style="width:${progress}%"></div></div> <span style="font-size:12px;color:var(--muted)">${progress}%</span></td>
       <td class="cell-time">${createdAt}</td>
-      <td>
-        <button class="btn-detail" onclick="event.stopPropagation();openDetail('${task.task_id}')"><i class="fas fa-eye"></i> 详情</button>
-        ${(task.status === 'queued' || task.status === 'running') && !task.cancel_requested ? `<button class="btn-cancel-table" onclick="event.stopPropagation();cancelTask('${task.task_id}')" title="取消任务"><i class="fas fa-ban"></i></button>` : ''}
+      <td><div class="action-cell">
+        <button class="btn-detail" onclick="event.stopPropagation();openDetail('${taskId}')"><i class="fas fa-eye"></i> 详情</button>
+        <button class="btn-feedback-table ${feedback.marked ? 'is-marked' : ''}" onclick="event.stopPropagation();openFeedbackModal('${taskId}')" title="${feedback.marked ? '更新异常标记' : '标记异常'}"><i class="fas fa-flag"></i></button>
+        ${(task.status === 'queued' || task.status === 'running') && !task.cancel_requested ? `<button class="btn-cancel-table" onclick="event.stopPropagation();cancelTask('${taskId}')" title="取消任务"><i class="fas fa-ban"></i></button>` : ''}
         ${task.cancel_requested && task.status === 'running' ? `<span style="font-size:11px;color:#94a3b8;margin-left:4px">取消中...</span>` : ''}
-      </td>
+      </div></td>
     </tr>`;
   }).join('');
 }
@@ -232,6 +262,7 @@ function renderDetail(task) {
   const inputItems = normalizeInputFiles(task.input_files);
   const outputItems = Array.isArray(task.output_files) ? task.output_files : [];
   const modelInfo = task.model_info && typeof task.model_info === 'object' ? task.model_info : null;
+  const feedback = normalizeFeedback(task.feedback);
   const modelItemHtml = modelInfo
     ? `<div class="detail-item"><div class="dl">\u4f7f\u7528\u6a21\u578b</div><div class="dv">${escHtml(modelInfo.label || '-')}</div></div>`
     : '';
@@ -250,6 +281,7 @@ function renderDetail(task) {
   const logHtml = task.stream_log ? `<div class="detail-section"><h3><i class="fas fa-terminal"></i> 运行日志</h3><pre class="detail-log">${escHtml(task.stream_log)}</pre></div>` : '';
 
   const renderedLogHtml = buildSanitizedLogHtml(task.stream_log || '');
+  const feedbackHtml = buildFeedbackDetailHtml(task, feedback);
 
   document.getElementById('drawerContent').innerHTML = `
     <h2>${escHtml(task.display_no || '-')}</h2>
@@ -265,6 +297,8 @@ function renderDetail(task) {
       ${(task.status === 'queued' || task.status === 'running') && !task.cancel_requested ? `<button class="btn-cancel" style="margin-top:10px" onclick="cancelTask('${task.task_id}')"><i class="fas fa-ban"></i> 取消任务</button>` : ''}
       ${task.cancel_requested && task.status === 'running' ? `<div style="margin-top:10px;font-size:13px;color:#94a3b8"><i class="fas fa-spinner fa-spin"></i> 正在取消，等待当前步骤结束...</div>` : ''}
     </div>
+
+    ${feedbackHtml}
 
     <div class="detail-section">
       <h3><i class="fas fa-info-circle"></i> 基本信息</h3>
@@ -284,6 +318,139 @@ function renderDetail(task) {
     ${errorHtml}
     ${renderedLogHtml}
   `;
+}
+
+function normalizeFeedback(feedback) {
+  if (!feedback || typeof feedback !== 'object') {
+    return { marked: false, category: '', note: '', marked_at: null };
+  }
+  return {
+    marked: Boolean(feedback.marked),
+    category: feedback.category || '',
+    note: feedback.note || '',
+    marked_at: feedback.marked_at || null,
+  };
+}
+
+function feedbackCategoryText(category) {
+  return FEEDBACK_CATEGORY_TEXT[category] || category || '处理结果异常';
+}
+
+function buildFeedbackDetailHtml(task, feedback) {
+  const taskId = escJsString(task.task_id || '');
+  const markedAt = feedback.marked_at ? formatTime(feedback.marked_at) : '-';
+  const stateBadge = feedback.marked
+    ? `<span class="badge badge-feedback"><i class="fas fa-flag"></i> 已标记异常</span>`
+    : `<span class="badge badge-feedback-muted"><i class="far fa-flag"></i> 未标记异常</span>`;
+  const markedInfo = feedback.marked
+    ? `<div class="feedback-meta">异常类型：${escHtml(feedbackCategoryText(feedback.category))}<br>标记时间：${escHtml(markedAt)}</div>
+       ${feedback.note ? `<div class="feedback-note">${escHtml(feedback.note)}</div>` : ''}`
+    : `<div class="feedback-meta">用户发现处理结果、下载文件或运行过程有异常时，可以在这里给开发人员留下反馈。</div>`;
+
+  return `<div class="detail-section">
+    <h3><i class="fas fa-flag"></i> 异常标记</h3>
+    <div class="feedback-panel ${feedback.marked ? 'is-marked' : ''}">
+      <div class="feedback-head">
+        ${stateBadge}
+        <div class="feedback-actions">
+          <button class="btn-feedback" onclick="openFeedbackModal('${taskId}')"><i class="fas fa-flag"></i> ${feedback.marked ? '更新标记' : '标记异常'}</button>
+          ${feedback.marked ? `<button class="btn-feedback-secondary" onclick="clearFeedbackMark('${taskId}')"><i class="fas fa-eraser"></i> 取消标记</button>` : ''}
+        </div>
+      </div>
+      ${markedInfo}
+    </div>
+  </div>`;
+}
+
+async function openFeedbackModal(taskId) {
+  feedbackTaskId = taskId;
+  feedbackSubmitting = false;
+  document.getElementById('feedbackCategory').value = 'processing_exception';
+  document.getElementById('feedbackNote').value = '';
+  document.getElementById('feedbackSubmit').disabled = false;
+  document.getElementById('feedbackModal').classList.add('open');
+
+  try {
+    const response = await fetch(`/task/${encodeURIComponent(taskId)}/detail`);
+    if (response.ok) {
+      const task = await response.json();
+      const feedback = normalizeFeedback(task.feedback);
+      if (feedback.category && FEEDBACK_CATEGORY_TEXT[feedback.category]) {
+        document.getElementById('feedbackCategory').value = feedback.category;
+      }
+      document.getElementById('feedbackNote').value = feedback.note || '';
+    }
+  } catch (error) {
+    console.error('openFeedbackModal', error);
+  }
+  document.getElementById('feedbackNote').focus();
+}
+
+function closeFeedbackModal() {
+  if (feedbackSubmitting) return;
+  feedbackTaskId = null;
+  document.getElementById('feedbackModal').classList.remove('open');
+}
+
+async function submitFeedbackMark() {
+  if (!feedbackTaskId || feedbackSubmitting) return;
+
+  const submitButton = document.getElementById('feedbackSubmit');
+  const category = document.getElementById('feedbackCategory').value;
+  const note = document.getElementById('feedbackNote').value.trim();
+  feedbackSubmitting = true;
+  submitButton.disabled = true;
+
+  try {
+    const response = await fetch(`/task/${encodeURIComponent(feedbackTaskId)}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marked: true, category, note }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      alert(data.detail || '保存标记失败');
+      return;
+    }
+    const savedTaskId = feedbackTaskId;
+    feedbackTaskId = null;
+    document.getElementById('feedbackModal').classList.remove('open');
+    await loadAll();
+    if (openTaskId === savedTaskId) {
+      await loadDetail(savedTaskId);
+    }
+  } catch (error) {
+    console.error('submitFeedbackMark', error);
+    alert('保存标记失败，请重试');
+  } finally {
+    feedbackSubmitting = false;
+    submitButton.disabled = false;
+  }
+}
+
+async function clearFeedbackMark(taskId) {
+  if (!confirm('确定要取消该任务的异常标记吗？')) {
+    return;
+  }
+  try {
+    const response = await fetch(`/task/${encodeURIComponent(taskId)}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marked: false }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      alert(data.detail || '取消标记失败');
+      return;
+    }
+    await loadAll();
+    if (openTaskId === taskId) {
+      await loadDetail(taskId);
+    }
+  } catch (error) {
+    console.error('clearFeedbackMark', error);
+    alert('取消标记失败，请重试');
+  }
 }
 
 function normalizeInputFiles(inputFiles) {
@@ -370,7 +537,20 @@ function escHtml(value) {
 }
 
 function escAttr(value) {
-  return String(value || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escJsString(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r?\n/g, ' ');
 }
 
 function formatTime(iso) {

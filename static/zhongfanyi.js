@@ -37,6 +37,8 @@ const ETA_TIME_ZONE = 'Asia/Shanghai';
 const MODEL_DISPLAY_NAMES = {
     'gemini-3-flash-preview': '快速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
+    'gemini-3.5-flash': '新模型',
+    'google/gemini-3.5-flash': '新模型',
     'gemini-3.1-pro-preview': '增强版V2',
     'google/gemini-3.1-pro-preview': '增强版V2',
 };
@@ -98,6 +100,10 @@ async function loadConfig() {
             'google/gemini-3-flash-preview': {
                 label: '快速版V2',
                 description: '速度更快，适合常规中翻专检场景。',
+            },
+            'google/gemini-3.5-flash': {
+                label: '新模型',
+                description: 'OpenRouter 新模型，适合常规中翻专检场景。',
             },
             'google/gemini-3.1-pro-preview': {
                 label: '增强版V2',

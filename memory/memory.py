@@ -55,6 +55,12 @@ OPENROUTER_MODELS = {
         "max_output": 65536,
         "provider": "openrouter"
     },
+    "Google: google/gemini-3.5-flash": {
+        "id": "google/gemini-3.5-flash",
+        "description": "新模型，适合通过 OpenRouter 处理常规对齐任务",
+        "max_output": 65536,
+        "provider": "openrouter"
+    },
     "Google Gemini 2.5 Pro": {
         "id": "google/gemini-2.5-pro",
         "description": "PPT推荐-增强，速度稍慢，100万上下文，65K输出",

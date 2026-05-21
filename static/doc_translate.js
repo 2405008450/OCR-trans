@@ -101,6 +101,7 @@ function formatEtaDate(date) {
 
 const MODEL_DISPLAY_NAMES = {
     'google/gemini-3-flash-preview': '快速版V2',
+    'google/gemini-3.5-flash': '新模型',
     'google/gemini-3.1-pro-preview': '增强版V2',
 };
 
@@ -166,6 +167,7 @@ async function loadConfig() {
         console.error(error);
         modelConfig = {
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规 OCR。' },
+            'google/gemini-3.5-flash': { label: '新模型', description: 'OpenRouter 新模型，适合常规 OCR。' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '复杂版面表现更稳。' },
         };
         routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };

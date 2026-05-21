@@ -63,6 +63,12 @@ class BatchDownloadBody(BaseModel):
     archive_name: Optional[str] = None
 
 
+class TaskFeedbackBody(BaseModel):
+    marked: bool = True
+    category: Optional[str] = None
+    note: Optional[str] = None
+
+
 def _safe_resolve(file_path: str) -> Path:
     path = Path(file_path)
     if not path.is_absolute():
@@ -85,6 +91,12 @@ def _task_to_dict(task) -> dict:
         "message": task.message or "",
         "error": task.error_message,
         "cancel_requested": bool(task.cancel_requested),
+        "feedback": {
+            "marked": bool(task.feedback_marked),
+            "category": task.feedback_category,
+            "note": task.feedback_note or "",
+            "marked_at": task.feedback_marked_at.isoformat() if task.feedback_marked_at else None,
+        },
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
@@ -146,7 +158,6 @@ def _build_archive_name(task, display_name: str, used_names: set[str]) -> str:
     return candidate
 
 
-
 def _merge_queue_timestamps(payload: Optional[dict], queue_task: Optional[dict]) -> Optional[dict]:
     if not payload:
         return payload
@@ -156,10 +167,12 @@ def _merge_queue_timestamps(payload: Optional[dict], queue_task: Optional[dict])
             if key in queue_task and merged.get(key) is None:
                 merged[key] = queue_task.get(key)
     return merged
+
+
 @router.get("/list")
-async def list_tasks(status: Optional[str] = Query(None), task_type: Optional[str] = Query(None), keyword: Optional[str] = Query(None), page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
+async def list_tasks(status: Optional[str] = Query(None), task_type: Optional[str] = Query(None), keyword: Optional[str] = Query(None), feedback_marked: Optional[bool] = Query(None), page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)):
     with SessionLocal() as db:
-        tasks, total = task_repo.list_tasks(db, status=status, task_type=task_type, keyword=keyword, page=page, page_size=page_size)
+        tasks, total = task_repo.list_tasks(db, status=status, task_type=task_type, keyword=keyword, feedback_marked=feedback_marked, page=page, page_size=page_size)
         return {"items": [_task_to_dict(task) for task in tasks], "total": total, "page": page, "page_size": page_size}
 
 
@@ -195,6 +208,21 @@ async def cancel_task(task_id: str):
             return {"status": task.status, "message": f"Task already in terminal state: {task.status}"}
         task_repo.cancel_task(db, task_id)
     return {"status": "ok", "message": "Cancel request submitted"}
+
+
+@router.post("/{task_id}/feedback")
+async def update_task_feedback(task_id: str, body: TaskFeedbackBody):
+    with SessionLocal() as db:
+        task = task_repo.update_task_feedback(
+            db,
+            task_id,
+            marked=body.marked,
+            category=body.category,
+            note=body.note,
+        )
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return {"status": "ok", "task": _task_to_dict(task)}
 
 
 @router.get("/{task_id}/download")

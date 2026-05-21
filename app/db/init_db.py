@@ -36,6 +36,10 @@ def _ensure_task_table_columns():
         'error_message': 'ALTER TABLE task ADD COLUMN error_message TEXT',
         'retry_count': 'ALTER TABLE task ADD COLUMN retry_count INTEGER DEFAULT 0 NOT NULL',
         'cancel_requested': 'ALTER TABLE task ADD COLUMN cancel_requested BOOLEAN DEFAULT 0 NOT NULL',
+        'feedback_marked': 'ALTER TABLE task ADD COLUMN feedback_marked BOOLEAN DEFAULT 0 NOT NULL',
+        'feedback_category': 'ALTER TABLE task ADD COLUMN feedback_category VARCHAR',
+        'feedback_note': 'ALTER TABLE task ADD COLUMN feedback_note TEXT',
+        'feedback_marked_at': 'ALTER TABLE task ADD COLUMN feedback_marked_at DATETIME',
         'started_at': 'ALTER TABLE task ADD COLUMN started_at DATETIME',
         'finished_at': 'ALTER TABLE task ADD COLUMN finished_at DATETIME',
         'updated_at': 'ALTER TABLE task ADD COLUMN updated_at DATETIME',
@@ -51,6 +55,7 @@ def _ensure_task_table_columns():
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_task_type ON task (task_type)'))
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_created_at ON task (created_at)'))
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_updated_at ON task (updated_at)'))
+        connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_feedback_marked ON task (feedback_marked)'))
         connection.execute(text('UPDATE task SET updated_at = created_at WHERE updated_at IS NULL AND created_at IS NOT NULL'))
         for task_type, label in LABEL_MAP.items():
             if task_type == 'business_licence':
