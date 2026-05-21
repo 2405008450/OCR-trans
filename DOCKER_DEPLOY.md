@@ -168,25 +168,16 @@ docker logs fastapi-llm --tail 100
 
 ## 七、GPU vs CPU 说明
 
-| 情况 | Dockerfile 基础镜像 | 性能 |
-|------|-------------------|------|
-| 服务器有 NVIDIA GPU | `paddlepaddle/paddle:3.0.0-gpu-cuda11.8-cudnn8.6-trt8.5` | 快 |
-| 服务器无 GPU（纯CPU） | `paddlepaddle/paddle:3.0.0` | 慢但能用 |
-
-如果服务器是 **CPU 型**，编辑 `Dockerfile` 第4行改为：
-```dockerfile
-FROM paddlepaddle/paddle:3.0.0
-```
-同时 `requirements_docker.txt` 中不需要 nvidia 相关包。
+当前 Dockerfile 使用 `python:3.11-slim`，已移除历史 PaddleOCR / PaddlePaddle 镜像依赖。默认部署按 CPU 服务形态运行，视觉 OCR 能力由现有 LLM/视觉模型接口提供，不再需要切换 Paddle 基础镜像。
 
 ---
 
 ## 八、镜像大小优化说明
 
-完整镜像约 **6-8 GB**（含 CUDA、PaddlePaddle、torch 等），这是正常的。
+移除 PaddlePaddle、PaddleOCR 和旧身份证 OCR 图像回填链路后，镜像体积会明显小于历史版本。
 若要减小体积，可以：
-1. 使用 CPU 版基础镜像（约 3-4 GB）
-2. 去掉 `simple-lama-inpainting`（会去掉 torch 依赖）
+1. 继续使用 `python:3.11-slim`
+2. 定期清理历史输出文件和临时上传文件
 
 ---
 
@@ -195,9 +186,9 @@ FROM paddlepaddle/paddle:3.0.0
 如果你发现**同时运行两个不同项目/任务时，系统直接卡死，Docker 日志停止跳动**，这通常不是单纯的 FastAPI 因为并发阻塞导致的，更核心的原因在于 **服务器资源耗尽（尤其是内存 OOM）**。
 
 ### 1. 为什么会卡死？
-当前项目使用了深度学习模型（如 `PaddleOCR`、`llama`、`torch`）。这些 AI 模型不仅吃 CPU 计算力，更占用大量**内存 (RAM)**。
+当前项目仍包含视觉模型、文档转换和表格/图片处理流程。这些任务不仅吃 CPU 计算力，更占用大量**内存 (RAM)**。
 在单进程模式下，当有请求进来，主进程满负荷运行 AI 推理，此时如果有新的请求进来，FastAPI 事件循环会被阻塞，表现为"卡住排队等待"。
-一旦开启多进程，每个进程都会独立在内存中加载一份完整的 AI 模型体系（Paddle、Torch），如果你的服务器是 2核心且内存较小（例如 4核 8G 或者 2核 4G），内存会被迅速撑爆！此时 Linux 系统的 OOM (Out of Memory) Killer 会直接杀死你的进程，或者疯狂触发 Swap 磁盘交换，导致整个云服务器陷入硬盘 I/O 死锁，表现也就是 **完全卡死不动**。
+一旦开启多进程，每个进程都会独立加载依赖和处理中间文件，如果你的服务器是 2核心且内存较小（例如 4核 8G 或者 2核 4G），内存会被迅速撑爆！此时 Linux 系统的 OOM (Out of Memory) Killer 会直接杀死你的进程，或者疯狂触发 Swap 磁盘交换，导致整个云服务器陷入硬盘 I/O 死锁，表现也就是 **完全卡死不动**。
 
 对于 2核心 的服务器，AI 推理的算力已经属于极度紧缺状态，**强烈建议不建议盲目增加部署进程数**。
 
@@ -221,5 +212,5 @@ CMD ["gunicorn", "app.main:app", "-w", "2", "-k", "uvicorn.workers.UvicornWorker
 ### 3. 给 2核服务器（或低配服务器）的终极建议
 由于你是 2核 服务器，**强开多进程必然导致物理崩溃**。建议采取以下方案应对多项目卡死：
 1. **继续使用单进程** `uvicorn`，但是接受排队。可以通过增加前端的“排队提示”来让用户知道系统正在处理上一个任务。
-2. **异步包裹同步计算**: 确保代码中执行 `PaddleOCR` 或 `Llama` 推理的方法使用 `asyncio.to_thread` 或 `fastapi.concurrency.run_in_threadpool` 放到后台线程池执行，这样不仅主线程可以继续受理其他请求（不会卡死），而且也不会重复消耗过多内存。
+2. **异步包裹同步计算**: 确保耗时的文档转换、OCR 或 LLM 调用使用后台线程池/任务队列执行，这样主线程可以继续受理其他请求，也不会重复消耗过多内存。
 3. **扩大 Swap 分区**: 在云服务器上配置 8GB 的虚拟内存（Swap），虽然推理会变慢，但可以避免内存不够导致的直接假死。

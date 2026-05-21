@@ -7,7 +7,6 @@ from app.model import entity
 
 
 LABEL_MAP = {
-    'ocr': 'OCR',
     'number_check': 'Number Check',
     'zhongfanyi': 'Zhongfanyi',
     'alignment': 'Alignment',
@@ -26,7 +25,7 @@ def _ensure_task_table_columns():
     missing_columns = {
         'task_id': 'ALTER TABLE task ADD COLUMN task_id VARCHAR',
         'display_no': 'ALTER TABLE task ADD COLUMN display_no VARCHAR',
-        'task_type': "ALTER TABLE task ADD COLUMN task_type VARCHAR DEFAULT 'ocr' NOT NULL",
+        'task_type': "ALTER TABLE task ADD COLUMN task_type VARCHAR DEFAULT 'doc_translate' NOT NULL",
         'progress': 'ALTER TABLE task ADD COLUMN progress INTEGER DEFAULT 0 NOT NULL',
         'message': 'ALTER TABLE task ADD COLUMN message VARCHAR',
         'params_json': 'ALTER TABLE task ADD COLUMN params_json TEXT',

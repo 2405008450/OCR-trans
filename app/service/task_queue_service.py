@@ -21,7 +21,6 @@ from app.service.business_licence_service import (
 )
 from app.service.doc_translate_service import execute_doc_translate_task
 from app.service.drivers_license_service import execute_drivers_license_task
-from app.service.llm_service import execute_ocr_task_from_path
 from app.service.number_check_service import _get_task_progress as get_number_check_progress, run_number_check_task
 from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_GEMINI_ROUTE,
@@ -37,7 +36,6 @@ class TaskCancelledError(Exception):
 class TaskQueueService:
     MAX_AUTO_REQUEUE_ATTEMPTS = 1
     DEFAULT_TASK_TYPE_LIMITS: Dict[str, int] = {
-        'ocr': 1,
         'pdf2docx': 1,
         'doc_translate': 1,
         'alignment': 1,
@@ -123,18 +121,6 @@ class TaskQueueService:
             if self._task_executor is not None:
                 self._task_executor.shutdown(wait=False, cancel_futures=True)
                 self._task_executor = None
-
-    async def submit_ocr_task(self, **kwargs) -> str:
-        file: UploadFile = kwargs.pop('file')
-        reserved_task = self._create_db_task('ocr', file.filename or 'input.bin', kwargs, {})
-        try:
-            input_path, original_filename = await self._save_single_upload(file, 'ocr', reserved_task.display_no, reserved_task.task_id)
-            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
-            self._notify_dispatcher()
-            return reserved_task.task_id
-        except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
-            raise
 
     async def submit_number_check_task(
         self,
@@ -408,7 +394,7 @@ class TaskQueueService:
         return None
 
     def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
-        if task_type in {'ocr', 'doc_translate', 'business_licence', 'pdf2docx'}:
+        if task_type in {'doc_translate', 'business_licence', 'pdf2docx'}:
             return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
 
         if task_type == 'drivers_license':
@@ -598,10 +584,7 @@ class TaskQueueService:
 
         try:
             self._append_task_log(task_id, f'[start] {task_type}')
-            if task_type == 'ocr':
-                result = await execute_ocr_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or filename, progress_callback=update, executor=self._task_executor, **params)
-                output_path = result.get('results', [{}])[0].get('translated_image') if result.get('results') else None
-            elif task_type == 'number_check':
+            if task_type == 'number_check':
                 result = await self._execute_number_check(task_id, display_no, input_files, params, update)
                 output_path = result.get('corrected_docx')
             elif task_type == 'zhongfanyi':
@@ -797,14 +780,7 @@ class TaskQueueService:
                     }
                 )
 
-        if task_type == 'ocr':
-            for item in result.get('results', []):
-                if isinstance(item, dict):
-                    if item.get('translated_image'):
-                        files.append({'name': friendly(item['translated_image'], original_filename, 'translated'), 'path': item['translated_image'], 'type': 'output'})
-                    if item.get('visualization_image'):
-                        files.append({'name': friendly(item['visualization_image'], original_filename, 'visualization'), 'path': item['visualization_image'], 'type': 'output'})
-        elif task_type == 'number_check':
+        if task_type == 'number_check':
             add_result('corrected_docx')
             reports = result.get('reports', {})
             if isinstance(reports, dict):
@@ -866,4 +842,3 @@ class TaskQueueService:
 
 
 task_queue_service = TaskQueueService()
-ocr_task_queue = task_queue_service

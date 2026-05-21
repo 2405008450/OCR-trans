@@ -5,10 +5,9 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PADDLEOCR_HOME=/app/.paddleocr \
     LIBREOFFICE_PATH=/usr/bin/soffice \
     OPENCV_IO_MAX_IMAGE_PIXELS=1099511627776 \
-    PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org download.pytorch.org pypi.tuna.tsinghua.edu.cn www.paddlepaddle.org.cn"
+    PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org pypi.tuna.tsinghua.edu.cn"
 
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -28,14 +27,8 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; \
 
 RUN pip install --upgrade pip && \
     mkdir -p /root/.config/pip && \
-    printf '[global]\ntrusted-host = pypi.org\n    files.pythonhosted.org\n    download.pytorch.org\n    www.paddlepaddle.org.cn\n' \
+    printf '[global]\ntrusted-host = pypi.org\n    files.pythonhosted.org\n' \
     > /root/.config/pip/pip.conf
-
-RUN pip install torch==2.10.0 torchvision==0.25.0 \
-        --index-url https://download.pytorch.org/whl/cpu
-
-RUN pip install paddlepaddle==3.2.2 \
-    -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt \

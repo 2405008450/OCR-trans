@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.controller import task
 from app.core.config import settings
 from app.db.init_db import init_db
-from app.service.task_queue_service import ocr_task_queue
+from app.service.task_queue_service import task_queue_service
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
@@ -38,7 +38,6 @@ GLOBAL_NAV_ITEMS = [
 NAV_ACTIVE_ALIASES = {
     "/certificate-translation": (
         "/certificate-translation",
-        "/ocr",
         "/doc-translate",
         "/drivers-license",
         "/business-licence",
@@ -401,12 +400,12 @@ app.include_router(task.router)
 @app.on_event("startup")
 async def startup_event():
     init_db()
-    await ocr_task_queue.start()
+    await task_queue_service.start()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    await ocr_task_queue.stop()
+    await task_queue_service.stop()
 
 
 def _read_page(filename: str) -> str:
@@ -518,11 +517,6 @@ async def root():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page():
     return _render_page("dashboard.html", "/dashboard")
-
-
-@app.get("/ocr", response_class=HTMLResponse)
-async def ocr_page():
-    return _render_page("index.html", "/ocr")
 
 
 @app.get("/certificate-translation", response_class=HTMLResponse)

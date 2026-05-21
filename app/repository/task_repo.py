@@ -8,7 +8,6 @@ from app.core.file_naming import build_display_no
 from app.model.entity import Task
 
 TASK_TYPE_LABELS = {
-    'ocr': 'OCR',
     'number_check': 'Number Check',
     'zhongfanyi': 'Zhongfanyi',
     'alignment': 'Alignment',

@@ -96,7 +96,7 @@ source .venv/bin/activate
 # 升级pip
 pip install --upgrade pip
 
-# 安装依赖（可能需要较长时间，PaddleOCR模型较大）
+# 安装依赖（可能需要较长时间，包含文档、图像和 LLM 调用相关依赖）
 # 如果网络慢，可以使用国内镜像：
 # pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 pip install -r requirements.txt
@@ -391,7 +391,7 @@ curl -X POST "http://your_server_ip:8000/task/run?from_lang=zh&to_lang=en" \
 ### 问题 4: OCR识别失败
 
 **检查：**
-- PaddleOCR 模型是否正确下载
+- 视觉模型 API Key 和路由是否配置正确
 - 内存是否充足
 - 查看日志：`sudo journalctl -u fastapi-ocr -f`
 

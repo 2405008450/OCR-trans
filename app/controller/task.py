@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import tempfile
-import traceback
 import zipfile
 from pathlib import Path
 from typing import List, Optional
@@ -281,40 +280,6 @@ async def batch_download(body: BatchDownloadBody):
         media_type="application/zip",
         background=BackgroundTask(lambda path=archive_path: path.unlink(missing_ok=True)),
     )
-
-
-@router.post("/run")
-async def run_task(file: UploadFile = File(...), from_lang: str = Query("zh"), to_lang: str = Query("en"), enable_correction: bool = Query(False), enable_visualization: bool = Query(True), card_side: str = Query("front")):
-    try:
-        task_id = await task_queue_service.submit_ocr_task(file=file, from_lang=from_lang, to_lang=to_lang, enable_correction=enable_correction, enable_visualization=enable_visualization, card_side=card_side)
-        return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
-    except Exception as exc:
-        tb = traceback.format_exc()
-        raise HTTPException(status_code=500, detail={"error": str(exc), "type": type(exc).__name__, "traceback": tb.split("\n")[-10:] if tb else []})
-
-
-@router.post("/run/batch")
-async def run_task_batch(files: List[UploadFile] = File(...), from_lang: str = Query("zh"), to_lang: str = Query("en"), enable_correction: bool = Query(False), enable_visualization: bool = Query(True), card_side: str = Query("front")):
-    if not files:
-        raise HTTPException(status_code=400, detail="At least one file is required")
-    if len(files) > 50:
-        raise HTTPException(status_code=400, detail="Too many files (max 50)")
-    results = []
-    for file in files:
-        try:
-            task_id = await task_queue_service.submit_ocr_task(file=file, from_lang=from_lang, to_lang=to_lang, enable_correction=enable_correction, enable_visualization=enable_visualization, card_side=card_side)
-            results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
-        except Exception as exc:
-            results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
-    return {"status": "ACCEPTED", "tasks": results, "total": len(results)}
-
-
-@router.get("/run/status/{task_id}")
-async def get_run_task_status(task_id: str):
-    task = task_queue_service.get_task_status(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task
 
 
 @router.post("/number-check")

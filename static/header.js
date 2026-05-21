@@ -22,7 +22,7 @@
         { href: '/zhongfanyi', icon: 'fa-spell-check', text: '中翻专检' },
     ];
     const navActiveAliases = {
-        '/certificate-translation': ['/certificate-translation', '/ocr', '/doc-translate', '/drivers-license', '/business-licence'],
+        '/certificate-translation': ['/certificate-translation', '/doc-translate', '/drivers-license', '/business-licence'],
     };
 
     const shell = window.AppShell || {};

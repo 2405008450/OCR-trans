@@ -333,7 +333,7 @@
                 <div class="brand-mark"><i class="fas fa-id-card"></i></div>
                 <div class="brand-text">
                     <strong>证件翻译工作台</strong>
-                    <span>身份证、驾驶证、营业执照与通用证件统一入口</span>
+                    <span>驾驶证、营业执照与通用证件统一入口</span>
                 </div>
             </div>
             <nav class="topbar-nav">
@@ -348,14 +348,13 @@
                 <div>
                     <span class="section-badge"><i class="fas fa-sliders"></i> 工作区</span>
                     <h2>统一处理各类证件翻译任务</h2>
-                    <p>这里集中承接身份证、驾驶证、营业执照和通用证件的翻译处理。选择对应标签即可进入具体流程，任务进度、结果输出和后续下载仍统一纳入任务工作台。</p>
+                    <p>这里集中承接驾驶证、营业执照和通用证件的翻译处理。选择对应标签即可进入具体流程，任务进度、结果输出和后续下载仍统一纳入任务工作台。</p>
                 </div>
                 <a class="outline-link" href="/dashboard"><i class="fas fa-clock-rotate-left"></i> 去任务工作台</a>
             </div>
 
             <div class="tabbar" role="tablist" aria-label="证件翻译类型切换">
                 <button class="tab-btn active" type="button" data-target="doc-panel"><i class="fas fa-file-signature"></i> 通用证件</button>
-                <button class="tab-btn" type="button" data-target="ocr-panel"><i class="fas fa-address-card"></i> 身份证</button>
                 <button class="tab-btn" type="button" data-target="drivers-panel"><i class="fas fa-id-card"></i> 驾驶证</button>
                 <button class="tab-btn" type="button" data-target="business-panel"><i class="fas fa-building"></i> 营业执照</button>
             </div>
@@ -374,24 +373,6 @@
                     </div>
                     <div class="iframe-shell">
                         <iframe title="通用证件翻译" data-src="/doc-translate?embed=1"></iframe>
-                    </div>
-                </div>
-            </section>
-
-            <section class="panel" id="ocr-panel">
-                <div class="panel-card">
-                    <div class="panel-head">
-                        <div class="panel-copy">
-                            <span class="section-badge"><i class="fas fa-image"></i> 图片证件</span>
-                            <h3>身份证 OCR 翻译</h3>
-                            <p>处理身份证正反面图片，适合需要识别结果图回填和 OCR 可视化核对的场景。</p>
-                        </div>
-                        <div class="panel-actions">
-                            <a href="/ocr" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 新窗口打开</a>
-                        </div>
-                    </div>
-                    <div class="iframe-shell">
-                        <iframe title="身份证 OCR 翻译" data-src="/ocr?embed=1"></iframe>
                     </div>
                 </div>
             </section>
