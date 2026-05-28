@@ -2,6 +2,7 @@
     const APP_BUILD_ID = document.querySelector('meta[name="app-build-id"]')?.content || 'dev';
     const BUILD_STORAGE_KEY = 'app_build_id';
     const UPLOAD_TIMEOUT_MS = 240000;
+    const PAGE_TRANSITION_DELAY_MS = 180;
     const REFRESH_HINT = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。';
     const REFRESH_HINT_HTML = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。';
     const RELEASE_NOTES = [
@@ -24,16 +25,19 @@
     const navActiveAliases = {
         '/certificate-translation': ['/certificate-translation', '/doc-translate', '/drivers-license', '/business-licence'],
     };
+    let pageTransitionInProgress = false;
 
     const shell = window.AppShell || {};
     shell.buildId = APP_BUILD_ID;
     shell.refreshHint = REFRESH_HINT;
     shell.uploadTimeoutMs = UPLOAD_TIMEOUT_MS;
     shell.showToast = showToast;
+    shell.showPageTransition = () => showPageTransition();
     shell.submitTaskRequest = (input, init = {}, options = {}) => fetchWithUploadTimeout(input, init, options);
     window.AppShell = shell;
 
     patchFetchForUploads();
+    initPageTransitions();
 
     function patchFetchForUploads() {
         if (window.__APP_SHELL_UPLOAD_TIMEOUT_PATCHED__) {
@@ -92,6 +96,278 @@
         return error instanceof Error ? error : new Error(message || '请求失败');
     }
 
+    function initPageTransitions() {
+        const isEmbedded = window.self !== window.top || new URLSearchParams(window.location.search).get('embed') === '1';
+        if (isEmbedded) {
+            document.documentElement.classList.remove('app-page-preparing', 'app-page-leaving');
+            return;
+        }
+
+        injectPageTransitionStyle();
+        injectRuntimeShellOverrides();
+        ensurePageTransitionOverlay();
+        document.documentElement.classList.add('app-transition-enabled');
+
+        window.addEventListener('pageshow', () => {
+            markPageReady();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            showPageTransition();
+        });
+
+        document.addEventListener('click', handlePageLinkClick);
+    }
+
+    function scheduleMarkPageReady() {
+        window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(markPageReady);
+        });
+    }
+
+    function injectPageTransitionStyle() {
+        if (document.getElementById('appTransitionStyle')) {
+            return;
+        }
+
+        const style = document.createElement('style');
+        style.id = 'appTransitionStyle';
+        style.textContent = `
+            html.app-transition-enabled {
+                background: #040812;
+            }
+            html.app-page-preparing body {
+                opacity: 0;
+            }
+            html.app-page-ready body {
+                opacity: 1;
+            }
+            html.app-transition-enabled body > :not(.app-transition-overlay) {
+                transition: opacity 0.18s ease;
+            }
+            html.app-page-leaving body {
+                overflow: hidden;
+            }
+            html.app-page-leaving body > :not(.app-transition-overlay) {
+                opacity: 0.96;
+                pointer-events: none;
+            }
+            .app-transition-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+                opacity: 0;
+                visibility: hidden;
+                pointer-events: none;
+                background:
+                    radial-gradient(circle at 42% 36%, rgba(56, 189, 248, 0.18), transparent 28%),
+                    rgba(3, 12, 24, 0.56);
+                transition: opacity 0.16s ease, visibility 0.16s ease;
+            }
+            .app-transition-overlay.is-visible,
+            html.app-page-leaving .app-transition-overlay {
+                opacity: 1;
+                visibility: visible;
+                pointer-events: auto;
+            }
+            .app-transition-panel {
+                display: grid;
+                grid-template-columns: auto 1fr;
+                align-items: center;
+                gap: 16px;
+                min-width: min(360px, calc(100vw - 48px));
+                padding: 18px 20px;
+                border-radius: 22px;
+                border: 1px solid rgba(125, 211, 252, 0.26);
+                background: linear-gradient(145deg, rgba(9, 22, 38, 0.88), rgba(15, 35, 58, 0.82));
+                color: #f8fafc;
+                box-shadow: 0 30px 80px rgba(2, 8, 23, 0.38);
+            }
+            .app-transition-spinner {
+                width: 44px;
+                height: 44px;
+                border-radius: 999px;
+                border: 4px solid rgba(186, 230, 253, 0.24);
+                border-top-color: #7dd3fc;
+                border-right-color: rgba(52, 211, 153, 0.86);
+                animation: app-transition-spin 0.82s linear infinite;
+                box-shadow: 0 0 30px rgba(56, 189, 248, 0.22);
+            }
+            .app-transition-copy {
+                display: grid;
+                gap: 4px;
+                min-width: 0;
+            }
+            .app-transition-copy strong {
+                font-size: 16px;
+                line-height: 1.35;
+            }
+            .app-transition-copy span {
+                color: rgba(226, 232, 240, 0.76);
+                font-size: 13px;
+                line-height: 1.5;
+            }
+            @keyframes app-transition-spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                html.app-page-ready body {
+                    animation: none;
+                }
+                html.app-transition-enabled body > :not(.app-transition-overlay),
+                .app-transition-overlay {
+                    transition: none;
+                }
+                .app-transition-spinner {
+                    animation-duration: 1.4s;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function injectRuntimeShellOverrides() {
+        if (document.getElementById('appShellRuntimeOverrideStyle')) {
+            return;
+        }
+
+        const style = document.createElement('style');
+        style.id = 'appShellRuntimeOverrideStyle';
+        style.textContent = `
+            html.app-transition-enabled body,
+            html.app-page-ready body,
+            html.app-page-leaving body {
+                animation: none !important;
+                filter: none !important;
+                transform: none !important;
+            }
+            html.app-transition-enabled body > :not(.app-transition-overlay) {
+                transition: opacity 0.18s ease !important;
+            }
+            html.app-page-leaving body > :not(.app-transition-overlay) {
+                filter: none !important;
+                opacity: 0.96;
+                transform: none !important;
+            }
+            .unified-top-nav a {
+                line-height: 1;
+                transform: none !important;
+                transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease !important;
+            }
+            .unified-top-nav a:hover,
+            .unified-top-nav a.active {
+                transform: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function ensurePageTransitionOverlay() {
+        let overlay = document.getElementById('appTransitionOverlay');
+        if (overlay) {
+            return overlay;
+        }
+
+        overlay = document.createElement('div');
+        overlay.id = 'appTransitionOverlay';
+        overlay.className = 'app-transition-overlay';
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.innerHTML = `
+            <div class="app-transition-panel" role="status" aria-live="polite">
+                <div class="app-transition-spinner" aria-hidden="true"></div>
+                <div class="app-transition-copy">
+                    <strong>正在切换页面</strong>
+                    <span>请稍候，界面正在平滑加载</span>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        return overlay;
+    }
+
+    function markPageReady() {
+        const root = document.documentElement;
+        pageTransitionInProgress = false;
+        root.classList.remove('app-page-preparing', 'app-page-leaving');
+        root.classList.add('app-page-ready');
+        document.getElementById('appTransitionOverlay')?.classList.remove('is-visible');
+    }
+
+    function showPageTransition() {
+        const root = document.documentElement;
+        if (!root.classList.contains('app-transition-enabled')) {
+            return;
+        }
+        pageTransitionInProgress = true;
+        ensurePageTransitionOverlay().classList.add('is-visible');
+        root.classList.remove('app-page-ready', 'app-page-preparing');
+        root.classList.add('app-page-leaving');
+    }
+
+    function handlePageLinkClick(event) {
+        const targetUrl = getTransitionTargetUrl(event);
+        if (!targetUrl) {
+            return;
+        }
+
+        event.preventDefault();
+        if (pageTransitionInProgress) {
+            return;
+        }
+
+        showPageTransition();
+        window.setTimeout(() => {
+            window.location.href = targetUrl.href;
+        }, PAGE_TRANSITION_DELAY_MS);
+    }
+
+    function getTransitionTargetUrl(event) {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return null;
+        }
+
+        const link = event.target.closest?.('a[href]');
+        if (!link || link.dataset.noPageTransition === 'true' || link.closest('[data-no-page-transition]')) {
+            return null;
+        }
+
+        const href = link.getAttribute('href') || '';
+        const target = (link.getAttribute('target') || '').toLowerCase();
+        if (
+            !href ||
+            href.startsWith('#') ||
+            link.hasAttribute('download') ||
+            (target && target !== '_self') ||
+            /^(javascript|mailto|tel):/i.test(href)
+        ) {
+            return null;
+        }
+
+        let url;
+        try {
+            url = new URL(link.href, window.location.href);
+        } catch (_) {
+            return null;
+        }
+
+        if (url.origin !== window.location.origin || !/^https?:$/.test(url.protocol)) {
+            return null;
+        }
+
+        const current = new URL(window.location.href);
+        if (url.pathname === current.pathname && url.search === current.search) {
+            return null;
+        }
+
+        return url;
+    }
+
     function injectSharedStyle() {
         if (document.getElementById('appShellStyle')) {
             return;
@@ -125,6 +401,7 @@
                 align-items: center;
                 gap: 8px;
                 min-height: 42px;
+                line-height: 1;
                 padding: 0 16px;
                 border-radius: 999px;
                 border: 1px solid rgba(255, 255, 255, 0.08);
@@ -133,7 +410,7 @@
                 color: #e2e8f0;
                 font-size: 14px;
                 font-weight: 500;
-                transition: all 0.24s ease;
+                transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
                 backdrop-filter: blur(12px);
             }
             .unified-top-nav a:hover,
@@ -141,7 +418,6 @@
                 background: rgba(56, 189, 248, 0.16);
                 border-color: rgba(56, 189, 248, 0.4);
                 color: #fff;
-                transform: translateY(-1.5px);
             }
             .page-hero-header {
                 color: #fff;
@@ -417,6 +693,7 @@
         const shellSlot = document.getElementById('appShellSlot');
         const shellHost = shellSlot?.querySelector('.app-shell-inner') || shellSlot || document.querySelector('.container, .page');
         if (!shellHost) {
+            scheduleMarkPageReady();
             return;
         }
 
@@ -455,6 +732,7 @@
         injectRefreshNotice(shellHost);
         injectReleaseNotice(shellHost);
         announceBuildUpdate();
+        scheduleMarkPageReady();
     }
 
     function injectRefreshNotice(topContainer) {

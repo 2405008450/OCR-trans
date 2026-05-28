@@ -263,32 +263,26 @@ def _generate_openrouter_text(
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         }
     )
-    stream = client.chat.completions.create(
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    extra_headers = {"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"}
+
+    if log_callback:
+        log_callback("[openrouter] 使用非流式生成，等待模型完整返回...")
+    response = client.chat.completions.create(
         model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        messages=messages,
         temperature=temperature,
         max_tokens=max_output_tokens,
-        extra_headers={"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
-        stream=True,
+        extra_headers=extra_headers,
+        stream=False,
     )
-    full_text = ""
-    char_count = 0
-    last_log_at = 0
-    for chunk in stream:
-        delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
-        if not delta:
-            continue
-        full_text += delta
-        char_count += len(delta)
-        if log_callback and char_count - last_log_at >= 200:
-            log_callback(f"[openrouter] 生成中... 已接收 {char_count} 字符")
-            last_log_at = char_count
+    full_text = (response.choices[0].message.content or "").strip()
     if log_callback:
-        log_callback(f"[openrouter] 生成完毕，共 {char_count} 字符")
-    return full_text.strip()
+        log_callback(f"[openrouter] 非流式生成完毕，共 {len(full_text)} 字符")
+    return full_text
 
 
 def _generate_openrouter_vision(

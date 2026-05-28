@@ -200,6 +200,16 @@ DEFAULT_SOURCE_LANG = "中文"
 DEFAULT_TARGET_LANG = "英语"
 
 
+def is_cjk_source_lang(source_lang):
+    """判断源语言是否属于中日韩类语言。"""
+    normalized = str(source_lang or "").strip().lower()
+    return normalized in {
+        "中文", "日语", "韩语",
+        "zh", "zh-cn", "zh_cn", "zh-hans", "zh_hans", "zh-hant", "zh_hant", "zh-tw", "zh_tw",
+        "ja", "jp", "ko", "kr",
+    }
+
+
 # ==========================================
 # === 提示词（保持原版不变）===
 # ==========================================
@@ -287,7 +297,7 @@ def get_docx_alignment_prompt(source_lang="中文", target_lang="英语"):
     target_info = SUPPORTED_LANGUAGES.get(target_lang, SUPPORTED_LANGUAGES["英语"])
 
     # 判断原文是否为中日韩等需要特殊断句的语言
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = is_cjk_source_lang(source_lang)
 
     # 根据原文语言类型确定断句标点
     if source_is_cjk:
@@ -347,7 +357,7 @@ DOCX_ALIGNMENT_SYSTEM_PROMPT = get_docx_alignment_prompt()
 def get_split_row_prompt(source_lang="中文"):
     """生成动态的分句对齐提示词"""
     # 判断原文是否为中日韩等需要特殊断句的语言
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = is_cjk_source_lang(source_lang)
 
     if source_is_cjk:
         punctuation_marks = "。！？"
@@ -472,7 +482,7 @@ SPLIT_ROW_SYSTEM_PROMPT = get_split_row_prompt()
 
 def get_table_cell_split_prompt(source_lang="中文"):
     """生成表格单元格细粒度分句提示词 - 专门用于中英方向表格处理"""
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = is_cjk_source_lang(source_lang)
 
     if source_is_cjk:
         punctuation_marks = "。！？"
@@ -1732,7 +1742,7 @@ def call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_toke
     route = get_gemini_route()
 
     try:
-        log_manager.log(f"请求 Gemini API... route={route}")
+        log_manager.log(f"请求 Gemini 文本接口... route={route}")
         log_manager.log_stream("\n" + "=" * 50 + f" {filename} " + "=" * 50 + "\n")
         full_response_text = generate_text(
             system_prompt=system_prompt,
@@ -1750,7 +1760,7 @@ def call_openrouter_stream(system_prompt, user_prompt, model_id, max_output_toke
         return full_response_text
 
     except Exception as e:
-        log_manager.log_exception("Gemini API调用失败", str(e))
+        log_manager.log_exception(f"Gemini/OpenRouter API调用失败（route={route}）", str(e))
         import traceback
         log_manager.log_exception("详细堆栈", traceback.format_exc())
         return None
@@ -2022,6 +2032,18 @@ def has_numbering_pattern(text):
     return False
 
 
+def needs_cjk_post_split(orig_text, source_lang):
+    """判断中日韩源文本是否需要后处理分句。"""
+    if not is_cjk_source_lang(source_lang):
+        return False
+
+    if not orig_text:
+        return False
+
+    terminator_count = sum(orig_text.count(mark) for mark in ("。", "！", "？"))
+    return terminator_count > 1
+
+
 def needs_english_post_split(orig_text, source_lang):
     """判断是否需要英文后处理分句
 
@@ -2029,8 +2051,8 @@ def needs_english_post_split(orig_text, source_lang):
     1. 文本中包含编号模式（如 A. / 1. / I. 等）
     2. 文本中有多个真实句子（排除缩写后的句号数 > 1）
     """
-    # 只对非CJK语言进行后处理
-    if source_lang in ["中文", "日语", "韩语"]:
+    # 英文/西方语言使用缩写排除逻辑；中日韩走 needs_cjk_post_split。
+    if is_cjk_source_lang(source_lang):
         return False
 
     if not orig_text:
@@ -2048,9 +2070,19 @@ def needs_english_post_split(orig_text, source_lang):
     return False
 
 
-def post_process_english_split(data, model_id, source_lang="英语", target_lang="中文", enable_ai_split=True):
+def needs_post_split(orig_text, source_lang):
+    """根据源语言判断一行对齐结果是否需要二次分句。"""
+    if is_cjk_source_lang(source_lang):
+        return needs_cjk_post_split(orig_text, source_lang)
+    return needs_english_post_split(orig_text, source_lang)
+
+
+def post_process_sentence_split(data, model_id, source_lang="英语", target_lang="中文", enable_ai_split=True):
     """
-    后处理：对英文原文进行进一步的细粒度分句
+    后处理：对已形成键值对的行做进一步细粒度分句。
+
+    中文/日语/韩语按全角句末标点（。！？）检测多句；
+    英文等西方语言继续使用缩写排除后的句号检测。
 
     Args:
         data: 解析后的对齐数据列表 [{"原文": ..., "译文": ...}, ...]
@@ -2062,10 +2094,6 @@ def post_process_english_split(data, model_id, source_lang="英语", target_lang
     Returns:
         处理后的数据列表
     """
-    # 只对非CJK源语言进行后处理
-    if source_lang in ["中文", "日语", "韩语"]:
-        return data
-
     if not data:
         return data
 
@@ -2077,7 +2105,7 @@ def post_process_english_split(data, model_id, source_lang="英语", target_lang
         trans = row.get('译文', '')
 
         # 检查是否需要分句
-        if needs_english_post_split(orig, source_lang):
+        if needs_post_split(orig, source_lang):
             if enable_ai_split:
                 # 调用AI进行分句
                 log_manager.log(f"后处理分句: 第 {idx + 1} 行需要进一步细分")
@@ -2101,6 +2129,11 @@ def post_process_english_split(data, model_id, source_lang="英语", target_lang
         log_manager.log(f"后处理分句完成: {split_count} 行被细分，总行数 {len(data)} → {len(result)}")
 
     return result
+
+
+def post_process_english_split(data, model_id, source_lang="英语", target_lang="中文", enable_ai_split=True):
+    """兼容旧调用名，实际已扩展为多语言后处理分句。"""
+    return post_process_sentence_split(data, model_id, source_lang, target_lang, enable_ai_split)
 
 
 def run_llm_alignment(file_original_path, file_trans_path, output_excel_path, model_id,
@@ -2187,10 +2220,10 @@ def run_llm_alignment(file_original_path, file_trans_path, output_excel_path, mo
                     paragraph_data = parse_alignment_response(response)
 
                     if paragraph_data:
-                        # 对非CJK源语言进行后处理分句
-                        if enable_post_split and source_lang not in ["中文", "日语", "韩语"]:
+                        # 对源语言进行后处理分句：中文等按 。！？，英文等按缩写排除后的句号。
+                        if enable_post_split:
                             log_manager.log("检查非表格部分是否需要后处理分句...")
-                            paragraph_data = post_process_english_split(
+                            paragraph_data = post_process_sentence_split(
                                 paragraph_data, model_id, source_lang, target_lang, enable_ai_split=True
                             )
 
@@ -2267,10 +2300,10 @@ def run_llm_alignment(file_original_path, file_trans_path, output_excel_path, mo
         log_manager.log_exception("解析结果为空，文件处理失败")
         return False
 
-    # 对非CJK源语言进行后处理分句（如英文原文需要按句号细分）
-    if enable_post_split and source_lang not in ["中文", "日语", "韩语"]:
+    # 对源语言进行后处理分句：中文等按 。！？，英文等按缩写排除后的句号。
+    if enable_post_split:
         log_manager.log("检查是否需要后处理分句...")
-        data = post_process_english_split(data, model_id, source_lang, target_lang, enable_ai_split=True)
+        data = post_process_sentence_split(data, model_id, source_lang, target_lang, enable_ai_split=True)
 
     df = pd.DataFrame(data)
 
@@ -2297,7 +2330,7 @@ def run_llm_alignment(file_original_path, file_trans_path, output_excel_path, mo
 
 def needs_sentence_split(orig_text, trans_text, source_lang="中文"):
     """判断是否需要分句 - 根据原文语言检测相应的句末标点"""
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = is_cjk_source_lang(source_lang)
 
     if source_is_cjk:
         # 中日韩语言使用全角句末标点
@@ -2374,7 +2407,7 @@ def needs_table_cell_split(text, source_lang="中文"):
 
     import re
 
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = is_cjk_source_lang(source_lang)
 
     # 检测换行符（包括 \n、\r\n、\r）
     has_newline = '\n' in text or '\r' in text
@@ -3050,11 +3083,11 @@ class DocumentAlignerGUI:
         self.lang_info_label = ttk.Label(lang_frame, textvariable=self.lang_info_var, foreground="#666666")
         self.lang_info_label.grid(row=0, column=4, padx=20, pady=5, sticky=tk.W)
 
-        # 后处理分句选项（针对英文等西方语言）
+        # 后处理分句选项（中文按 。！？；英文自动排除缩写）
         self.post_split_var = tk.BooleanVar(value=True)
         self.post_split_check = ttk.Checkbutton(
             lang_frame,
-            text="启用后处理细粒度分句（英文等西方语言按句号细分，自动排除缩写）",
+            text="启用后处理细粒度分句（中文按 。！？，英文自动排除缩写）",
             variable=self.post_split_var
         )
         self.post_split_check.grid(row=1, column=0, columnspan=5, sticky=tk.W, padx=5, pady=(5, 0))
@@ -3062,7 +3095,7 @@ class DocumentAlignerGUI:
         # 后处理分句说明
         post_split_info = ttk.Label(
             lang_frame,
-            text="💡 当源语言为英文等西方语言时，会在LLM对齐后进一步按句号细分",
+            text="💡 LLM 对齐后会按源语言再次检查并拆分多句原文键",
             foreground="#0066cc"
         )
         post_split_info.grid(row=2, column=0, columnspan=5, sticky=tk.W, padx=5, pady=(2, 0))

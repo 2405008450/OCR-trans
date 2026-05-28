@@ -352,20 +352,37 @@
         .drawer {
             position: fixed;
             top: 0;
-            right: -520px;
-            width: min(520px, 100vw);
+            right: 0;
+            bottom: 0;
+            width: 100vw;
             height: 100vh;
+            height: 100dvh;
             z-index: 910;
             overflow-y: auto;
-            padding: 28px;
-            transition: right .3s ease;
+            padding: 30px clamp(18px, 4vw, 56px);
+            transform: translateX(100%);
+            transition: transform .3s ease;
             background: linear-gradient(180deg, #0c1e32 0%, #091627 100%);
             border-left: 1px solid var(--line);
             box-shadow: -12px 0 40px rgba(0, 0, 0, .4);
         }
 
         .drawer.open {
-            right: 0;
+            transform: translateX(0);
+        }
+
+        body.drawer-open,
+        body:has(#drawer.open) {
+            animation: none !important;
+            transform: none !important;
+            filter: none !important;
+            overflow: hidden;
+        }
+
+        #drawerContent {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding-right: 52px;
         }
 
         .drawer-close {
@@ -710,7 +727,11 @@
             }
 
             .drawer {
-                width: 100vw;
+                padding: 24px 16px;
+            }
+
+            #drawerContent {
+                padding-right: 44px;
             }
 
             table {

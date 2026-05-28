@@ -208,12 +208,12 @@
                         <div class="option-group full-width" style="display:flex;align-items:center;gap:1.5rem;">
                             <label class="checkbox-inline">
                                 <input type="checkbox" id="enablePostSplit" checked>
-                                <span>启用后处理细粒度分句（英文等西方语言按句号细分，自动排除缩写）</span>
+                                <span>启用后处理细粒度分句（中文按 。！？，英文自动排除缩写）</span>
                             </label>
                         </div>
                         <div class="option-group full-width hint-text" id="langHint">
                             <i class="fas fa-info-circle"></i>
-                            <span id="langHintText">当源语言为英文等西方语言时，会在LLM对齐后进一步按句号细分</span>
+                            <span id="langHintText">LLM 对齐后会按源语言再次检查并拆分多句原文键</span>
                         </div>
                     </div>
 

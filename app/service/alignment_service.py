@@ -308,7 +308,7 @@ def _get_docx_alignment_prompt(source_lang="中文", target_lang="英语"):
     source_info = SUPPORTED_LANGUAGES.get(source_lang, SUPPORTED_LANGUAGES["中文"])
     target_info = SUPPORTED_LANGUAGES.get(target_lang, SUPPORTED_LANGUAGES["英语"])
 
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = _is_cjk_source_lang(source_lang)
     if source_is_cjk:
         punctuation_marks = "。！？"
         punctuation_desc = "。！？（全角中日韩句末标点）"
@@ -359,7 +359,7 @@ def _get_docx_alignment_prompt(source_lang="中文", target_lang="英语"):
 
 
 def _get_split_row_prompt(source_lang="中文"):
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = _is_cjk_source_lang(source_lang)
     if source_is_cjk:
         punctuation_marks = "。！？"
         punctuation_desc = "。！？（全角句末标点）"
@@ -476,7 +476,7 @@ Objectives. ||| 目标。
 
 
 def _get_table_cell_split_prompt(source_lang="中文"):
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = _is_cjk_source_lang(source_lang)
 
     if source_is_cjk:
         punctuation_marks = "。！？"
@@ -1190,7 +1190,7 @@ def _parse_alignment_response(response_text: str) -> list:
     return data
 
 
-# ── 英文后处理分句 ────────────────────────────────────────
+# ── 后处理分句 ────────────────────────────────────────────
 ENGLISH_ABBREVIATIONS = {
     'et al', 'etc', 'e.g', 'i.e', 'vs', 'cf', 'ibid', 'op', 'cit',
     'mr', 'mrs', 'ms', 'dr', 'prof', 'jr', 'sr', 'st',
@@ -1199,6 +1199,15 @@ ENGLISH_ABBREVIATIONS = {
     'a.m', 'p.m',
     'no', 'vol', 'fig', 'ch', 'sec', 'pp', 'approx', 'est', 'max', 'min', 'avg',
 }
+
+
+def _is_cjk_source_lang(source_lang):
+    normalized = str(source_lang or "").strip().lower()
+    return normalized in {
+        "中文", "日语", "韩语",
+        "zh", "zh-cn", "zh_cn", "zh-hans", "zh_hans", "zh-hant", "zh_hant", "zh-tw", "zh_tw",
+        "ja", "jp", "ko", "kr",
+    }
 
 
 def _is_abbreviation_period(text, pos):
@@ -1254,10 +1263,12 @@ def _count_real_sentences(text):
 
 
 def _needs_post_split(orig_text, source_lang):
-    if source_lang in ["中文", "日语", "韩语"]:
-        return False
     if not orig_text:
         return False
+
+    if _is_cjk_source_lang(source_lang):
+        return sum(orig_text.count(mark) for mark in ("。", "！", "？")) > 1
+
     numbering_patterns = [
         r'\d+\.\s',
         r'(?<![A-Za-z.])[A-Za-z]\.\s',
@@ -1295,8 +1306,6 @@ def _split_row_with_ai(orig, trans, model_id, source_lang, row_num="后处理"):
 
 
 def _post_process_split(data, model_id, source_lang):
-    if source_lang in ["中文", "日语", "韩语"]:
-        return data
     result = []
     for idx, row in enumerate(data):
         orig = row.get('原文', '')
@@ -1358,7 +1367,7 @@ def _needs_table_cell_split(text, source_lang):
         return False
     import re
 
-    source_is_cjk = source_lang in ["中文", "日语", "韩语"]
+    source_is_cjk = _is_cjk_source_lang(source_lang)
     has_newline = '\n' in text or '\r' in text
     has_consecutive_spaces = '  ' in text
 
@@ -1575,7 +1584,7 @@ def _run_single_alignment(orig_path, trans_path, output_path, model_id,
         print(f"[alignment]   LLM 原始响应前500字: {response[:500]}")
         return False
 
-    if enable_post_split and source_lang not in ["中文", "日语", "韩语"]:
+    if enable_post_split:
         data = _post_process_split(data, model_id, source_lang)
 
     df = pd.DataFrame(data)

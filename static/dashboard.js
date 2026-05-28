@@ -205,6 +205,7 @@ function goPage(page) {
 
 function openDetail(taskId) {
   openTaskId = taskId;
+  document.body.classList.add('drawer-open');
   document.getElementById('drawerOverlay').classList.add('open');
   document.getElementById('drawer').classList.add('open');
   loadDetail(taskId);
@@ -214,6 +215,7 @@ function openDetail(taskId) {
 function closeDrawer() {
   openTaskId = null;
   stopDetailPolling();
+  document.body.classList.remove('drawer-open');
   document.getElementById('drawerOverlay').classList.remove('open');
   document.getElementById('drawer').classList.remove('open');
 }

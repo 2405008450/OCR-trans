@@ -26,6 +26,12 @@ HTML_CACHE_HEADERS = {
 LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']+)(?P=quote)')
 REFRESH_HINT = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。"
 REFRESH_HINT_HTML = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。"
+RELEASE_NOTES = [
+    "支持批量下载处理完成文件",
+    "4月20日_解除pdf2docx页数限制，文件大小限制为95M以下",
+    "4月28日_增加通用证件翻译70+语种，记忆增加dsv4p模型",
+    "5月22日_去掉弃用模块，优化跳转动画，添加异常标记入口"
+]
 GLOBAL_NAV_ITEMS = [
     ("/", "fa-home", "首页"),
     ("/dashboard", "fa-gauge-high", "工作台"),
@@ -48,13 +54,28 @@ APP_SHELL_BOOTSTRAP = f"""
 (() => {{
     try {{
         const params = new URLSearchParams(window.location.search);
-        if (params.get('embed') === '1' || window.self !== window.top) {{
+        const isEmbedded = params.get('embed') === '1' || window.self !== window.top;
+        if (isEmbedded) {{
             document.documentElement.setAttribute('data-app-embed', '1');
+        }} else {{
+            document.documentElement.classList.add('app-transition-enabled', 'app-page-preparing');
+            window.setTimeout(() => {{
+                document.documentElement.classList.remove('app-page-preparing');
+            }}, 2500);
         }}
     }} catch (_) {{}}
 }})();
 </script>
 <style id="appShellStyle">
+    html.app-transition-enabled {{
+        background: #040812;
+    }}
+    html.app-page-preparing body {{
+        opacity: 0;
+    }}
+    html.app-page-ready body {{
+        opacity: 1;
+    }}
     html[data-app-embed="1"] .app-shell-slot {{
         display: none !important;
     }}
@@ -108,6 +129,7 @@ APP_SHELL_BOOTSTRAP = f"""
         align-items: center;
         gap: 8px;
         min-height: 42px;
+        line-height: 1;
         padding: 0 16px;
         border-radius: 999px;
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -116,7 +138,7 @@ APP_SHELL_BOOTSTRAP = f"""
         color: #e2e8f0;
         font-size: 14px;
         font-weight: 500;
-        transition: all 0.24s ease;
+        transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
         backdrop-filter: blur(12px);
     }}
     .unified-top-nav a:hover,
@@ -124,7 +146,6 @@ APP_SHELL_BOOTSTRAP = f"""
         background: rgba(56, 189, 248, 0.16);
         border-color: rgba(56, 189, 248, 0.4);
         color: #fff;
-        transform: translateY(-1.5px);
     }}
     .page-hero-header {{
         color: #fff;
@@ -359,6 +380,26 @@ APP_SHELL_BOOTSTRAP = f"""
         .shell-refresh-notice .notice-text {{
             font-size: 13px;
         }}
+        .shell-release-note {{
+            align-items: flex-start;
+            border-radius: 12px;
+            padding: 14px 14px 14px 16px;
+            gap: 12px;
+        }}
+        .shell-release-note .release-copy {{
+            display: grid;
+            gap: 8px;
+        }}
+        .shell-release-note .release-title {{
+            font-size: 14px;
+        }}
+        .shell-release-note .release-list {{
+            gap: 7px;
+        }}
+        .shell-release-note .release-list li {{
+            font-size: 13px;
+            padding: 6px 9px;
+        }}
         .shell-build-toast {{
             right: 10px;
             bottom: 10px;
@@ -467,6 +508,8 @@ def _build_app_shell_markup(current_path: str) -> str:
         active_class = " active" if is_active else ""
         nav_html.append(f'<a href="{href}" class="{active_class.strip()}"><i class="fas {icon}"></i> {text}</a>')
 
+    release_note_items = "".join(f"<li>{item}</li>" for item in RELEASE_NOTES)
+
     return f"""
 <div id="appShellSlot" class="app-shell-slot">
     <div class="app-shell-inner">
@@ -487,6 +530,16 @@ def _build_app_shell_markup(current_path: str) -> str:
                 <div class="notice-badge">使用提示</div>
                 <strong class="notice-title">页面异常时先强制刷新缓存</strong>
                 <div class="notice-text">{REFRESH_HINT_HTML}</div>
+            </div>
+        </section>
+        <section class="shell-release-note">
+            <div class="release-icon"><i class="fas fa-bullhorn"></i></div>
+            <div class="release-copy">
+                <div class="release-badge">最近更新</div>
+                <strong class="release-title">当前版本已同步以下内容</strong>
+                <ul class="release-list">
+                    {release_note_items}
+                </ul>
             </div>
         </section>
     </div>

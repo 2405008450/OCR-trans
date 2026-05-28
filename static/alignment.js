@@ -251,7 +251,7 @@ function updateLangLabels() {
 
     const srcDesc = configData?.languages?.[src] || src;
     const tgtDesc = configData?.languages?.[tgt] || tgt;
-    langHintText.textContent = `${srcDesc} → ${tgtDesc}`;
+    langHintText.textContent = `${srcDesc} → ${tgtDesc}；LLM 对齐后会按源语言再次检查并拆分多句原文键`;
 }
 
 function updateRouteInfo() {
