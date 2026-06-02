@@ -1642,12 +1642,19 @@ def _finalize_alignment_output(output_path: str | Path, task_dir: str | Path, or
     if not source.exists():
         return _normalize_output_path(source)
 
+    source_report = source.with_name(f"{source.stem}_覆盖校验报告.xlsx")
     target = ensure_unique_path(
         Path(task_dir) / build_user_visible_filename(original_filename or source.name, suffix="对齐结果", ext=source.suffix or ".xlsx"),
         existing_path=source,
     )
     if source != target:
         source.replace(target)
+        if source_report.exists():
+            target_report = ensure_unique_path(
+                target.with_name(f"{target.stem}_覆盖校验报告.xlsx"),
+                existing_path=source_report,
+            )
+            source_report.replace(target_report)
         source = target
     return _normalize_output_path(source)
 
@@ -1949,6 +1956,8 @@ def _run_alignment_sync(
             memory_module.merge_and_deduplicate_excels(
                 generated_excel_paths, final_path,
                 source_lang=source_lang, target_lang=target_lang,
+                original_path=original_path, translated_path=translated_path,
+                model_id=model_id,
             )
         else:
             final_path = generated_excel_paths[0] if generated_excel_paths else None
@@ -1956,6 +1965,16 @@ def _run_alignment_sync(
         print(f"[alignment] final_path={final_path}, exists={os.path.exists(final_path) if final_path else 'N/A'}")
         print(f"[alignment] generated_excel_paths={generated_excel_paths}")
         if final_path and os.path.exists(final_path):
+            if split_parts <= 1:
+                _update_progress(task_id, 88, "最终覆盖校验与补漏...")
+                memory_module.apply_final_coverage_repair_to_excel(
+                    final_path,
+                    original_path,
+                    translated_path,
+                    model_id,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                )
             _update_progress(task_id, 90, "正在整理最终结果...")
             final_output_path = _finalize_alignment_output(final_path, task_dir, original_filename)
             rel = os.path.relpath(final_output_path, ".").replace("\\", "/")
