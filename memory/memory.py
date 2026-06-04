@@ -1665,6 +1665,7 @@ def save_issues_report(issues, output_path):
 # ==========================================
 COVERAGE_REPAIR_MAX_ROUNDS = 2
 _COVERAGE_CONSUMED_MARK = "\0"
+FINAL_REPAIR_FILL_COLOR = "CFE2F3"
 
 
 def _coverage_ignorable_char(ch):
@@ -1900,6 +1901,35 @@ def _save_coverage_report(report_path, rejected_rows=None, appended_rows=None,
         log_manager.log_exception("覆盖校验报告保存失败", str(e))
 
 
+def _highlight_final_repair_rows(excel_path, row_indices):
+    """在最终结果 Excel 中高亮最终补漏追加的行。"""
+    row_indices = sorted({int(idx) for idx in (row_indices or []) if idx is not None and int(idx) >= 0})
+    if not excel_path or not row_indices:
+        return
+
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.styles import PatternFill
+
+        wb = load_workbook(excel_path)
+        ws = wb.active
+        fill = PatternFill(start_color=FINAL_REPAIR_FILL_COLOR, end_color=FINAL_REPAIR_FILL_COLOR, fill_type="solid")
+
+        highlighted = 0
+        for idx in row_indices:
+            excel_row = idx + 2  # DataFrame 索引 0 对应 Excel 第 2 行
+            if excel_row < 2 or excel_row > ws.max_row:
+                continue
+            for col in range(1, ws.max_column + 1):
+                ws.cell(row=excel_row, column=col).fill = fill
+            highlighted += 1
+
+        wb.save(excel_path)
+        log_manager.log(f"最终补漏追加行高亮: {highlighted} 行")
+    except Exception as e:
+        log_manager.log_exception("最终补漏追加行高亮失败", str(e))
+
+
 def validate_alignment_coverage_only(data, original_text, translated_text, report_path=None, phase="分片覆盖校验"):
     """只校验、不补漏；用于分片结果落盘前。"""
     rows = _as_alignment_rows(data)
@@ -1950,6 +1980,7 @@ def _repair_alignment_rows_with_full_text(rows, original_text, translated_text, 
     )
     all_rejected = list(rejected)
     appended_rows = []
+    appended_row_indices = []
 
     log_manager.log(
         f"最终覆盖校验: 初始通过 {len(accepted)}/{len(_as_alignment_rows(rows))} 行，"
@@ -1999,7 +2030,8 @@ def _repair_alignment_rows_with_full_text(rows, original_text, translated_text, 
             log_manager.log_exception(f"最终补漏第 {round_idx} 轮没有通过覆盖校验的行")
             break
 
-        for row in repaired:
+        append_start_index = len(accepted)
+        for offset, row in enumerate(repaired):
             row_report = {
                 "阶段": f"最终补漏第{round_idx}轮",
                 "补漏轮次": round_idx,
@@ -2007,6 +2039,7 @@ def _repair_alignment_rows_with_full_text(rows, original_text, translated_text, 
                 "译文": row.get("译文", ""),
             }
             appended_rows.append(row_report)
+            appended_row_indices.append(append_start_index + offset)
 
         accepted.extend(repaired)
         log_manager.log(f"最终补漏第 {round_idx} 轮追加 {len(repaired)} 行")
@@ -2034,6 +2067,7 @@ def _repair_alignment_rows_with_full_text(rows, original_text, translated_text, 
     return accepted, {
         "rejected": all_rejected,
         "appended": appended_rows,
+        "appended_row_indices": appended_row_indices,
         "remaining_original": final_remaining_original,
         "remaining_translated": final_remaining_translated,
     }
@@ -2060,7 +2094,7 @@ def apply_final_coverage_repair_to_excel(excel_path, original_path, translated_p
         return False
 
     rows = _as_alignment_rows(df)
-    final_rows, _ = _repair_alignment_rows_with_full_text(
+    final_rows, repair_info = _repair_alignment_rows_with_full_text(
         rows,
         original_text,
         translated_text,
@@ -2073,6 +2107,7 @@ def apply_final_coverage_repair_to_excel(excel_path, original_path, translated_p
 
     final_df = pd.DataFrame(final_rows, columns=["原文", "译文"])
     final_df.to_excel(excel_path, index=False)
+    _highlight_final_repair_rows(excel_path, repair_info.get("appended_row_indices", []))
     log_manager.log(f"最终覆盖校验已更新结果: {excel_path} ({len(final_df)} 行)")
     return True
 
@@ -3428,13 +3463,14 @@ def merge_and_deduplicate_excels(excel_paths, final_output_path, source_lang="�
     log_manager.log(f"去除完全重复: {total_before} -> {total_after_full_dedup} 行 (移除 {full_dup_removed} 行)")
 
     combined_df = combined_df.reset_index(drop=True)
+    repair_info = {}
 
     if enable_final_repair and original_path and translated_path and model_id:
         log_manager.log("执行最终覆盖校验与补漏...")
         original_text = read_file_content(original_path)
         translated_text = read_file_content(translated_path)
         if original_text or translated_text:
-            repaired_rows, _ = _repair_alignment_rows_with_full_text(
+            repaired_rows, repair_info = _repair_alignment_rows_with_full_text(
                 _as_alignment_rows(combined_df),
                 original_text,
                 translated_text,
@@ -3483,6 +3519,8 @@ def merge_and_deduplicate_excels(excel_paths, final_output_path, source_lang="�
 
     except Exception as e:
         log_manager.log_exception(f"高亮处理失败", str(e))
+
+    _highlight_final_repair_rows(final_output_path, repair_info.get("appended_row_indices", []))
 
     log_manager.log(f"✅ 最终结果: {final_output_path} ({len(combined_df)} 行)")
     return final_output_path
