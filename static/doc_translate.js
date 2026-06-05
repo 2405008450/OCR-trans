@@ -11,10 +11,26 @@ const btnProcess = document.getElementById('btnProcess');
 const btnNewTask = document.getElementById('btnNewTask');
 const btnBatchDownloadAll = document.getElementById('btnBatchDownloadAll');
 const modelSelect = document.getElementById('modelSelect');
+const translationEngineSelect = document.getElementById('translationEngineSelect');
+const modelSmartSelect = document.getElementById('modelSmartSelect');
+const translationEngineSmartSelect = document.getElementById('translationEngineSmartSelect');
 let geminiRouteSelect = document.getElementById('geminiRouteSelect');
-const sourceLangSelect = document.getElementById('sourceLangSelect');
 const translateModeGroup = document.getElementById('translateModeGroup');
+const sourceLangGroup = document.getElementById('sourceLangGroup');
 const targetLangGroup = document.getElementById('targetLangGroup');
+const sourceLangSearch = document.getElementById('sourceLangSearch');
+const targetLangSearch = document.getElementById('targetLangSearch');
+const sourceLangSelected = document.getElementById('sourceLangSelected');
+const targetLangSelected = document.getElementById('targetLangSelected');
+const sourceLangCount = document.getElementById('sourceLangCount');
+const targetLangCount = document.getElementById('targetLangCount');
+const btnSourceCommon = document.getElementById('btnSourceCommon');
+const btnTargetCommon = document.getElementById('btnTargetCommon');
+const btnClearSourceLangs = document.getElementById('btnClearSourceLangs');
+const btnClearTargetLangs = document.getElementById('btnClearTargetLangs');
+const translationRulesInput = document.getElementById('translationRulesInput');
+const translationRulesCount = document.getElementById('translationRulesCount');
+const btnClearTranslationRules = document.getElementById('btnClearTranslationRules');
 
 const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
@@ -33,18 +49,23 @@ const fileCountEl = document.getElementById('fileCount');
 let selectedFiles = [];
 let pollingTimer = null;
 let modelConfig = {};
+let translationEngineConfig = {};
 let languageConfig = {};
 let translateModeConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
+let defaultTranslationEngine = 'google/gemini-3-flash-preview';
 let defaultRoute = 'openrouter';
 let defaultTranslateMode = 'standard';
 let allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tif', '.tiff', '.doc', '.docx'];
+let selectedSourceLangs = new Set(['zh']);
+let selectedTargetLangs = new Set(['en']);
 let streamLogWrap = null;
 let streamLogEl = null;
 let retryBtn = null;
 let batchPollingTimer = null;
 let batchTaskStates = [];
+let openSmartSelect = null;
 
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 let etaHint = null;
@@ -100,9 +121,23 @@ function formatEtaDate(date) {
 }
 
 const MODEL_DISPLAY_NAMES = {
+    'google/gemini-3.1-flash-lite': '极速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
     'google/gemini-3.5-flash': '新模型',
     'google/gemini-3.1-pro-preview': '增强版V2',
+    'deepseek-v4-flash': 'DeepSeek V4 Flash',
+    'deepseek-chat': 'DeepSeek Chat',
+    'openai/gpt-5.5': 'GPT-5.5',
+    'openai/gpt-5.4': 'GPT-5.4',
+    'openai/gpt-5.4-mini': 'GPT-5.4 Mini',
+    'openai/gpt-chat-latest': 'GPT Chat Latest',
+    'anthropic/claude-opus-4.8': 'Claude Opus 4.8',
+    'anthropic/claude-sonnet-4.6': 'Claude Sonnet 4.6',
+    'qwen/qwen3.7-max': 'Qwen3.7 Max',
+    'qwen/qwen3.7-plus': 'Qwen3.7 Plus',
+    'deepseek/deepseek-v3.2': 'DeepSeek V3.2',
+    'x-ai/grok-4.3': 'Grok 4.3',
+    'mistralai/mistral-medium-3-5': 'Mistral Medium 3.5',
 };
 
 init();
@@ -145,7 +180,47 @@ function bindEvents() {
     btnNewTask?.addEventListener('click', resetPage);
     document.getElementById('btnBatchNewTask')?.addEventListener('click', resetPage);
     btnBatchDownloadAll?.addEventListener('click', downloadAllBatchResults);
-    sourceLangSelect?.addEventListener('change', renderTargetLanguages);
+    sourceLangSearch?.addEventListener('input', renderSourceLanguages);
+    targetLangSearch?.addEventListener('input', renderTargetLanguages);
+    document.addEventListener('click', (event) => {
+        if (openSmartSelect && !openSmartSelect.contains(event.target)) closeSmartSelect();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeSmartSelect();
+    });
+    translationRulesInput?.addEventListener('input', updateTranslationRulesCount);
+    btnClearTranslationRules?.addEventListener('click', () => {
+        if (translationRulesInput) translationRulesInput.value = '';
+        updateTranslationRulesCount();
+    });
+    btnSourceCommon?.addEventListener('click', () => {
+        if (btnClearSourceLangs) delete btnClearSourceLangs.dataset.userCleared;
+        selectedSourceLangs = new Set(getExistingLanguageCodes(['zh', 'zh-TW', 'en']));
+        syncTargetSelection();
+        renderSourceLanguages();
+        renderTargetLanguages();
+        updateProcessButton();
+    });
+    btnTargetCommon?.addEventListener('click', () => {
+        selectedTargetLangs = new Set(getExistingLanguageCodes(['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'de', 'es']).filter((code) => !selectedSourceLangs.has(code)));
+        ensureTargetFallback();
+        renderTargetLanguages();
+        updateProcessButton();
+    });
+    btnClearSourceLangs?.addEventListener('click', () => {
+        btnClearSourceLangs.dataset.userCleared = '1';
+        selectedSourceLangs.clear();
+        syncTargetSelection();
+        renderSourceLanguages();
+        renderTargetLanguages();
+        updateProcessButton();
+    });
+    btnClearTargetLangs?.addEventListener('click', () => {
+        selectedTargetLangs.clear();
+        renderTargetLanguages();
+        updateProcessButton();
+    });
+    updateTranslationRulesCount();
 }
 
 async function loadConfig() {
@@ -155,6 +230,8 @@ async function loadConfig() {
         const data = await response.json();
         modelConfig = data.models || {};
         defaultModel = data.default_model || defaultModel;
+        translationEngineConfig = data.translation_engines || {};
+        defaultTranslationEngine = data.default_translation_engine || defaultTranslationEngine;
         languageConfig = data.languages || {};
         translateModeConfig = data.translate_modes || {};
         defaultTranslateMode = data.default_translate_mode || defaultTranslateMode;
@@ -166,9 +243,28 @@ async function loadConfig() {
     } catch (error) {
         console.error(error);
         modelConfig = {
+            'google/gemini-3.1-flash-lite': { label: '极速版V2', description: '轻量快速 OCR。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规 OCR。' },
             'google/gemini-3.5-flash': { label: '新模型', description: 'OpenRouter 新模型，适合常规 OCR。' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '复杂版面表现更稳。' },
+        };
+        translationEngineConfig = {
+            'google/gemini-3-flash-preview': { label: 'Gemini 3 Flash Preview', description: '默认文本翻译引擎。' },
+            'google/gemini-3.5-flash': { label: 'Gemini 3.5 Flash', description: '新一代 Gemini Flash 模型。' },
+            'google/gemini-3.1-pro-preview': { label: 'Gemini 3.1 Pro Preview', description: '复杂语境和术语一致性更强。' },
+            'openai/gpt-5.5': { label: 'GPT-5.5', description: 'OpenAI 新一代 GPT 旗舰模型。' },
+            'openai/gpt-5.4': { label: 'GPT-5.4', description: 'OpenAI GPT-5.4 主力模型。' },
+            'openai/gpt-5.4-mini': { label: 'GPT-5.4 Mini', description: 'GPT-5.4 系列轻量模型。' },
+            'openai/gpt-chat-latest': { label: 'GPT Chat Latest', description: 'OpenAI 最新聊天模型别名。' },
+            'anthropic/claude-opus-4.8': { label: 'Claude Opus 4.8', description: 'Anthropic Opus 高能力模型。' },
+            'anthropic/claude-sonnet-4.6': { label: 'Claude Sonnet 4.6', description: 'Anthropic Sonnet 主力模型。' },
+            'qwen/qwen3.7-max': { label: 'Qwen3.7 Max', description: '通义千问 Qwen3.7 旗舰模型。' },
+            'qwen/qwen3.7-plus': { label: 'Qwen3.7 Plus', description: '通义千问 Qwen3.7 高性价比模型。' },
+            'deepseek/deepseek-v3.2': { label: 'DeepSeek V3.2', description: 'DeepSeek V3.2 OpenRouter 模型。' },
+            'x-ai/grok-4.3': { label: 'Grok 4.3', description: 'xAI Grok 主力模型。' },
+            'mistralai/mistral-medium-3-5': { label: 'Mistral Medium 3.5', description: 'Mistral 中大型模型。' },
+            'deepseek-v4-flash': { label: 'DeepSeek V4 Flash', description: '原默认文本翻译引擎。' },
+            'deepseek-chat': { label: 'DeepSeek Chat', description: 'DeepSeek 官方通用模型。' },
         };
         routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };
         languageConfig = { zh:{name:'中文'}, en:{name:'英文'}, ja:{name:'日文'}, ko:{name:'韩文'}, es:{name:'西班牙文'}, fr:{name:'法文'}, de:{name:'德文'}, ru:{name:'俄文'} };
@@ -178,6 +274,7 @@ async function loadConfig() {
         };
     }
     renderModels();
+    renderTranslationEngines();
     renderRoutes();
     renderSourceLanguages();
     renderTranslateModes();
@@ -188,7 +285,196 @@ function renderModels() {
     modelSelect.innerHTML = '';
     Object.entries(modelConfig).forEach(([value, info]) => modelSelect.add(new Option(getModelDisplayName(info.label || value), value)));
     modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
+    renderSmartSelect({
+        container: modelSmartSelect,
+        select: modelSelect,
+        config: modelConfig,
+        iconClass: 'fas fa-robot',
+        searchPlaceholder: '搜索 OCR 模型',
+        emptyText: '没有匹配的 OCR 模型',
+    });
 }
+function renderTranslationEngines() {
+    if (!translationEngineSelect) return;
+    translationEngineSelect.innerHTML = '';
+    Object.entries(translationEngineConfig).forEach(([value, info]) => {
+        const option = new Option(getModelDisplayName(info.label || value), value);
+        if (info.description) option.title = info.description;
+        translationEngineSelect.add(option);
+    });
+    translationEngineSelect.value = translationEngineConfig[defaultTranslationEngine] ? defaultTranslationEngine : Object.keys(translationEngineConfig)[0];
+    renderSmartSelect({
+        container: translationEngineSmartSelect,
+        select: translationEngineSelect,
+        config: translationEngineConfig,
+        iconClass: 'fas fa-wand-magic-sparkles',
+        searchPlaceholder: '搜索 GPT、Gemini、Claude、Qwen...',
+        emptyText: '没有匹配的翻译引擎',
+    });
+}
+
+function closeSmartSelect() {
+    if (!openSmartSelect) return;
+    openSmartSelect.classList.remove('open');
+    openSmartSelect = null;
+}
+
+function getProviderLabel(value) {
+    const model = String(value || '').toLowerCase();
+    if (model.startsWith('openai/')) return 'GPT';
+    if (model.startsWith('anthropic/')) return 'Claude';
+    if (model.startsWith('google/')) return 'Gemini';
+    if (model.startsWith('qwen/')) return 'Qwen';
+    if (model.startsWith('deepseek')) return 'DeepSeek';
+    if (model.startsWith('x-ai/')) return 'Grok';
+    if (model.startsWith('mistralai/')) return 'Mistral';
+    return '模型';
+}
+
+function getSmartSelectOptions(select, config) {
+    return Array.from(select?.options || []).map((option) => {
+        const value = option.value;
+        const info = config?.[value] || {};
+        const label = option.textContent?.trim() || getModelDisplayName(info.label || value);
+        const description = info.description || value;
+        const provider = getProviderLabel(value);
+        return {
+            value,
+            label,
+            description,
+            provider,
+            searchText: `${value} ${label} ${description} ${provider}`.toLowerCase(),
+        };
+    });
+}
+
+function appendSmartSelectOption(list, option, select, renderAgain) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'smart-select-option';
+    item.classList.toggle('selected', option.value === select.value);
+
+    const main = document.createElement('span');
+    main.className = 'smart-option-main';
+    const title = document.createElement('span');
+    title.className = 'smart-option-title';
+    title.textContent = option.label;
+    const desc = document.createElement('span');
+    desc.className = 'smart-option-desc';
+    desc.textContent = option.description;
+    main.appendChild(title);
+    main.appendChild(desc);
+
+    const badge = document.createElement('span');
+    badge.className = 'smart-option-badge';
+    badge.textContent = option.provider;
+
+    item.appendChild(main);
+    item.appendChild(badge);
+    item.addEventListener('click', (event) => {
+        event.stopPropagation();
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        closeSmartSelect();
+        renderAgain();
+    });
+    list.appendChild(item);
+}
+
+function renderSmartSelectOptions(list, options, select, query, emptyText, renderAgain) {
+    list.innerHTML = '';
+    const normalizedQuery = String(query || '').trim().toLowerCase();
+    const visibleOptions = normalizedQuery
+        ? options.filter((option) => option.searchText.includes(normalizedQuery))
+        : options;
+
+    if (visibleOptions.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'smart-select-empty';
+        empty.textContent = emptyText;
+        list.appendChild(empty);
+        return;
+    }
+
+    visibleOptions.forEach((option) => appendSmartSelectOption(list, option, select, renderAgain));
+}
+
+function renderSmartSelect({ container, select, config, iconClass, searchPlaceholder, emptyText }) {
+    if (!container || !select) return;
+    const options = getSmartSelectOptions(select, config);
+    const selectedOption = options.find((option) => option.value === select.value) || options[0];
+    container.innerHTML = '';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'smart-select-trigger';
+
+    const icon = document.createElement('span');
+    icon.className = 'smart-select-icon';
+    const iconEl = document.createElement('i');
+    iconEl.className = iconClass;
+    icon.appendChild(iconEl);
+
+    const copy = document.createElement('span');
+    copy.className = 'smart-select-copy';
+    const title = document.createElement('span');
+    title.className = 'smart-select-title';
+    title.textContent = selectedOption?.label || '请选择';
+    const subtitle = document.createElement('span');
+    subtitle.className = 'smart-select-subtitle';
+    subtitle.textContent = selectedOption?.description || selectedOption?.value || '';
+    copy.appendChild(title);
+    copy.appendChild(subtitle);
+
+    const arrow = document.createElement('i');
+    arrow.className = 'fas fa-chevron-down smart-select-arrow';
+
+    trigger.appendChild(icon);
+    trigger.appendChild(copy);
+    trigger.appendChild(arrow);
+
+    const menu = document.createElement('div');
+    menu.className = 'smart-select-menu';
+
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'smart-select-search';
+    const searchIcon = document.createElement('i');
+    searchIcon.className = 'fas fa-magnifying-glass';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.placeholder = searchPlaceholder;
+    searchWrap.appendChild(searchIcon);
+    searchWrap.appendChild(searchInput);
+
+    const list = document.createElement('div');
+    list.className = 'smart-select-options';
+
+    const renderAgain = () => renderSmartSelect({ container, select, config, iconClass, searchPlaceholder, emptyText });
+    renderSmartSelectOptions(list, options, select, '', emptyText, renderAgain);
+
+    searchInput.addEventListener('click', (event) => event.stopPropagation());
+    searchInput.addEventListener('input', () => {
+        renderSmartSelectOptions(list, options, select, searchInput.value, emptyText, renderAgain);
+    });
+
+    trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (openSmartSelect === container) {
+            closeSmartSelect();
+            return;
+        }
+        closeSmartSelect();
+        container.classList.add('open');
+        openSmartSelect = container;
+        setTimeout(() => searchInput.focus(), 0);
+    });
+
+    menu.appendChild(searchWrap);
+    menu.appendChild(list);
+    container.appendChild(trigger);
+    container.appendChild(menu);
+}
+
 function renderRoutes() {
     if (!geminiRouteSelect) return;
     geminiRouteSelect.innerHTML = '';
@@ -196,9 +482,20 @@ function renderRoutes() {
     geminiRouteSelect.value = routeConfig[defaultRoute] ? defaultRoute : Object.keys(routeConfig)[0];
 }
 function renderSourceLanguages() {
-    sourceLangSelect.innerHTML = '';
-    Object.entries(languageConfig).forEach(([code, info]) => sourceLangSelect.add(new Option(info.name, code)));
-    sourceLangSelect.value = languageConfig.zh ? 'zh' : Object.keys(languageConfig)[0];
+    if (!sourceLangGroup) return;
+    if (Object.keys(languageConfig).length > 0 && selectedSourceLangs.size === 0 && !btnClearSourceLangs?.dataset.userCleared) {
+        selectedSourceLangs.add(languageConfig.zh ? 'zh' : Object.keys(languageConfig)[0]);
+    }
+    renderLanguageGroup({
+        container: sourceLangGroup,
+        selectedSet: selectedSourceLangs,
+        searchText: sourceLangSearch?.value || '',
+        type: 'source',
+        excludedSet: new Set(),
+        emptyText: '没有找到匹配的源语言',
+    });
+    renderSelectedLanguages(sourceLangSelected, selectedSourceLangs, 'source');
+    updateLanguageCount(sourceLangCount, selectedSourceLangs.size);
 }
 function renderTranslateModes() {
     if (!translateModeGroup) return;
@@ -216,7 +513,7 @@ function renderTranslateModes() {
     translateModeGroup.innerHTML = '';
     Object.entries(translateModeConfig).forEach(([value, info]) => {
         const chip = document.createElement('label');
-        chip.className = 'lang-chip';
+        chip.className = 'lang-chip mode-chip';
         if (info.description) chip.title = info.description;
         const radio = document.createElement('input');
         radio.type = 'radio';
@@ -226,11 +523,19 @@ function renderTranslateModes() {
         const checkIcon = document.createElement('span');
         checkIcon.className = 'chip-check';
         checkIcon.innerHTML = '<i class="fas fa-check"></i>';
+        const copy = document.createElement('span');
+        copy.className = 'mode-chip-copy';
         const nameSpan = document.createElement('span');
+        nameSpan.className = 'mode-chip-title';
         nameSpan.textContent = info.label || value;
+        const descSpan = document.createElement('span');
+        descSpan.className = 'mode-chip-desc';
+        descSpan.textContent = info.description || '';
+        copy.appendChild(nameSpan);
+        copy.appendChild(descSpan);
         chip.appendChild(radio);
         chip.appendChild(checkIcon);
-        chip.appendChild(nameSpan);
+        chip.appendChild(copy);
         chip.classList.toggle('active', radio.checked);
         chip.addEventListener('click', (e) => {
             e.preventDefault();
@@ -252,13 +557,33 @@ const LANG_GROUPS = [
     { label: '美洲', codes: ['pt-BR', 'es-419', 'qu', 'ht'] },
 ];
 
-function makeChip(code, info, sourceLang) {
+function getExistingLanguageCodes(codes) {
+    return codes.filter((code) => languageConfig[code]);
+}
+
+function getLanguageSearchText(code, info) {
+    return [
+        code,
+        info?.name || '',
+        info?.english_name || '',
+    ].join(' ').toLowerCase();
+}
+
+function languageMatchesSearch(code, info, searchText) {
+    const query = String(searchText || '').trim().toLowerCase();
+    if (!query) return true;
+    return getLanguageSearchText(code, info).includes(query);
+}
+
+function makeChip(code, info, type) {
     const chip = document.createElement('label');
     chip.className = 'lang-chip';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.value = code;
-    if (code === 'en' && sourceLang !== 'en') { checkbox.checked = true; chip.classList.add('active'); }
+    const selectedSet = type === 'source' ? selectedSourceLangs : selectedTargetLangs;
+    checkbox.checked = selectedSet.has(code);
+    chip.classList.toggle('active', checkbox.checked);
     const checkIcon = document.createElement('span');
     checkIcon.className = 'chip-check';
     checkIcon.innerHTML = '<i class="fas fa-check"></i>';
@@ -269,51 +594,169 @@ function makeChip(code, info, sourceLang) {
     chip.appendChild(nameSpan);
     chip.addEventListener('click', (e) => {
         e.preventDefault();
-        checkbox.checked = !checkbox.checked;
-        chip.classList.toggle('active', checkbox.checked);
-        updateProcessButton();
+        toggleLanguageSelection(type, code);
     });
     return chip;
 }
 
-function renderTargetLanguages() {
-    targetLangGroup.innerHTML = '';
-    const sourceLang = sourceLangSelect.value;
+function appendLanguageGroupTitle(container, label) {
+    const groupLabel = document.createElement('div');
+    groupLabel.className = 'language-group-title';
+    groupLabel.textContent = label;
+    container.appendChild(groupLabel);
+}
+
+function renderLanguageGroup({ container, selectedSet, searchText, type, excludedSet, emptyText }) {
+    container.innerHTML = '';
     const rendered = new Set();
+    let visibleCount = 0;
 
     LANG_GROUPS.forEach((group) => {
-        const codesInGroup = group.codes.filter((c) => c !== sourceLang && languageConfig[c]);
+        const codesInGroup = group.codes.filter((code) => {
+            if (!languageConfig[code] || excludedSet.has(code)) return false;
+            return languageMatchesSearch(code, languageConfig[code], searchText);
+        });
         if (codesInGroup.length === 0) return;
 
-        const groupLabel = document.createElement('div');
-        groupLabel.style.cssText = 'width:100%;margin-top:10px;margin-bottom:2px;font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--text-secondary,#94a3b8);text-transform:uppercase;';
-        groupLabel.textContent = group.label;
-        targetLangGroup.appendChild(groupLabel);
-
+        appendLanguageGroupTitle(container, group.label);
         codesInGroup.forEach((code) => {
             rendered.add(code);
-            targetLangGroup.appendChild(makeChip(code, languageConfig[code], sourceLang));
+            visibleCount += 1;
+            container.appendChild(makeChip(code, languageConfig[code], type));
         });
     });
 
-    // 未被分进任何组的语言（兜底）
-    const extras = Object.keys(languageConfig).filter((c) => c !== sourceLang && !rendered.has(c));
+    const extras = Object.keys(languageConfig).filter((code) => (
+        !rendered.has(code)
+        && !excludedSet.has(code)
+        && languageMatchesSearch(code, languageConfig[code], searchText)
+    ));
     if (extras.length > 0) {
-        const groupLabel = document.createElement('div');
-        groupLabel.style.cssText = 'width:100%;margin-top:10px;margin-bottom:2px;font-size:11px;font-weight:700;letter-spacing:0.06em;color:var(--text-secondary,#94a3b8);text-transform:uppercase;';
-        groupLabel.textContent = '其他';
-        targetLangGroup.appendChild(groupLabel);
+        appendLanguageGroupTitle(container, '其他');
         extras.forEach((code) => {
-            targetLangGroup.appendChild(makeChip(code, languageConfig[code], sourceLang));
+            visibleCount += 1;
+            container.appendChild(makeChip(code, languageConfig[code], type));
         });
     }
 
+    if (visibleCount === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'language-empty';
+        empty.textContent = emptyText;
+        container.appendChild(empty);
+    }
+}
+
+function renderSelectedLanguages(container, selectedSet, type) {
+    if (!container) return;
+    container.innerHTML = '';
+    if (selectedSet.size === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'selected-pill';
+        empty.textContent = type === 'source' ? '未选择源语言' : '未选择目标语言';
+        container.appendChild(empty);
+        return;
+    }
+
+    Array.from(selectedSet).forEach((code) => {
+        const info = languageConfig[code];
+        if (!info) return;
+        const pill = document.createElement('span');
+        pill.className = 'selected-pill';
+        const label = document.createElement('span');
+        label.textContent = info.name;
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.title = '移除';
+        removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+        removeBtn.addEventListener('click', () => toggleLanguageSelection(type, code));
+        pill.appendChild(label);
+        pill.appendChild(removeBtn);
+        container.appendChild(pill);
+    });
+}
+
+function updateLanguageCount(el, count) {
+    if (!el) return;
+    el.textContent = `已选 ${count}`;
+}
+
+function toggleLanguageSelection(type, code) {
+    const selectedSet = type === 'source' ? selectedSourceLangs : selectedTargetLangs;
+    if (selectedSet.has(code)) {
+        selectedSet.delete(code);
+        if (type === 'source' && selectedSourceLangs.size === 0 && btnClearSourceLangs) {
+            btnClearSourceLangs.dataset.userCleared = '1';
+        }
+    } else {
+        selectedSet.add(code);
+        if (type === 'source' && btnClearSourceLangs) {
+            delete btnClearSourceLangs.dataset.userCleared;
+        }
+    }
+
+    if (type === 'source') {
+        syncTargetSelection();
+        renderSourceLanguages();
+        renderTargetLanguages();
+    } else {
+        renderTargetLanguages();
+    }
     updateProcessButton();
 }
 
-function getSelectedTargetLangs() {
-    return Array.from(targetLangGroup.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value);
+function syncTargetSelection() {
+    Array.from(selectedSourceLangs).forEach((code) => selectedTargetLangs.delete(code));
 }
+
+function ensureTargetFallback() {
+    syncTargetSelection();
+    if (selectedTargetLangs.size > 0 || Object.keys(languageConfig).length === 0) return;
+    const fallback = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'de', 'es']
+        .find((code) => languageConfig[code] && !selectedSourceLangs.has(code))
+        || Object.keys(languageConfig).find((code) => !selectedSourceLangs.has(code));
+    if (fallback) selectedTargetLangs.add(fallback);
+}
+
+function renderTargetLanguages() {
+    if (!targetLangGroup) return;
+    ensureTargetFallback();
+    renderLanguageGroup({
+        container: targetLangGroup,
+        selectedSet: selectedTargetLangs,
+        searchText: targetLangSearch?.value || '',
+        type: 'target',
+        excludedSet: selectedSourceLangs,
+        emptyText: '没有找到匹配的目标语言，或匹配项已被选为源语言',
+    });
+    renderSelectedLanguages(targetLangSelected, selectedTargetLangs, 'target');
+    updateLanguageCount(targetLangCount, selectedTargetLangs.size);
+    updateProcessButton();
+}
+
+function getSelectedSourceLangs() {
+    return Array.from(selectedSourceLangs).filter((code) => languageConfig[code]);
+}
+
+function getSelectedTargetLangs() {
+    return Array.from(selectedTargetLangs).filter((code) => languageConfig[code] && !selectedSourceLangs.has(code));
+}
+
+function getTranslationRules() {
+    return (translationRulesInput?.value || '').trim();
+}
+
+function updateTranslationRulesCount() {
+    if (!translationRulesCount) return;
+    const maxLength = Number(translationRulesInput?.maxLength || 4000);
+    const currentLength = translationRulesInput?.value.length || 0;
+    translationRulesCount.textContent = `${currentLength} / ${maxLength}`;
+}
+
+function updateProcessButton() {
+    btnProcess.disabled = !(selectedFiles.length > 0 && getSelectedSourceLangs().length > 0 && getSelectedTargetLangs().length > 0);
+}
+
 function getSelectedTranslateMode() {
     const checked = translateModeGroup?.querySelector('input[type="radio"]:checked');
     return checked?.value || defaultTranslateMode;
@@ -327,10 +770,6 @@ function selectTranslateMode(mode) {
         chip.classList.toggle('active', isActive);
     });
 }
-function updateProcessButton() {
-    btnProcess.disabled = !(selectedFiles.length > 0 && getSelectedTargetLangs().length > 0);
-}
-
 function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); uploadArea.style.borderColor = 'var(--primary-color)'; }
 function handleDrop(e) {
     e.preventDefault(); e.stopPropagation();
@@ -388,13 +827,15 @@ function clearFiles() {
 
 async function processFiles() {
     if (selectedFiles.length === 0) return;
+    const sourceLangs = getSelectedSourceLangs();
     const targetLangs = getSelectedTargetLangs();
+    if (sourceLangs.length === 0) { alert('请至少选择一种源语言。'); return; }
     if (targetLangs.length === 0) { alert('请至少选择一种目标翻译语言。'); return; }
-    if (selectedFiles.length === 1) { await processSingleFile(targetLangs); return; }
-    await processBatchFiles(targetLangs);
+    if (selectedFiles.length === 1) { await processSingleFile(sourceLangs, targetLangs); return; }
+    await processBatchFiles(sourceLangs, targetLangs);
 }
 
-async function processSingleFile(targetLangs) {
+async function processSingleFile(sourceLangs, targetLangs) {
     uploadSection.style.display = 'none';
     resultSection.style.display = 'none';
     batchSection.style.display = 'none';
@@ -405,7 +846,8 @@ async function processSingleFile(targetLangs) {
     try {
         const formData = new FormData();
         formData.append('file', selectedFiles[0]);
-        const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
+        formData.append('translation_rules', getTranslationRules());
+        const params = new URLSearchParams({ source_lang: sourceLangs.join(','), target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, translation_engine: translationEngineSelect?.value || defaultTranslationEngine });
         const response = await fetch(`/task/doc-translate?${params.toString()}`, { method: 'POST', body: formData });
         if (!response.ok) { const t = await safeReadError(response); throw new Error(t || `提交失败: ${response.status}`); }
         const data = await response.json();
@@ -413,14 +855,15 @@ async function processSingleFile(targetLangs) {
     } catch (error) { showFailure(error.message); }
 }
 
-async function processBatchFiles(targetLangs) {
+async function processBatchFiles(sourceLangs, targetLangs) {
     uploadSection.style.display = 'none';
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
 
-    const params = new URLSearchParams({ source_lang: sourceLangSelect.value, target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
+    const params = new URLSearchParams({ source_lang: sourceLangs.join(','), target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, translation_engine: translationEngineSelect?.value || defaultTranslationEngine });
     const formData = new FormData();
+    formData.append('translation_rules', getTranslationRules());
     selectedFiles.forEach((file) => formData.append('files', file));
 
     try {
@@ -633,6 +1076,7 @@ function showResult(result) {
     resultStats.innerHTML = `
         <div class="stat-card"><i class="fas fa-file-alt"></i><h3>${escapeHtml(result.filename || '-')}</h3><p>源文件</p></div>
         <div class="stat-card"><i class="fas fa-robot"></i><h3>${escapeHtml(getModelDisplayName(result.ocr_model || '-'))}</h3><p>OCR 模型</p></div>
+        <div class="stat-card"><i class="fas fa-language"></i><h3>${escapeHtml(getModelDisplayName(result.translation_engine || result.translation_model || '-'))}</h3><p>翻译引擎</p></div>
         <div class="stat-card"><i class="fas fa-globe"></i><h3>${langCount} 种语言</h3><p>翻译输出</p></div>
         <div class="stat-card"><i class="fas fa-check-circle"></i><h3>成功</h3><p>任务状态</p></div>
     `;

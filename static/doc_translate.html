@@ -12,23 +12,28 @@
         .lang-selector {
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 12px;
         }
 
         .lang-checkbox-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+            gap: 8px;
+            max-height: 268px;
+            overflow-y: auto;
+            padding: 4px 2px 6px;
+            scrollbar-width: thin;
         }
 
         .lang-chip {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            border-radius: 999px;
+            gap: 8px;
+            min-height: 38px;
+            padding: 8px 12px;
+            border-radius: 10px;
             border: 1.5px solid var(--border-color);
-            background: var(--card-bg);
+            background: rgba(255, 255, 255, 0.82);
             cursor: pointer;
             font-size: 13px;
             font-weight: 500;
@@ -49,10 +54,10 @@
 
         .lang-chip.active {
             border-color: var(--primary-color);
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.15));
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(99, 102, 241, 0.12));
             color: var(--primary-color);
             font-weight: 600;
-            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
+            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.1);
         }
 
         .lang-chip .chip-check {
@@ -80,12 +85,496 @@
             color: var(--text-primary);
         }
 
+        .upload-card .options-panel {
+            grid-template-columns: repeat(2, minmax(260px, 1fr));
+            align-items: start;
+            overflow: visible;
+        }
+
+        .model-picker-card,
+        .engine-picker-card,
+        .translate-mode-card,
+        .prompt-rules-card {
+            overflow: visible;
+        }
+
+        .config-card-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .config-card-head label,
+        .config-card-head h4 {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+            color: var(--text-primary);
+        }
+
+        .config-card-head span {
+            white-space: nowrap;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .native-select-hidden {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            min-height: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: 0 !important;
+            opacity: 0;
+            pointer-events: none;
+            clip-path: inset(50%);
+        }
+
+        .smart-select {
+            position: relative;
+            z-index: 5;
+        }
+
+        .smart-select.open {
+            z-index: 80;
+        }
+
+        .smart-select-trigger {
+            width: 100%;
+            min-height: 74px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 14px;
+            border: 1px solid rgba(88, 112, 138, 0.16);
+            background: linear-gradient(180deg, #ffffff, #f8fbff);
+            color: var(--text-primary);
+            cursor: pointer;
+            text-align: left;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+        }
+
+        .smart-select-trigger:hover,
+        .smart-select.open .smart-select-trigger {
+            border-color: rgba(14, 165, 233, 0.42);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1), 0 10px 26px rgba(15, 23, 42, 0.08);
+        }
+
+        .smart-select-icon {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            border-radius: 12px;
+            background: rgba(14, 165, 233, 0.1);
+            color: var(--primary-color);
+            font-size: 16px;
+        }
+
+        .smart-select-copy {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .smart-select-title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+
+        .smart-select-subtitle {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .smart-select-arrow {
+            color: var(--text-secondary);
+            transition: transform 0.18s ease;
+        }
+
+        .smart-select.open .smart-select-arrow {
+            transform: rotate(180deg);
+        }
+
+        .smart-select-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            right: 0;
+            display: none;
+            border-radius: 16px;
+            border: 1px solid rgba(88, 112, 138, 0.16);
+            background: #fff;
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+            padding: 10px;
+        }
+
+        .smart-select.open .smart-select-menu {
+            display: block;
+        }
+
+        .smart-select-search {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            min-height: 40px;
+            padding: 0 11px;
+            margin-bottom: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(88, 112, 138, 0.14);
+            background: #f8fbfe;
+        }
+
+        .smart-select-search i {
+            color: var(--primary-color);
+        }
+
+        .smart-select-search input {
+            width: 100%;
+            border: none;
+            outline: none;
+            background: transparent;
+            color: var(--text-primary);
+            font: inherit;
+            font-size: 14px;
+        }
+
+        .smart-select-options {
+            max-height: 310px;
+            overflow-y: auto;
+            display: grid;
+            gap: 6px;
+            padding-right: 2px;
+        }
+
+        .smart-select-option {
+            width: 100%;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+            padding: 10px 11px;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .smart-select-option:hover {
+            background: #f4f8fc;
+            border-color: rgba(88, 112, 138, 0.12);
+        }
+
+        .smart-select-option.selected {
+            background: rgba(14, 165, 233, 0.09);
+            border-color: rgba(14, 165, 233, 0.22);
+        }
+
+        .smart-option-main {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .smart-option-title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .smart-option-desc {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .smart-option-badge {
+            min-width: 72px;
+            justify-self: end;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.06);
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 800;
+            text-align: center;
+        }
+
+        .smart-select-option.selected .smart-option-badge {
+            background: rgba(14, 165, 233, 0.14);
+            color: var(--primary-color);
+        }
+
+        .smart-select-empty {
+            padding: 18px 12px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            text-align: center;
+        }
+
+        .translate-mode-card .lang-selector {
+            gap: 10px;
+        }
+
+        .translate-mode-card .lang-checkbox-group {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            max-height: none;
+            gap: 10px;
+            padding: 0;
+        }
+
+        .translate-mode-card .mode-chip {
+            min-height: 76px;
+            align-items: flex-start;
+            padding: 12px;
+            background: #fff;
+        }
+
+        .mode-chip-copy {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .mode-chip-title {
+            font-size: 14px;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+
+        .mode-chip-desc {
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .language-panel {
+            grid-column: 1 / -1;
+        }
+
+        .language-panel .lang-selector {
+            padding: 2px;
+        }
+
+        .language-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .language-count {
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: rgba(14, 165, 233, 0.1);
+            color: var(--primary-color);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .language-toolbar {
+            display: grid;
+            grid-template-columns: minmax(220px, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .language-search {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 42px;
+            padding: 0 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(88, 112, 138, 0.16);
+            background: #fff;
+        }
+
+        .language-search i {
+            color: var(--primary-color);
+        }
+
+        .language-search input {
+            width: 100%;
+            border: none;
+            outline: none;
+            background: transparent;
+            font: inherit;
+            color: var(--text-primary);
+        }
+
+        .language-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .mini-action {
+            min-height: 38px;
+            padding: 0 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(88, 112, 138, 0.16);
+            background: rgba(255, 255, 255, 0.86);
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .mini-action:hover {
+            border-color: rgba(14, 165, 233, 0.3);
+            color: var(--primary-color);
+        }
+
+        .selected-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            min-height: 28px;
+        }
+
+        .selected-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            min-height: 28px;
+            padding: 0 9px;
+            border-radius: 999px;
+            border: 1px solid rgba(14, 165, 233, 0.16);
+            background: rgba(14, 165, 233, 0.08);
+            color: var(--primary-color);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .selected-pill button {
+            border: none;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .language-group-title {
+            grid-column: 1 / -1;
+            margin: 8px 0 0;
+            padding-top: 8px;
+            border-top: 1px solid rgba(88, 112, 138, 0.12);
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .language-empty {
+            grid-column: 1 / -1;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px dashed rgba(88, 112, 138, 0.24);
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.62);
+            font-size: 13px;
+        }
+
         .lang-selector .selector-label {
             display: flex;
             align-items: center;
             gap: 8px;
             font-size: 13px;
             color: var(--text-secondary);
+        }
+
+        .prompt-rules-card {
+            grid-column: 1 / -1;
+        }
+
+        .prompt-rules-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .prompt-rules-head label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+        }
+
+        .prompt-rules-textarea {
+            width: 100%;
+            min-height: 118px;
+            resize: vertical;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(88, 112, 138, 0.16);
+            background: #fff;
+            color: var(--text-primary);
+            font: inherit;
+            line-height: 1.65;
+            outline: none;
+        }
+
+        .prompt-rules-textarea:focus {
+            border-color: rgba(14, 165, 233, 0.45);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+        }
+
+        .prompt-rules-footer {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 8px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        @media (max-width: 720px) {
+            .upload-card .options-panel,
+            .translate-mode-card .lang-checkbox-group {
+                grid-template-columns: 1fr;
+            }
+
+            .language-toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .language-actions {
+                justify-content: flex-start;
+            }
         }
 
         /* 结果区域覆盖 */
@@ -159,7 +648,7 @@
                 </div>
                 <div class="metric-card">
                     <strong>AI 驱动</strong>
-                    <span>OCR 提取 + DeepSeek 大模型翻译，专业术语更准确。</span>
+                    <span>OCR 提取 + Gemini / DeepSeek 翻译引擎，专业术语更准确。</span>
                 </div>
             </div>
         </section>
@@ -202,12 +691,22 @@
                         <!-- 配置区 -->
                         <div class="options-panel">
                             <!-- OCR 模型选择 -->
-                            <div class="option-group option-card">
-                                <label for="modelSelect">OCR 模型</label>
-                                <div class="field-wrap">
-                                    <i class="fas fa-robot"></i>
-                                    <select id="modelSelect"></select>
+                            <div class="option-group option-card model-picker-card">
+                                <div class="config-card-head">
+                                    <label for="modelSelect"><i class="fas fa-robot"></i> OCR 模型</label>
+                                    <span>识别阶段</span>
                                 </div>
+                                <select id="modelSelect" class="native-select-hidden" aria-label="OCR 模型"></select>
+                                <div class="smart-select" id="modelSmartSelect"></div>
+                            </div>
+
+                            <div class="option-group option-card engine-picker-card">
+                                <div class="config-card-head">
+                                    <label for="translationEngineSelect"><i class="fas fa-language"></i> 翻译引擎</label>
+                                    <span>LLM 模型</span>
+                                </div>
+                                <select id="translationEngineSelect" class="native-select-hidden" aria-label="翻译引擎"></select>
+                                <div class="smart-select" id="translationEngineSmartSelect"></div>
                             </div>
 
                             <div class="option-group option-card" id="geminiRouteGroup" style="display:none;">
@@ -218,18 +717,12 @@
                                 </div>
                             </div>
 
-                            <!-- 源语言 -->
-                            <div class="option-group option-card">
-                                <label for="sourceLangSelect">源语言</label>
-                                <div class="field-wrap">
-                                    <i class="fas fa-flag"></i>
-                                    <select id="sourceLangSelect"></select>
-                                </div>
-                            </div>
-
-                            <div class="option-group option-card">
+                            <div class="option-group option-card translate-mode-card">
                                 <div class="lang-selector">
-                                    <h4><i class="fas fa-language"></i> 翻译模式</h4>
+                                    <div class="config-card-head">
+                                        <h4><i class="fas fa-sliders"></i> 翻译模式</h4>
+                                        <span>输出结构</span>
+                                    </div>
                                     <div class="lang-checkbox-group" id="translateModeGroup">
                                         <!-- JS 动态填充 -->
                                     </div>
@@ -239,18 +732,69 @@
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="option-group option-card prompt-rules-card">
+                                <div class="prompt-rules-head">
+                                    <label for="translationRulesInput"><i class="fas fa-pen-nib"></i> 翻译规则</label>
+                                    <button type="button" class="mini-action" id="btnClearTranslationRules">清空</button>
+                                </div>
+                                <textarea
+                                    id="translationRulesInput"
+                                    class="prompt-rules-textarea"
+                                    maxlength="4000"
+                                    placeholder="例如：公司名称保持英文；日期统一输出为 YYYY-MM-DD；术语 Certificate of Incorporation 译为公司注册证书。"></textarea>
+                                <div class="prompt-rules-footer">
+                                    <span id="translationRulesCount">0 / 4000</span>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- 目标语言多选 -->
-                        <div class="option-group option-card" style="margin-top: 16px;">
+                        <div class="option-group option-card language-panel">
                             <div class="lang-selector">
-                                <h4><i class="fas fa-globe"></i> 选择目标翻译语言（可多选）</h4>
-                                <div class="lang-checkbox-group" id="targetLangGroup">
-                                    <!-- JS 动态填充 -->
+                                <div class="language-head">
+                                    <h4><i class="fas fa-flag"></i> 源语言（可多选）</h4>
+                                    <span class="language-count" id="sourceLangCount">已选 0</span>
                                 </div>
+                                <div class="language-toolbar">
+                                    <div class="language-search">
+                                        <i class="fas fa-magnifying-glass"></i>
+                                        <input type="search" id="sourceLangSearch" placeholder="搜索源语言：中文、英文、zh、en...">
+                                    </div>
+                                    <div class="language-actions">
+                                        <button type="button" class="mini-action" id="btnSourceCommon">常用源语</button>
+                                        <button type="button" class="mini-action" id="btnClearSourceLangs">清空</button>
+                                    </div>
+                                </div>
+                                <div class="selected-strip" id="sourceLangSelected"></div>
+                                <div class="lang-checkbox-group" id="sourceLangGroup"></div>
                                 <div class="selector-label">
                                     <i class="fas fa-info-circle"></i>
-                                    <span>选中的每种语言都会生成一份独立的 Word 文档</span>
+                                    <span>证件中混有多种原文时可同时勾选，翻译提示词会按多源语言处理。</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="option-group option-card language-panel" style="margin-top: 16px;">
+                            <div class="lang-selector">
+                                <div class="language-head">
+                                    <h4><i class="fas fa-globe"></i> 目标翻译语言（可多选）</h4>
+                                    <span class="language-count" id="targetLangCount">已选 0</span>
+                                </div>
+                                <div class="language-toolbar">
+                                    <div class="language-search">
+                                        <i class="fas fa-magnifying-glass"></i>
+                                        <input type="search" id="targetLangSearch" placeholder="搜索目标语言：英语、日文、Spanish、es...">
+                                    </div>
+                                    <div class="language-actions">
+                                        <button type="button" class="mini-action" id="btnTargetCommon">常用目标</button>
+                                        <button type="button" class="mini-action" id="btnClearTargetLangs">清空</button>
+                                    </div>
+                                </div>
+                                <div class="selected-strip" id="targetLangSelected"></div>
+                                <div class="lang-checkbox-group" id="targetLangGroup"></div>
+                                <div class="selector-label">
+                                    <i class="fas fa-info-circle"></i>
+                                    <span>选中的每种语言都会生成一份独立的 Word 文档；已选源语言会自动从目标列表中排除。</span>
                                 </div>
                             </div>
                         </div>
@@ -272,8 +816,9 @@
                         <ul class="info-list">
                             <li>上传 PDF 或图片文件，系统自动 OCR 提取文字。</li>
                             <li>可同时选择多种目标语言，每种语言各自生成一份 Word。</li>
+                            <li>源语言可多选，适合证件中混有多种语言的情况。</li>
                             <li>复杂版面建议使用"增强版V2"模型。</li>
-                            <li>翻译使用 DeepSeek AI 大模型，支持专业术语。</li>
+                            <li>可按任务选择 Gemini 或 DeepSeek 翻译引擎。</li>
                         </ul>
                     </div>
                     <div class="info-card emphasis">

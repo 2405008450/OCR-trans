@@ -25,7 +25,7 @@ from PIL import Image, UnidentifiedImageError
 
 from app.core.config import settings
 from app.core.file_naming import build_user_visible_filename, ensure_unique_path
-from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
+from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured, generate_text
 from app.service.libreoffice_service import convert_doc_to_docx_via_libreoffice
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
@@ -130,6 +130,10 @@ DOC_TRANSLATE_DEFAULT_MODEL = "google/gemini-3-flash-preview"
 DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
 
 DOC_TRANSLATE_MODELS: Dict[str, Dict[str, str]] = {
+    "google/gemini-3.1-flash-lite": {
+        "label": "极速版V2",
+        "description": "更轻量的 OCR 模型，适合追求速度的 PDF / 图片文档。",
+    },
     "google/gemini-3-flash-preview": {
         "label": "快速版V2",
         "description": "速度更快，适合常规 PDF / 图片文档。",
@@ -156,9 +160,156 @@ DOC_TRANSLATE_TRANSLATE_MODES: Dict[str, Dict[str, str]] = {
 }
 
 # 文本翻译模型
-DOC_TRANSLATE_TRANSLATION_MODEL = "deepseek-v4-flash"
+DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE = "google/gemini-3-flash-preview"
+DOC_TRANSLATE_TRANSLATION_MODEL = DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE
 DOC_TRANSLATE_TRANSLATION_MAX_TOKENS = 384000
 DOC_TRANSLATE_TRANSLATION_REQUEST_MAX_TOKENS = 384000
+DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS = 65536
+DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS = 65536
+DOC_TRANSLATE_TRANSLATION_RULES_MAX_CHARS = 4000
+DOC_TRANSLATE_TRANSLATION_ENGINES: Dict[str, Dict[str, Any]] = {
+    "google/gemini-3-flash-preview": {
+        "label": "Gemini 3 Flash Preview",
+        "description": "默认文本翻译引擎，速度优先，适合常规证件翻译。",
+        "provider": "gemini",
+        "model": "google/gemini-3-flash-preview",
+        "max_tokens": DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS,
+    },
+    "google/gemini-3.5-flash": {
+        "label": "Gemini 3.5 Flash",
+        "description": "新一代 Gemini Flash 模型，适合常规多语种翻译。",
+        "provider": "gemini",
+        "model": "google/gemini-3.5-flash",
+        "max_tokens": DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS,
+    },
+    "google/gemini-3.1-pro-preview": {
+        "label": "Gemini 3.1 Pro Preview",
+        "description": "更强调复杂语境和术语一致性，适合难度较高的证件文本。",
+        "provider": "gemini",
+        "model": "google/gemini-3.1-pro-preview",
+        "max_tokens": DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS,
+    },
+    "google/gemini-3.1-flash-lite": {
+        "label": "Gemini 3.1 Flash Lite",
+        "description": "轻量快速的 Gemini 文本翻译引擎，适合短文本和批量任务。",
+        "provider": "gemini",
+        "model": "google/gemini-3.1-flash-lite",
+        "max_tokens": DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS,
+    },
+    "openai/gpt-5.5": {
+        "label": "GPT-5.5",
+        "description": "OpenAI 新一代 GPT 旗舰模型，适合高质量证件和长文本翻译。",
+        "provider": "openrouter",
+        "model": "openai/gpt-5.5",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "openai/gpt-5.4": {
+        "label": "GPT-5.4",
+        "description": "OpenAI GPT-5.4 主力模型，适合对译文质量要求较高的任务。",
+        "provider": "openrouter",
+        "model": "openai/gpt-5.4",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "openai/gpt-5.4-mini": {
+        "label": "GPT-5.4 Mini",
+        "description": "GPT-5.4 系列轻量模型，适合速度和成本更敏感的翻译任务。",
+        "provider": "openrouter",
+        "model": "openai/gpt-5.4-mini",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "openai/gpt-chat-latest": {
+        "label": "GPT Chat Latest",
+        "description": "OpenAI 稳定最新聊天模型别名，适合希望跟随 GPT 最新主线的环境。",
+        "provider": "openrouter",
+        "model": "openai/gpt-chat-latest",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "anthropic/claude-opus-4.8": {
+        "label": "Claude Opus 4.8",
+        "description": "Anthropic Opus 新一代高能力模型，适合复杂文档和高质量译文。",
+        "provider": "openrouter",
+        "model": "anthropic/claude-opus-4.8",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "anthropic/claude-sonnet-4.6": {
+        "label": "Claude Sonnet 4.6",
+        "description": "Anthropic Sonnet 主力模型，适合质量、速度和成本均衡的翻译任务。",
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4.6",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "qwen/qwen3.7-max": {
+        "label": "Qwen3.7 Max",
+        "description": "通义千问 Qwen3.7 旗舰模型，适合中英文和多语种文档翻译。",
+        "provider": "openrouter",
+        "model": "qwen/qwen3.7-max",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "qwen/qwen3.7-plus": {
+        "label": "Qwen3.7 Plus",
+        "description": "通义千问 Qwen3.7 高性价比模型，适合批量证件翻译。",
+        "provider": "openrouter",
+        "model": "qwen/qwen3.7-plus",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "deepseek/deepseek-v3.2": {
+        "label": "DeepSeek V3.2",
+        "description": "OpenRouter DeepSeek V3.2 模型，适合多语种和长上下文翻译。",
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-v3.2",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "x-ai/grok-4.3": {
+        "label": "Grok 4.3",
+        "description": "xAI Grok 主力模型，适合需要较强指令跟随的翻译任务。",
+        "provider": "openrouter",
+        "model": "x-ai/grok-4.3",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "mistralai/mistral-medium-3-5": {
+        "label": "Mistral Medium 3.5",
+        "description": "Mistral 中大型模型，适合欧洲语种和通用文档翻译。",
+        "provider": "openrouter",
+        "model": "mistralai/mistral-medium-3-5",
+        "max_tokens": DOC_TRANSLATE_OPENROUTER_TRANSLATION_MAX_TOKENS,
+    },
+    "deepseek-v4-flash": {
+        "label": "DeepSeek V4 Flash",
+        "description": "原默认文本翻译引擎，速度快，适合常规证件和文档翻译。",
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "max_tokens": DOC_TRANSLATE_TRANSLATION_MAX_TOKENS,
+    },
+    "deepseek-chat": {
+        "label": "DeepSeek Chat",
+        "description": "DeepSeek 官方通用对话模型，适合需要官方模型名兼容的环境。",
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "max_tokens": 8192,
+    },
+}
+DOC_TRANSLATE_TRANSLATION_ENGINE_ALIASES = {
+    "deepseek": "deepseek-v4-flash",
+    "default": DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
+    "gemini-3.1-flash-lite": "google/gemini-3.1-flash-lite",
+    "gemini-3-flash-preview": "google/gemini-3-flash-preview",
+    "gemini-3.5-flash": "google/gemini-3.5-flash",
+    "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
+    "gpt-5.5": "openai/gpt-5.5",
+    "gpt5.5": "openai/gpt-5.5",
+    "gpt-5.4": "openai/gpt-5.4",
+    "gpt5.4": "openai/gpt-5.4",
+    "gpt-5.4-mini": "openai/gpt-5.4-mini",
+    "gpt5.4-mini": "openai/gpt-5.4-mini",
+    "gpt-chat-latest": "openai/gpt-chat-latest",
+    "claude-opus-4.8": "anthropic/claude-opus-4.8",
+    "claude-sonnet-4.6": "anthropic/claude-sonnet-4.6",
+    "qwen3.7-max": "qwen/qwen3.7-max",
+    "qwen3.7-plus": "qwen/qwen3.7-plus",
+    "deepseek-v3.2": "deepseek/deepseek-v3.2",
+    "grok-4.3": "x-ai/grok-4.3",
+    "mistral-medium-3.5": "mistralai/mistral-medium-3-5",
+}
 
 DOC_TRANSLATE_ALLOWED_EXTENSIONS = (
     ".pdf",
@@ -215,6 +366,10 @@ def get_doc_translate_modes() -> Dict[str, Dict[str, str]]:
     return DOC_TRANSLATE_TRANSLATE_MODES
 
 
+def get_doc_translate_translation_engines() -> Dict[str, Dict[str, Any]]:
+    return DOC_TRANSLATE_TRANSLATION_ENGINES
+
+
 def get_supported_languages() -> Dict[str, Dict[str, str]]:
     return SUPPORTED_LANGUAGES
 
@@ -223,6 +378,21 @@ def normalize_doc_translate_mode(translate_mode: Optional[str]) -> str:
     normalized = str(translate_mode or DOC_TRANSLATE_DEFAULT_MODE).strip().lower()
     if normalized not in DOC_TRANSLATE_TRANSLATE_MODES:
         raise ValueError(f"不支持的翻译模式: {translate_mode}")
+    return normalized
+
+
+def normalize_doc_translate_translation_engine(translation_engine: Optional[str]) -> str:
+    candidate = str(translation_engine or DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE).strip()
+    normalized = DOC_TRANSLATE_TRANSLATION_ENGINE_ALIASES.get(candidate.lower(), candidate)
+    if normalized not in DOC_TRANSLATE_TRANSLATION_ENGINES:
+        raise ValueError(f"不支持的翻译引擎: {translation_engine}")
+    return normalized
+
+
+def normalize_doc_translate_translation_rules(translation_rules: Optional[str]) -> str:
+    normalized = str(translation_rules or "").replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(normalized) > DOC_TRANSLATE_TRANSLATION_RULES_MAX_CHARS:
+        raise ValueError(f"翻译规则不能超过 {DOC_TRANSLATE_TRANSLATION_RULES_MAX_CHARS} 个字符")
     return normalized
 
 
@@ -538,13 +708,45 @@ def _normalize_translation_max_tokens(max_tokens: int) -> int:
     return max(1, min(requested, DOC_TRANSLATE_TRANSLATION_REQUEST_MAX_TOKENS))
 
 
+def _format_language_names(lang_value: str) -> str:
+    codes = [
+        item.strip()
+        for item in re.split(r"[,，;；\s]+", str(lang_value or ""))
+        if item.strip()
+    ]
+    if not codes and lang_value:
+        codes = [str(lang_value).strip()]
+
+    names: List[str] = []
+    seen = set()
+    for code in codes:
+        if code in seen:
+            continue
+        seen.add(code)
+        info = SUPPORTED_LANGUAGES.get(code, {})
+        names.append(info.get("name") or info.get("english_name") or code)
+    return "、".join(names) if names else "未指定源语言"
+
+
 # ============================================================
-# LLM 翻译：调用 DeepSeek API
+# LLM 翻译：按翻译引擎调用 DeepSeek / Gemini
 # ============================================================
-def _build_translation_system_prompt(source_lang: str, target_lang: str) -> str:
-    source_name = SUPPORTED_LANGUAGES.get(source_lang, {}).get("name", source_lang)
-    target_name = SUPPORTED_LANGUAGES.get(target_lang, {}).get("name", target_lang)
-    return f"""你是一个专业的文档翻译专家。请将以下文档内容从{source_name}翻译为{target_name}。
+def _append_translation_rules(system_prompt: str, translation_rules: str) -> str:
+    rules = normalize_doc_translate_translation_rules(translation_rules)
+    if not rules:
+        return system_prompt
+    return f"""{system_prompt}
+
+用户自定义翻译规则：
+{rules}
+
+以上用户自定义规则仅用于翻译风格、术语、格式和字段处理；仍必须遵守前面的硬性输出要求，尤其是仅返回处理后的内容，不要添加解释或注释。"""
+
+
+def _build_translation_system_prompt(source_lang: str, target_lang: str, translation_rules: str = "") -> str:
+    source_name = _format_language_names(source_lang)
+    target_name = _format_language_names(target_lang)
+    prompt = f"""你是一个专业的文档翻译专家。请将以下文档内容从{source_name}翻译为{target_name}。
 
 翻译规则：
 1. 保留原文的所有格式标记（HTML 标签、Markdown 标记等），只翻译文字内容
@@ -559,12 +761,13 @@ def _build_translation_system_prompt(source_lang: str, target_lang: str) -> str:
 10. 看到“19.01.13”这类三段两位点分数字时，除非上下文明确第一段是年份，否则禁止译为“2019年01月13日”；应按证件上下文核对为日.月.年，无法确认时保留原格式
 11. 驾驶证字段编号（如 1、2、3、4a、4b、10、11、12）与日期相邻时，字段编号不是日期的一部分
 12. 仅返回翻译后的内容，不要添加任何解释或注释"""
+    return _append_translation_rules(prompt, translation_rules)
 
 
-def _build_bilingual_system_prompt(source_lang: str, target_lang: str) -> str:
-    source_name = SUPPORTED_LANGUAGES.get(source_lang, {}).get("name", source_lang)
-    target_name = SUPPORTED_LANGUAGES.get(target_lang, {}).get("name", target_lang)
-    return f"""你是一个专业的文档翻译专家。请对以下文档执行双语对照翻译。
+def _build_bilingual_system_prompt(source_lang: str, target_lang: str, translation_rules: str = "") -> str:
+    source_name = _format_language_names(source_lang)
+    target_name = _format_language_names(target_lang)
+    prompt = f"""你是一个专业的文档翻译专家。请对以下文档执行双语对照翻译。
 
 处理规则：
 1. 对于{source_name}内容：在原文下方紧跟一行{target_name}译文，形成“原文\\n译文”的逐段对照格式
@@ -583,6 +786,13 @@ def _build_bilingual_system_prompt(source_lang: str, target_lang: str) -> str:
    Translation of paragraph B
 
    Already English paragraph (kept as-is)"""
+    return _append_translation_rules(prompt, translation_rules)
+
+
+def _get_translation_engine_max_tokens(engine_config: Dict[str, Any]) -> int:
+    return _normalize_translation_max_tokens(
+        int(engine_config.get("max_tokens") or DOC_TRANSLATE_TRANSLATION_MAX_TOKENS)
+    )
 
 
 def _translate_text_with_llm(
@@ -591,24 +801,36 @@ def _translate_text_with_llm(
     target_lang: str,
     retries: int = 3,
     translate_mode: str = DOC_TRANSLATE_DEFAULT_MODE,
+    translation_engine: str = DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
+    gemini_route: str = DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
+    translation_rules: str = "",
 ) -> str:
     """
-    调用 DeepSeek API 翻译文本。
+    调用指定翻译引擎翻译文本。
     分段处理防止超长文本导致单次调用失败。
     """
     resolved_translate_mode = normalize_doc_translate_mode(translate_mode)
+    resolved_translation_engine = normalize_doc_translate_translation_engine(translation_engine)
+    engine_config = DOC_TRANSLATE_TRANSLATION_ENGINES[resolved_translation_engine]
+    engine_provider = str(engine_config.get("provider") or "deepseek")
+    engine_model = str(engine_config.get("model") or resolved_translation_engine)
+    engine_label = str(engine_config.get("label") or engine_model)
+    max_tokens = _get_translation_engine_max_tokens(engine_config)
+
     if resolved_translate_mode == "bilingual":
-        system_prompt = _build_bilingual_system_prompt(source_lang, target_lang)
+        system_prompt = _build_bilingual_system_prompt(source_lang, target_lang, translation_rules)
     else:
-        system_prompt = _build_translation_system_prompt(source_lang, target_lang)
+        system_prompt = _build_translation_system_prompt(source_lang, target_lang, translation_rules)
 
     MAX_CHUNK_SIZE = 6000
     chunks = _split_text_into_chunks(raw_text, MAX_CHUNK_SIZE)
     translated_parts = []
-    client = OpenAI(
-        api_key=settings.DEEPSEEK_API_KEY,
-        base_url=settings.DEEPSEEK_BASE_URL,
-    )
+    client = None
+    if engine_provider == "deepseek":
+        client = OpenAI(
+            api_key=settings.DEEPSEEK_API_KEY,
+            base_url=settings.DEEPSEEK_BASE_URL,
+        )
 
     for i, chunk in enumerate(chunks):
         chunk_text = chunk.strip()
@@ -618,21 +840,44 @@ def _translate_text_with_llm(
 
         for attempt in range(retries):
             try:
-                response = client.chat.completions.create(
-                    model=DOC_TRANSLATE_TRANSLATION_MODEL,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": chunk_text},
-                    ],
-                    max_tokens=_normalize_translation_max_tokens(DOC_TRANSLATE_TRANSLATION_MAX_TOKENS),
-                )
-                result = response.choices[0].message.content or ""
+                if engine_provider == "deepseek":
+                    if client is None:
+                        raise RuntimeError("DeepSeek 客户端未初始化")
+                    response = client.chat.completions.create(
+                        model=engine_model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": chunk_text},
+                        ],
+                        max_tokens=max_tokens,
+                    )
+                    result = response.choices[0].message.content or ""
+                elif engine_provider == "gemini":
+                    result = generate_text(
+                        system_prompt=system_prompt,
+                        user_prompt=chunk_text,
+                        model=engine_model,
+                        route=gemini_route,
+                        temperature=0.1,
+                        max_output_tokens=max_tokens,
+                    )
+                elif engine_provider == "openrouter":
+                    result = generate_text(
+                        system_prompt=system_prompt,
+                        user_prompt=chunk_text,
+                        model=engine_model,
+                        route=GEMINI_ROUTE_OPENROUTER,
+                        temperature=0.1,
+                        max_output_tokens=max_tokens,
+                    )
+                else:
+                    raise RuntimeError(f"不支持的翻译引擎类型: {engine_provider}")
                 translated_parts.append(result)
                 break
             except Exception as e:
                 if attempt < retries - 1:
                     wait = 3 * (attempt + 1)
-                    print(f"⚠️ DeepSeek 翻译请求失败({e.__class__.__name__})，{wait}秒后重试 [{attempt + 1}/{retries}]...")
+                    print(f"⚠️ {engine_label} 翻译请求失败({e.__class__.__name__})，{wait}秒后重试 [{attempt + 1}/{retries}]...")
                     time.sleep(wait)
                 else:
                     raise RuntimeError(f"翻译失败（已重试 {retries} 次）: {e}")
@@ -698,6 +943,8 @@ async def execute_doc_translate_task(
     translate_mode: str = DOC_TRANSLATE_DEFAULT_MODE,
     ocr_model: str = DOC_TRANSLATE_DEFAULT_MODEL,
     gemini_route: str = DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
+    translation_engine: str = DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
+    translation_rules: str = "",
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
@@ -712,14 +959,19 @@ async def execute_doc_translate_task(
         source_lang: 源语言代码
         target_langs: 目标语言代码列表（支持多个）
         ocr_model: OCR 模型
+        translation_engine: 文本翻译引擎
+        translation_rules: 用户自定义翻译规则
         progress_callback: 进度回调
         executor: 线程池
     """
     if ocr_model not in DOC_TRANSLATE_MODELS:
         raise ValueError(f"不支持的 OCR 模型: {ocr_model}")
     translate_mode = normalize_doc_translate_mode(translate_mode)
+    translation_engine = normalize_doc_translate_translation_engine(translation_engine)
+    translation_rules = normalize_doc_translate_translation_rules(translation_rules)
+    translation_engine_config = DOC_TRANSLATE_TRANSLATION_ENGINES[translation_engine]
     gemini_route = ensure_gemini_route_configured(gemini_route)
-    if not settings.DEEPSEEK_API_KEY:
+    if translation_engine_config.get("provider") == "deepseek" and not settings.DEEPSEEK_API_KEY:
         raise ValueError("未配置 DEEPSEEK_API_KEY，无法执行翻译")
 
     loop = asyncio.get_running_loop()
@@ -867,11 +1119,14 @@ async def execute_doc_translate_task(
                 )
                 translated_segment = await loop.run_in_executor(
                     executor,
-                    lambda txt=segment_text, l=lang, mode=translate_mode: _translate_text_with_llm(
+                    lambda txt=segment_text, l=lang, mode=translate_mode, engine=translation_engine, rules=translation_rules: _translate_text_with_llm(
                         txt,
                         source_lang,
                         l,
                         translate_mode=mode,
+                        translation_engine=engine,
+                        gemini_route=gemini_route,
+                        translation_rules=rules,
                     ) if txt.strip() else "",
                 )
                 translated_segments.append(translated_segment)
@@ -889,11 +1144,14 @@ async def execute_doc_translate_task(
             )
             translated_text = await loop.run_in_executor(
                 executor,
-                lambda l=lang, mode=translate_mode: _translate_text_with_llm(
+                lambda l=lang, mode=translate_mode, engine=translation_engine, rules=translation_rules: _translate_text_with_llm(
                     raw_text,
                     source_lang,
                     l,
                     translate_mode=mode,
+                    translation_engine=engine,
+                    gemini_route=gemini_route,
+                    translation_rules=rules,
                 ),
             )
 
@@ -941,10 +1199,12 @@ async def execute_doc_translate_task(
         "task_id": task_id,
         "filename": original_filename,
         "ocr_model": ocr_model,
-        "translation_model": DOC_TRANSLATE_TRANSLATION_MODEL,
+        "translation_model": translation_engine,
+        "translation_engine": translation_engine,
         "gemini_route": gemini_route,
         "source_lang": source_lang,
         "translate_mode": translate_mode,
+        "has_translation_rules": bool(translation_rules),
         "raw_output_txt": _normalize_path(raw_output_path),
         "raw_parts": raw_part_paths,
         "source_image_count": len(source_images),

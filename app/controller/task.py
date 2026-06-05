@@ -26,11 +26,15 @@ from app.service.doc_translate_service import (
     DOC_TRANSLATE_DEFAULT_MODE,
     DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
     DOC_TRANSLATE_DEFAULT_MODEL,
+    DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
     get_doc_translate_allowed_extensions,
     get_doc_translate_models,
     get_doc_translate_modes,
+    get_doc_translate_translation_engines,
     get_supported_languages,
     normalize_doc_translate_mode,
+    normalize_doc_translate_translation_rules,
+    normalize_doc_translate_translation_engine,
 )
 from app.service.drivers_license_service import get_drivers_license_config
 from app.service.gemini_service import get_gemini_routes
@@ -644,25 +648,29 @@ async def get_doc_translate_config():
         "languages": get_supported_languages(),
         "translate_modes": get_doc_translate_modes(),
         "default_translate_mode": DOC_TRANSLATE_DEFAULT_MODE,
+        "translation_engines": get_doc_translate_translation_engines(),
+        "default_translation_engine": DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
         "allowed_extensions": get_doc_translate_allowed_extensions(),
     }
 
 
 @router.post("/doc-translate")
-async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), translate_mode: str = Query(DOC_TRANSLATE_DEFAULT_MODE), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE)):
+async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), translate_mode: str = Query(DOC_TRANSLATE_DEFAULT_MODE), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE), translation_engine: str = Query(DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE), translation_rules: str = Form("")):
     allowed_ext = set(get_doc_translate_allowed_extensions())
     if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
     try:
         translate_mode = normalize_doc_translate_mode(translate_mode)
+        translation_engine = normalize_doc_translate_translation_engine(translation_engine)
+        translation_rules = normalize_doc_translate_translation_rules(translation_rules)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route)
+    task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route, translation_engine=translation_engine, translation_rules=translation_rules)
     return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
 
 
 @router.post("/doc-translate/batch")
-async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), translate_mode: str = Query(DOC_TRANSLATE_DEFAULT_MODE), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE)):
+async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source_lang: str = Query("zh"), target_langs: str = Query("en"), translate_mode: str = Query(DOC_TRANSLATE_DEFAULT_MODE), ocr_model: str = Query(DOC_TRANSLATE_DEFAULT_MODEL), gemini_route: str = Query(DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE), translation_engine: str = Query(DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE), translation_rules: str = Form("")):
     allowed_ext = set(get_doc_translate_allowed_extensions())
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")
@@ -670,6 +678,8 @@ async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source
         raise HTTPException(status_code=400, detail="Too many files (max 50)")
     try:
         translate_mode = normalize_doc_translate_mode(translate_mode)
+        translation_engine = normalize_doc_translate_translation_engine(translation_engine)
+        translation_rules = normalize_doc_translate_translation_rules(translation_rules)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     results = []
@@ -678,7 +688,7 @@ async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": "Unsupported file format"})
             continue
         try:
-            task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route)
+            task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route, translation_engine=translation_engine, translation_rules=translation_rules)
             results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
         except Exception as exc:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
