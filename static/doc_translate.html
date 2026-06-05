@@ -29,6 +29,9 @@
             display: inline-flex;
             align-items: center;
             gap: 8px;
+            width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
             min-height: 38px;
             padding: 8px 12px;
             border-radius: 10px;
@@ -40,6 +43,25 @@
             color: var(--text-secondary);
             transition: all 0.2s ease;
             user-select: none;
+        }
+
+        .lang-chip .chip-check {
+            flex: 0 0 16px;
+        }
+
+        .lang-chip .chip-name {
+            display: -webkit-box;
+            flex: 1 1 0;
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            line-height: 1.35;
         }
 
         .lang-chip:hover {
@@ -466,6 +488,9 @@
             display: inline-flex;
             align-items: center;
             gap: 7px;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
             min-height: 28px;
             padding: 0 9px;
             border-radius: 999px;
@@ -476,7 +501,15 @@
             font-weight: 700;
         }
 
+        .selected-pill span {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .selected-pill button {
+            flex: 0 0 auto;
             border: none;
             background: transparent;
             color: inherit;

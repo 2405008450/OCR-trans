@@ -588,6 +588,7 @@ function makeChip(code, info, type) {
     checkIcon.className = 'chip-check';
     checkIcon.innerHTML = '<i class="fas fa-check"></i>';
     const nameSpan = document.createElement('span');
+    nameSpan.className = 'chip-name';
     nameSpan.textContent = info.name;
     chip.appendChild(checkbox);
     chip.appendChild(checkIcon);
