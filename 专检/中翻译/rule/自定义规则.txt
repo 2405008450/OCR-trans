@@ -1,0 +1,126 @@
+翻译要求：统一翻译风格如下（美式英语拼写及日期，日期即December 31, 2025的格式）
+一、字体用Times New Roman；段前空两格按中文原文；字号及行距按中文原文；小标题的序号不要用自动编号，合稿的时候序号才不会变。
+二、标题翻译：“二、”翻译成“II”（后面没有点）；“（二）”翻译成“ii.”（后面有点）
+三、金额翻译示例： RMB1,000，翻译后的数值有小数的注意不要四舍五入数值，使用精确数值
+四、日期翻译示例： December 31, 2021 （美式）
+五、人名翻译示例：Wen Pengcheng
+六、表格右上方货币单位
+单位：人民币元    Unit: RMB
+单位：人民币千元  Unit: RMB’000
+单位：人民币万元  Unit: RMB’0,000
+单位：人民币百万  Unit: RMB millions
+七、常用语翻译示例
+本公司 the Company
+母公司 the parent company   
+报告期 the Reporting Period
+本期 the period
+适用 Applicable 
+不适用 Not applicable （表格里用缩写N/A）
+董事会the Board of Directors
+监事会the Supervisory Committee   
+期初余额 opening balance 
+期末余额 closing balance  
+关联方 a related party 
+关联交易/关联方交易  a related-party transaction
+账面余额 gross amount 
+账面价值 carrying amount 
+第八届董事会第五次会议 the 5th Meeting of the 8th Board of Directors
+2021年度股东大会 the 2021 Annual General Meeting of Shareholders 
+2021年第一次临时股东大会 the First Extraordinary General Meeting of Shareholders in 2021
+
+专有词汇：【文段中提到本公司“伊之密”的时候，多用YIZUMI，少用Yizumi。以下表格中的公司名，按表格中的大小写来。“行业、本行业”用the Industry，即Industry首字母大写】
+公司中文官网：https://www.yizumi.com/
+公司英文官网：https://www.yizumi.com/en
+伊之密股份有限公司（伊之密、公司、本公司、股份公司）
+Yizumi Holdings Co., Ltd. (“YIZUMI” or the “Company”) 
+股票简称：伊之密
+Stock name: YIZUMI
+
+香港佳卓、佳卓控股	指	佳卓控股有限公司
+Great Alpha		Great Alpha Holdings Limited
+德国伊之密、德国技术中心、德国研发中心	指	YIZUMI GERMANY GMBH（伊之密德国有限责任公司）
+YIZUMI Germany, Germany Technology Center, Germany R&D Center		
+德国销售中心	指	YIZUMI PRECISION MACHINERY (GERMANY) GMBH I.G. ，（伊之密精密机械（德国）有限责任公司））
+Germany Sales Center		
+香港伊之密	指	伊之密精密机械（香港）有限公司
+YIZUMI HK		Yizumi Precision Machinery (HK) Co., Limited
+印度技术中心	指	YIZUMI PRECISION MACHINERY(INDIA) TECHNICAL CENTER PRIVATE LIMITED，（伊之密精密机械（印度）技术中心有限公司）
+India Technical Center		
+印度伊之密、印度工厂	指	YIZUMI PRECISION MACHINERY (INDIA) PRIVATE LIMITED（伊之密精密机械印度有限公司）
+YIZUMI India, India Factory		
+印度先进成型	指	Yizumi Advanced Processing Technology Private Limited（伊之密先进成型技术私人有限公司 ）
+India Advanced Processing		
+HPM北美	指	原HPM北美有限公司，公司全资子公司，后更名为YIZUMI-HPM  CORPORATION
+HPM North America 		HPM North America Corporation
+泰国伊之密	指	YIZUMI PRECISION MACHINERY（Thailand） Company Limited（伊之密精密机械（泰国）有限公司）
+YIZUMI Thailand		
+越南伊之密	指	YIZUMI PRECISION MACHINERY(VIETNAM) Company Limited（伊之密精密机械（越南）有限公司）
+YIZUMI Vietnam		
+俄罗斯伊之密	指	YIZUMI PRECISION MACHINERY (RUS) LTD. （伊之密精密机械（俄罗斯）有限责任公司）
+YIZUMI Russia 		
+墨西哥伊之密	指	YIZUMI PRECISION MACHINERY(MEXICO)S.de R.L de C.V.（伊之密精密机械（墨西哥）有限责任公司）
+YIZUMI Mexico 		
+土耳其伊之密	指	Yizumi Turkey Precision Makine A.S.（伊之密土耳其精密机械股份有限公司）
+YIZUMI Turkey 		
+浙江伊之密	指	伊之密精密机械（浙江）有限公司
+YIZUMI Zhejiang 		Yizumi Precision Machinery (Zhejiang) Co., Ltd.
+苏州伊之密	指	伊之密精密机械（苏州）有限公司
+YIZUMI Suzhou 		Yizumi Precision Machinery (Suzhou) Co., Ltd.
+伊之密注压	指	广东伊之密精密注压科技有限公司
+YIZUMI Injection Molding and Die Casting		Guangdong Yizumi Precision Injection Molding and Die Casting Technology Co., Ltd.
+伊之密伊哥、伊之密伊哥体育	指	佛山市顺德区容桂伊哥体育运动策划有限公司
+YIZUMI Yige, YIZUMI Yige Sports		Foshan Shunde Ronggui Yige Sports Planning Co., Ltd. 
+伊之密橡胶	指	原佛山伊之密精密橡胶机械有限公司，现更名为广东伊之密精密橡塑装备科技有限公司
+YIZUMI Rubber 		Guangdong Yizumi Precision Rubber and Plastic Equipment Technology Co., Ltd., formerly known as “Foshan Yizumi Precision Rubber Machinery Co., Ltd.” 
+伊之密包装	指	广东伊之密高速包装系统有限公司，现更名为广东伊之密进出口有限公司 
+YIZUMI Packaging 		Guangdong Yizumi Import and Export Co., Ltd., formerly known as “Guangdong Yizumi High-Speed ​​Packaging System Co., Ltd.” 
+伊之密机器人	指	伊之密机器人自动化科技（苏州）有限公司
+YIZUMI Robot		Yizumi Robot Automation Technology (Suzhou) Co., Ltd.
+佳全号、佳全号租赁	指	广东佳全号融资租赁有限公司
+Jiaquanhao, Jiaquanhao Leasing 		Guangdong Jiaquanhao Financial Leasing Co., Ltd.
+零壹基金	指	佛山市顺德区盈峰零壹高端智能装备产业投资基金合伙企业（有限合伙）
+Zero One Fund 		Foshan Shunde Yingfeng Zero One High-end Intelligent Equipment Industry Investment Fund Partnership (L.P.) 
+宁波峰乐	指	宁波峰乐股权投资合伙企业（有限合伙）
+Ningbo Fengle		Ningbo Fengle Equity Investment Partnership (L.P.)
+美智创投	指	美智二期（广东）创业投资合伙企业（有限合伙）
+Meizhi Venture Capital		Meizhi Phase II (Guangdong) Venture Capital Partnership (L.P.)
+火神环保	指	佛山市火神环保科技有限公司
+Huoshen Environmental Technology		Foshan Huoshen Environmental Technology Co., Ltd.
+江西亿丰、江西江工	指	原江西亿丰精密铸造有限公司，现更名江西江工精密机械有限公司
+Jiangxi Yifeng, Jiangxi Jianggong		Jiangxi Jianggong Precision Machinery Co., Ltd., formerly known as “Jiangxi Yifeng Precision Casting Co., Ltd.” 
+伊之密智能制造	指	广东伊之密智能制造有限公司
+YIZUMI Intelligent Manufacturing		Guangdong Yizumi Intelligent Manufacturing Co., Ltd.
+力喜科技	指	佛山市力喜机械科技有限公司
+Lixi Technology		Foshan Lixi Machinery Technology Co., Ltd.
+香港伟信	指	伟信发展有限公司
+Great Faith		Great Faith Development Limited
+伊力威科技	指	佛山市伊力威机械科技有限公司
+Yiliwei Technology		Foshan Yiliwei Machinery Technology Co., Ltd.
+香港高讯	指	高讯投资有限公司
+Gold Vision		Gold Vision Investments Limited
+安力电器	指	佛山市安力电器实业有限公司
+ONLI Electrical Appliances		ONLI Electrical Appliances Co., Ltd.
+伟力电器	指	佛山市顺德区伟力电器有限公司
+Weili Electrical Appliances		Foshan Shunde Weili Electrical Appliances Co., Ltd.
+海晟金租	指	佛山海晟金融租赁股份有限公司
+Haisheng Financial Leasing		Foshan Haisheng Financial Leasing Company Limited 
+巴西伊之密	指	Yizumi Comércio de Máquinas Ltda 
+YIZUMI Brazil		
+
+行业、本行业 指 模压成型专用设备行业，系专用设备制造业细分行业
+The “Industry”:
+The molding equipment industry, a sub-sector of specialized equipment manufacturing 
+宁波盈峰股权投资基金管理有限公司
+Ningbo Yingfeng Equity Investment Fund Management Co., Ltd.
+
+
+锚定目标 创变向前
+Vision Oriented and Innovation Led
+技术 更进一步
+Think Tech Forward
+数智高效、全球运营、绿色发展
+Intelligent and Efficient, Global Operation and Green Development
+成为成型装备领域的世界级企业
+To Be a World-class Molding Equipment Solution Provider
+智造新生 绿塑未来
+Smart Life, Green Future 

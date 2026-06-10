@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-中翻译专检：对接 专检/中翻译V2/main.py，支持双文件模式、单文件双语模式与 Excel 报告导出。
+中翻译专检：对接 专检/中翻译/main.py，支持双文件模式、单文件双语模式与 Excel 报告导出。
 """
 import importlib.machinery
 import os
@@ -32,7 +32,7 @@ SECTION_DIR_NAMES = {"正文": "zhengwen", "页眉": "yemei", "页脚": "yejiao"
 SECTION_COUNT_KEYS = {"正文": "body_issues", "页眉": "header_issues", "页脚": "footer_issues"}
 ZHONGFANYI_MODELS: Dict[str, Dict[str, str]] = {
     "google/gemini-3-flash-preview": {
-        "label": "快速版V2",
+        "label": "快速版",
         "description": "速度更快，适合常规中翻专检场景。",
     },
     "google/gemini-3.5-flash": {
@@ -40,7 +40,7 @@ ZHONGFANYI_MODELS: Dict[str, Dict[str, str]] = {
         "description": "OpenRouter 新模型，适合常规中翻专检场景。",
     },
     "google/gemini-3.1-pro-preview": {
-        "label": "增强版V2",
+        "label": "增强版",
         "description": "推理更强，适合复杂规则和上下文判断场景。",
     },
 }
@@ -60,7 +60,7 @@ _task_progress: Dict[str, Dict[str, Any]] = {}
 _specialist_import_lock = threading.Lock()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ZHONGFANYI_ROOT = REPO_ROOT / "专检" / "中翻译V2"
+ZHONGFANYI_ROOT = REPO_ROOT / "专检" / "中翻译"
 _ALIASED_NAMESPACE_PACKAGES = (
     "llm",
     "llm.llm_project",

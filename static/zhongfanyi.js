@@ -35,12 +35,12 @@ const ruleContentArea = document.getElementById('ruleContent');
 const POLL_INTERVAL = 1500;
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 const MODEL_DISPLAY_NAMES = {
-    'gemini-3-flash-preview': '快速版V2',
-    'google/gemini-3-flash-preview': '快速版V2',
+    'gemini-3-flash-preview': '快速版',
+    'google/gemini-3-flash-preview': '快速版',
     'gemini-3.5-flash': '新模型',
     'google/gemini-3.5-flash': '新模型',
-    'gemini-3.1-pro-preview': '增强版V2',
-    'google/gemini-3.1-pro-preview': '增强版V2',
+    'gemini-3.1-pro-preview': '增强版',
+    'google/gemini-3.1-pro-preview': '增强版',
 };
 
 let pollingTimer = null;
@@ -98,7 +98,7 @@ async function loadConfig() {
         console.error(error);
         modelConfig = {
             'google/gemini-3-flash-preview': {
-                label: '快速版V2',
+                label: '快速版',
                 description: '速度更快，适合常规中翻专检场景。',
             },
             'google/gemini-3.5-flash': {
@@ -106,7 +106,7 @@ async function loadConfig() {
                 description: 'OpenRouter 新模型，适合常规中翻专检场景。',
             },
             'google/gemini-3.1-pro-preview': {
-                label: '增强版V2',
+                label: '增强版',
                 description: '推理更强，适合复杂规则和上下文判断场景。',
             },
         };
