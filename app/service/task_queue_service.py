@@ -21,7 +21,11 @@ from app.service.business_licence_service import (
 )
 from app.service.doc_translate_service import DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE, execute_doc_translate_task
 from app.service.drivers_license_service import execute_drivers_license_task
-from app.service.number_check_service import _get_task_progress as get_number_check_progress, run_number_check_task
+from app.service.number_check_service import (
+    NUMBER_CHECK_MODE_ALIGNMENT,
+    _get_task_progress as get_number_check_progress,
+    run_number_check_task,
+)
 from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     PDF2DOCX_DEFAULT_MODEL,
@@ -126,18 +130,21 @@ class TaskQueueService:
         self,
         *,
         mode: str,
-        original_file: Optional[UploadFile],
-        translated_file: Optional[UploadFile],
-        single_file: Optional[UploadFile],
+        alignment_file: Optional[UploadFile],
+        source_file: Optional[UploadFile],
+        target_file: Optional[UploadFile],
+        source_hf_file: Optional[UploadFile],
         gemini_route: str,
         model_name: str,
     ) -> str:
-        if mode == 'single' and single_file:
-            display_name = single_file.filename or 'single.docx'
+        if mode == NUMBER_CHECK_MODE_ALIGNMENT:
+            alignment_name = alignment_file.filename if alignment_file else 'alignment.xlsx'
+            target_name = target_file.filename if target_file else None
+            display_name = f'{alignment_name} | {target_name}' if target_name else alignment_name
         else:
-            original_name = original_file.filename if original_file else 'original.docx'
-            translated_name = translated_file.filename if translated_file else 'translated.docx'
-            display_name = f'{original_name} | {translated_name}'
+            source_name = source_file.filename if source_file else 'source.docx'
+            target_name = target_file.filename if target_file else 'target.docx'
+            display_name = f'{source_name} | {target_name}'
         reserved_task = self._create_db_task(
             'number_check',
             display_name,
@@ -147,38 +154,37 @@ class TaskQueueService:
         try:
             upload_dir = Path(settings.UPLOAD_DIR) / 'number_check' / reserved_task.display_no
             upload_dir.mkdir(parents=True, exist_ok=True)
-            if mode == 'single':
-                if single_file is None:
-                    raise ValueError('single_file is required for single mode')
-                single_ext = Path(single_file.filename or 'single.docx').suffix or '.docx'
-                single_path = upload_dir / build_storage_filename(
+
+            input_files: Dict[str, Any] = {}
+
+            async def save_role(role: str, upload: Optional[UploadFile], fallback_name: str) -> None:
+                if upload is None:
+                    return
+                ext = Path(upload.filename or fallback_name).suffix or Path(fallback_name).suffix
+                path = upload_dir / build_storage_filename(
                     reserved_task.display_no,
-                    single_file.filename,
+                    upload.filename,
                     reserved_task.task_id,
-                    role='single',
-                    ext=single_ext,
+                    role=role,
+                    ext=ext,
                 )
-                single_path.write_bytes(await single_file.read())
-                self._update_task_input_files(
-                    reserved_task.task_id,
-                    {
-                        'single_path': str(single_path).replace('\\', '/'),
-                        'single_filename': single_file.filename,
-                    },
-                )
-                self._notify_dispatcher()
-                return reserved_task.task_id
+                path.write_bytes(await upload.read())
+                input_files[f'{role}_path'] = str(path).replace('\\', '/')
+                input_files[f'{role}_filename'] = upload.filename
 
-            if original_file is None or translated_file is None:
-                raise ValueError('original_file and translated_file are required for double mode')
+            if mode == NUMBER_CHECK_MODE_ALIGNMENT:
+                if alignment_file is None:
+                    raise ValueError('alignment_file is required for alignment mode')
+                await save_role('alignment', alignment_file, 'alignment.xlsx')
+                await save_role('target', target_file, 'target.docx')
+                await save_role('source_hf', source_hf_file, 'source_hf.docx')
+            else:
+                if source_file is None or target_file is None:
+                    raise ValueError('source_file and target_file are required for direct mode')
+                await save_role('source', source_file, 'source.docx')
+                await save_role('target', target_file, 'target.docx')
 
-            original_ext = Path(original_file.filename or 'original.docx').suffix or '.docx'
-            translated_ext = Path(translated_file.filename or 'translated.docx').suffix or '.docx'
-            original_path = upload_dir / build_storage_filename(reserved_task.display_no, original_file.filename, reserved_task.task_id, role='original', ext=original_ext)
-            translated_path = upload_dir / build_storage_filename(reserved_task.display_no, translated_file.filename, reserved_task.task_id, role='translated', ext=translated_ext)
-            original_path.write_bytes(await original_file.read())
-            translated_path.write_bytes(await translated_file.read())
-            self._update_task_input_files(reserved_task.task_id, {'original_path': str(original_path).replace('\\', '/'), 'translated_path': str(translated_path).replace('\\', '/'), 'original_filename': original_file.filename, 'translated_filename': translated_file.filename})
+            self._update_task_input_files(reserved_task.task_id, input_files)
             self._notify_dispatcher()
             return reserved_task.task_id
         except Exception as exc:
@@ -627,36 +633,30 @@ class TaskQueueService:
 
     async def _execute_number_check(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'number check started')
-        mode = params.get('mode', 'double')
-        if mode == 'single':
-            single_upload = UploadFile(
-                filename=input_files.get('single_filename') or 'single.docx',
-                file=io.BytesIO(Path(input_files['single_path']).read_bytes()),
+        mode = params.get('mode', NUMBER_CHECK_MODE_ALIGNMENT)
+
+        def make_upload(role: str, fallback_name: str) -> Optional[UploadFile]:
+            path_key = f'{role}_path'
+            if not input_files.get(path_key):
+                return None
+            return UploadFile(
+                filename=input_files.get(f'{role}_filename') or fallback_name,
+                file=io.BytesIO(Path(input_files[path_key]).read_bytes()),
             )
-            job = asyncio.create_task(
-                run_number_check_task(
-                    single_file=single_upload,
-                    mode=mode,
-                    task_id=task_id,
-                    display_no=display_no,
-                    gemini_route=params.get('gemini_route', 'openrouter'),
-                    model_name=params.get('model_name', 'gemini-3.1-pro-preview'),
-                )
+
+        job = asyncio.create_task(
+            run_number_check_task(
+                alignment_file=make_upload('alignment', 'alignment.xlsx'),
+                source_file=make_upload('source', 'source.docx'),
+                target_file=make_upload('target', 'target.docx'),
+                source_hf_file=make_upload('source_hf', 'source_hf.docx'),
+                mode=mode,
+                task_id=task_id,
+                display_no=display_no,
+                gemini_route=params.get('gemini_route', 'openrouter'),
+                model_name=params.get('model_name', 'gemini-3.1-pro-preview'),
             )
-        else:
-            original_upload = UploadFile(filename=input_files.get('original_filename') or 'original.docx', file=io.BytesIO(Path(input_files['original_path']).read_bytes()))
-            translated_upload = UploadFile(filename=input_files.get('translated_filename') or 'translated.docx', file=io.BytesIO(Path(input_files['translated_path']).read_bytes()))
-            job = asyncio.create_task(
-                run_number_check_task(
-                    original_file=original_upload,
-                    translated_file=translated_upload,
-                    mode=mode,
-                    task_id=task_id,
-                    display_no=display_no,
-                    gemini_route=params.get('gemini_route', 'openrouter'),
-                    model_name=params.get('model_name', 'gemini-3.1-pro-preview'),
-                )
-            )
+        )
         await self._mirror_progress(task_id, job, lambda: get_number_check_progress(task_id), update)
         return await job
 
@@ -782,6 +782,8 @@ class TaskQueueService:
 
         if task_type == 'number_check':
             add_result('corrected_docx')
+            add_result('revised_file')
+            add_result('report_excel', ftype='report')
             reports = result.get('reports', {})
             if isinstance(reports, dict):
                 for label, path in reports.items():

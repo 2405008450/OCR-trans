@@ -13,105 +13,115 @@
         <header class="header">
             <div class="logo">
                 <i class="fas fa-check-double"></i>
-                <h1>数字专检</h1>
+                <div>
+                    <h1>数字专检</h1>
+                    <p class="subtitle" id="pageSubtitle">使用新版数检程序核对译文中的数字、金额、编号、日期和比例。</p>
+                </div>
             </div>
-            <p class="subtitle" id="pageSubtitle">支持双文件对比与单文件双语对照检查</p>
             <nav class="header-nav">
                 <a href="/"><i class="fas fa-home"></i> 首页</a>
                 <a href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
-                <span style="color:var(--line); margin:0 4px">|</span>
             </nav>
         </header>
 
         <main class="main-content">
             <section class="upload-section" id="uploadSection">
                 <div class="upload-card">
-                    <h2>上传待专检文档</h2>
-                    <p class="upload-desc" id="uploadDesc">请选择模式后上传文件</p>
+                    <div class="section-title-row">
+                        <div>
+                            <span class="section-kicker"><i class="fas fa-file-circle-check"></i> 新版数检</span>
+                            <h2>上传待检查文件</h2>
+                        </div>
+                    </div>
+                    <p class="upload-desc" id="uploadDesc">优先使用已对齐的 Excel；如没有对照表，可直接上传原文和译文文件。</p>
 
                     <div class="options-panel">
-                        <div class="option-group" style="grid-column: 1 / -1;">
-                            <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center;">
-                                <span><i class="fas fa-sliders"></i> 检查模式:</span>
-                                <label style="display:flex; align-items:center; gap:6px;">
-                                    <input type="radio" name="checkMode" id="modeDouble" value="double">
-                                    <span>双文件模式</span>
+                        <div class="option-card" style="grid-column: 1 / -1;">
+                            <div class="toggle-row" style="gap:18px; flex-wrap:wrap;">
+                                <strong><i class="fas fa-sliders"></i> 检查模式</strong>
+                                <label class="toggle-row">
+                                    <input type="radio" name="checkMode" id="modeAlignment" value="alignment">
+                                    <span>对照 Excel</span>
                                 </label>
-                                <label style="display:flex; align-items:center; gap:6px;">
-                                    <input type="radio" name="checkMode" id="modeSingle" value="single">
-                                    <span>单文件模式</span>
+                                <label class="toggle-row">
+                                    <input type="radio" name="checkMode" id="modeDirect" value="direct">
+                                    <span>原文+译文</span>
                                 </label>
                             </div>
-                            <div id="modeHint" style="margin-top:8px; color:var(--text-secondary, #64748b); font-size:13px;"></div>
+                            <small id="modeHint">上传含“原文”“译文”两列的 Excel，可选上传译文文件生成修订版。</small>
                         </div>
 
                         <div class="option-group" style="grid-column: 1 / -1;">
-                            <label for="modelSelect" style="display:flex; align-items:center; gap:6px;">
-                                <i class="fas fa-robot"></i> 模型选择
-                            </label>
-                            <select id="modelSelect" style="margin-top:8px; width:100%;"></select>
-                            <div id="modelDesc" style="margin-top:8px; color:var(--text-secondary, #64748b); font-size:13px;"></div>
+                            <label for="modelSelect"><i class="fas fa-robot"></i> 模型选择</label>
+                            <div class="field-wrap">
+                                <select id="modelSelect"></select>
+                            </div>
+                            <small id="modelDesc"></small>
                         </div>
 
-                        <div id="doubleFileFields" style="grid-column: 1 / -1;">
-                            <div class="option-group" style="grid-column: 1 / -1;">
-                                <label style="width: 100%;">
-                                    <i class="fas fa-file-word"></i> 原文文件:
-                                    <input type="file" id="originalFile" accept=".docx,.doc" style="margin-left: 8px;">
-                                </label>
+                        <div id="alignmentFields" style="grid-column: 1 / -1;">
+                            <div class="option-group">
+                                <label for="alignmentFile"><i class="fas fa-table"></i> 对照 Excel 文件</label>
+                                <div class="field-wrap">
+                                    <input type="file" id="alignmentFile" accept=".xlsx">
+                                </div>
                             </div>
-                            <div class="option-group" style="grid-column: 1 / -1;">
-                                <label style="width: 100%;">
-                                    <i class="fas fa-file-word"></i> 译文文件:
-                                    <input type="file" id="translatedFile" accept=".docx,.doc" style="margin-left: 8px;">
-                                </label>
+                            <div class="option-group">
+                                <label for="targetFile"><i class="fas fa-file-pen"></i> 待修订译文文件（可选）</label>
+                                <div class="field-wrap">
+                                    <input type="file" id="targetFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
+                                </div>
+                            </div>
+                            <div class="option-group">
+                                <label for="sourceHfFile"><i class="fas fa-heading"></i> 页眉页脚原文 DOCX（可选）</label>
+                                <div class="field-wrap">
+                                    <input type="file" id="sourceHfFile" accept=".docx,.doc">
+                                </div>
                             </div>
                         </div>
 
-                        <div id="singleFileFields" style="grid-column: 1 / -1; display:none;">
-                            <div class="option-group" style="grid-column: 1 / -1;">
-                                <label style="width: 100%;">
-                                    <i class="fas fa-file-lines"></i> 双语对照文件:
-                                    <input type="file" id="singleFile" accept=".docx,.doc,.pdf,.xlsx,.pptx" style="margin-left: 8px;">
-                                </label>
+                        <div id="directFields" style="grid-column: 1 / -1; display:none;">
+                            <div class="option-group">
+                                <label for="sourceFile"><i class="fas fa-file-lines"></i> 原文文件</label>
+                                <div class="field-wrap">
+                                    <input type="file" id="sourceFile" accept=".docx,.doc,.xlsx,.pptx">
+                                </div>
                             </div>
-                            <div style="margin-top:8px; color:var(--text-secondary, #64748b); font-size:13px;">
-                                支持 `.docx / .doc / .pdf / .xlsx / .pptx`；其中 `.docx / .doc` 会额外输出修订版文档。
+                            <div class="option-group">
+                                <label for="directTargetFile"><i class="fas fa-file-pen"></i> 译文文件</label>
+                                <div class="field-wrap">
+                                    <input type="file" id="directTargetFile" accept=".docx,.doc,.xlsx,.pptx">
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div style="display: flex; gap: 12px;">
+                    <div style="display:flex; gap:12px; flex-wrap:wrap;">
                         <button class="btn-secondary" onclick="window.location.href='/'">
                             <i class="fas fa-home"></i> 返回首页
                         </button>
-                        <button class="btn-primary" id="btnRunCheck" style="max-width: 360px;">
+                        <button class="btn-primary" id="btnRunCheck" style="max-width:360px;">
                             <i class="fas fa-play"></i> 开始处理
                         </button>
                     </div>
                 </div>
             </section>
 
-            <section class="processing-section" id="processingSection" style="display: none;">
+            <section class="processing-section" id="processingSection" style="display:none;">
                 <div class="processing-card">
                     <div class="spinner"></div>
                     <h2 id="processingTitle">数字专检处理中...</h2>
-                    <p id="processingText">正在提取文本并调用对比引擎</p>
-
-                    <div class="progress-container" style="margin-top: 24px;">
-                        <div class="progress-bar-wrapper">
-                            <div class="progress-bar" id="progressBar">
-                                <span id="progressPercent" class="progress-percent">0%</span>
-                            </div>
+                    <p id="processingText">正在提交任务...</p>
+                    <div class="progress-container" style="margin-top:24px;">
+                        <div class="progress-bar" id="progressBar">
+                            <span id="progressPercent" class="progress-text">0%</span>
                         </div>
-                        <div class="progress-details" id="progressDetails">
-                            <p id="progressStep">初始化...</p>
-                        </div>
+                        <div class="progress-details" id="progressDetails"></div>
                     </div>
                 </div>
             </section>
 
-            <section class="result-section" id="resultSection" style="display: none;">
+            <section class="result-section" id="resultSection" style="display:none;">
                 <div class="result-header">
                     <h2><i class="fas fa-check-circle"></i> 专检完成</h2>
                     <button class="btn-secondary" id="btnReset">

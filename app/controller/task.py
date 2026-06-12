@@ -39,6 +39,12 @@ from app.service.doc_translate_service import (
 from app.service.drivers_license_service import get_drivers_license_config
 from app.service.gemini_service import get_gemini_routes
 from app.service.number_check_service import (
+    ALIGNMENT_EXTENSIONS,
+    DIRECT_SOURCE_EXTENSIONS,
+    HEADER_FOOTER_EXTENSIONS,
+    NUMBER_CHECK_MODE_ALIGNMENT,
+    NUMBER_CHECK_MODE_DIRECT,
+    TARGET_EXTENSIONS,
     _get_task_progress as get_number_check_progress,
     get_number_check_default_mode,
     get_number_check_models,
@@ -288,6 +294,10 @@ async def batch_download(body: BatchDownloadBody):
 
 @router.post("/number-check")
 async def run_number_check(
+    alignment_file: Optional[UploadFile] = File(None),
+    source_file: Optional[UploadFile] = File(None),
+    target_file: Optional[UploadFile] = File(None),
+    source_hf_file: Optional[UploadFile] = File(None),
     original_file: Optional[UploadFile] = File(None),
     translated_file: Optional[UploadFile] = File(None),
     single_file: Optional[UploadFile] = File(None),
@@ -296,20 +306,30 @@ async def run_number_check(
     model_name: str = Query("gemini-3.1-pro-preview"),
 ):
     resolved_mode = (mode or get_number_check_default_mode()).strip().lower()
-    if resolved_mode == "single":
-        if single_file is None:
-            raise HTTPException(status_code=400, detail="单文件模式需要上传 single_file")
+    if resolved_mode in {"excel", "alignment_excel", "single"}:
+        resolved_mode = NUMBER_CHECK_MODE_ALIGNMENT
     elif resolved_mode == "double":
-        if original_file is None or translated_file is None:
-            raise HTTPException(status_code=400, detail="双文件模式需要同时上传 original_file 和 translated_file")
+        resolved_mode = NUMBER_CHECK_MODE_DIRECT
+
+    source_upload = source_file or original_file
+    target_upload = target_file or translated_file
+    alignment_upload = alignment_file or single_file
+
+    if resolved_mode == NUMBER_CHECK_MODE_ALIGNMENT:
+        if alignment_upload is None:
+            raise HTTPException(status_code=400, detail="对照 Excel 模式需要上传 alignment_file")
+    elif resolved_mode == NUMBER_CHECK_MODE_DIRECT:
+        if source_upload is None or target_upload is None:
+            raise HTTPException(status_code=400, detail="原文+译文模式需要同时上传 source_file 和 target_file")
     else:
         raise HTTPException(status_code=400, detail=f"不支持的数字专检模式: {mode}")
 
     task_id = await task_queue_service.submit_number_check_task(
         mode=resolved_mode,
-        original_file=original_file,
-        translated_file=translated_file,
-        single_file=single_file,
+        alignment_file=alignment_upload,
+        source_file=source_upload,
+        target_file=target_upload,
+        source_hf_file=source_hf_file,
         gemini_route=gemini_route,
         model_name=model_name,
     )
@@ -318,8 +338,10 @@ async def run_number_check(
 
 @router.get("/number-check/config")
 async def get_number_check_config():
-    double_file_extensions = [".docx", ".doc"]
-    single_file_extensions = [".docx", ".doc", ".pdf", ".xlsx", ".pptx"]
+    alignment_file_extensions = sorted(ALIGNMENT_EXTENSIONS)
+    direct_file_extensions = sorted(DIRECT_SOURCE_EXTENSIONS)
+    target_file_extensions = sorted(TARGET_EXTENSIONS)
+    source_hf_file_extensions = sorted(HEADER_FOOTER_EXTENSIONS)
     return {
         "models": get_number_check_models(),
         "default_model": "gemini-3.1-pro-preview",
@@ -327,17 +349,21 @@ async def get_number_check_config():
         "default_route": "openrouter",
         "default_mode": get_number_check_default_mode(),
         "modes": {
-            "double": {
-                "label": "双文件模式",
-                "description": f"上传原文和译文两个 {' / '.join(double_file_extensions).upper().replace('.', '')} 文件，输出修订版译文。",
+            NUMBER_CHECK_MODE_ALIGNMENT: {
+                "label": "对照 Excel 模式",
+                "description": "上传已对齐的原文/译文 Excel，可选上传译文文件生成修订版。",
             },
-            "single": {
-                "label": "单文件模式",
-                "description": "上传一个中英对照文件；DOC / DOCX 可生成修订版，其它格式仅输出报告。",
+            NUMBER_CHECK_MODE_DIRECT: {
+                "label": "原文+译文模式",
+                "description": "直接上传原文和译文文件，由新版数检程序抽取内容并生成报告。",
             },
         },
-        "single_file_extensions": single_file_extensions,
-        "double_file_extensions": double_file_extensions,
+        "alignment_file_extensions": alignment_file_extensions,
+        "direct_file_extensions": direct_file_extensions,
+        "target_file_extensions": target_file_extensions,
+        "source_hf_file_extensions": source_hf_file_extensions,
+        "single_file_extensions": alignment_file_extensions,
+        "double_file_extensions": direct_file_extensions,
     }
 
 
