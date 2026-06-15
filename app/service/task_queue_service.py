@@ -415,14 +415,14 @@ class TaskQueueService:
             return missing
 
         if task_type == 'number_check':
-            mode = params.get('mode', 'double')
-            if mode == 'single':
-                return [] if self._get_input_value(input_files, 'single_path') else ['single_path']
+            mode = params.get('mode', NUMBER_CHECK_MODE_ALIGNMENT)
+            if mode in {NUMBER_CHECK_MODE_ALIGNMENT, 'single', 'excel', 'alignment_excel'}:
+                return [] if self._get_input_value(input_files, 'alignment_path', 'single_path') else ['alignment_path']
             missing = []
-            if not self._get_input_value(input_files, 'original_path'):
-                missing.append('original_path')
-            if not self._get_input_value(input_files, 'translated_path'):
-                missing.append('translated_path')
+            if not self._get_input_value(input_files, 'source_path', 'original_path'):
+                missing.append('source_path')
+            if not self._get_input_value(input_files, 'target_path', 'translated_path'):
+                missing.append('target_path')
             return missing
 
         if task_type == 'zhongfanyi':
@@ -576,8 +576,6 @@ class TaskQueueService:
             filename = task.filename
             display_no = task.display_no
 
-        input_files = await self._ensure_task_input_files(task_id, task_type, params, input_files)
-
         async def update(progress: int, message: str):
             with SessionLocal() as db:
                 if task_repo.is_cancel_requested(db, task_id):
@@ -590,6 +588,7 @@ class TaskQueueService:
 
         try:
             self._append_task_log(task_id, f'[start] {task_type}')
+            input_files = await self._ensure_task_input_files(task_id, task_type, params, input_files)
             if task_type == 'number_check':
                 result = await self._execute_number_check(task_id, display_no, input_files, params, update)
                 output_path = result.get('corrected_docx')
@@ -635,20 +634,22 @@ class TaskQueueService:
         await update(5, 'number check started')
         mode = params.get('mode', NUMBER_CHECK_MODE_ALIGNMENT)
 
-        def make_upload(role: str, fallback_name: str) -> Optional[UploadFile]:
-            path_key = f'{role}_path'
-            if not input_files.get(path_key):
+        def make_upload(role: str, fallback_name: str, *legacy_roles: str) -> Optional[UploadFile]:
+            roles = (role, *legacy_roles)
+            selected_role = next((candidate for candidate in roles if input_files.get(f'{candidate}_path')), None)
+            if not selected_role:
                 return None
+            path_key = f'{selected_role}_path'
             return UploadFile(
-                filename=input_files.get(f'{role}_filename') or fallback_name,
+                filename=input_files.get(f'{selected_role}_filename') or fallback_name,
                 file=io.BytesIO(Path(input_files[path_key]).read_bytes()),
             )
 
         job = asyncio.create_task(
             run_number_check_task(
-                alignment_file=make_upload('alignment', 'alignment.xlsx'),
-                source_file=make_upload('source', 'source.docx'),
-                target_file=make_upload('target', 'target.docx'),
+                alignment_file=make_upload('alignment', 'alignment.xlsx', 'single'),
+                source_file=make_upload('source', 'source.docx', 'original'),
+                target_file=make_upload('target', 'target.docx', 'translated'),
                 source_hf_file=make_upload('source_hf', 'source_hf.docx'),
                 mode=mode,
                 task_id=task_id,

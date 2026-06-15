@@ -181,6 +181,10 @@ async function runNumberCheck() {
             alert('请选择原文文件和译文文件。');
             return;
         }
+        if (isSameLocalFile(sourceFile, targetFile)) {
+            alert('原文文件和译文文件不能选择同一个文件。若只有一个文件，请先生成对照 Excel 后使用“对照 Excel”模式。');
+            return;
+        }
         formData.append('source_file', sourceFile);
         formData.append('target_file', targetFile);
     }
@@ -363,6 +367,13 @@ function buildResultHtml(data) {
 function addDownload(links, path, icon, label) {
     if (!path) return;
     links.push(`<a href="/${path}" download class="download-btn"><i class="fas ${icon}"></i> ${escapeHtml(label)}</a>`);
+}
+
+function isSameLocalFile(left, right) {
+    return Boolean(left && right
+        && left.name === right.name
+        && left.size === right.size
+        && left.lastModified === right.lastModified);
 }
 
 function resetPage() {

@@ -225,8 +225,17 @@ class _TaskLogWriter(io.TextIOBase):
     def write(self, text: str) -> int:
         if not text:
             return 0
-        self.original_stream.write(text)
-        self.original_stream.flush()
+        try:
+            self.original_stream.write(text)
+            self.original_stream.flush()
+        except UnicodeEncodeError:
+            encoding = getattr(self.original_stream, "encoding", None) or "utf-8"
+            safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+            try:
+                self.original_stream.write(safe_text)
+                self.original_stream.flush()
+            except Exception:
+                pass
         self._buffer += text
         while "\n" in self._buffer:
             line, self._buffer = self._buffer.split("\n", 1)
