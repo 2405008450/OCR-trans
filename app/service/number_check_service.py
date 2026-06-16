@@ -38,7 +38,7 @@ NUMBER_CHECK_MODE_ALIGNMENT = "alignment"
 NUMBER_CHECK_MODE_DIRECT = "direct"
 
 ALIGNMENT_EXTENSIONS = {".xlsx"}
-DIRECT_SOURCE_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx"}
+DIRECT_SOURCE_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx", ".pdf"}
 TARGET_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx", ".pdf"}
 HEADER_FOOTER_EXTENSIONS = {".docx", ".doc"}
 
@@ -483,6 +483,8 @@ def _run_latest_number_check_sync(
                 ext=target_path.suffix.lower() or ".docx",
             )
         )
+        if target_path.suffix.lower() != ".docx":
+            _copy_if_needed(target_path, revised_output_path)
 
     run_kwargs = {
         "alignment_path": str(alignment_path) if alignment_path else None,
@@ -494,6 +496,7 @@ def _run_latest_number_check_sync(
         "revised_docx_path": str(revised_output_path) if revised_output_path else None,
         "revision_author": "数值检查",
         "use_total_normalizer": True,
+        "force_mode_b": mode == NUMBER_CHECK_MODE_DIRECT,
         "ai_check_all": False,
     }
 
@@ -592,7 +595,7 @@ async def run_number_check_task(
             if source_file is None or target_file is None:
                 raise ValueError("原文+译文模式缺少 source_file 或 target_file")
             _validate_upload(source_file, "原文文件", DIRECT_SOURCE_EXTENSIONS)
-            _validate_upload(target_file, "译文文件", TARGET_EXTENSIONS - {".pdf"})
+            _validate_upload(target_file, "译文文件", TARGET_EXTENSIONS)
 
         folder_name = display_no or task_id
         upload_dir = Path(settings.UPLOAD_DIR) / "number_check" / folder_name

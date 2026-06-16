@@ -3,7 +3,7 @@ PDF 文本检查工具
 用于调试和查看 PDF 中实际存储的文本内容
 """
 
-import fitz  # PyMuPDF
+from pdf.fitz_compat import fitz  # PyMuPDF
 from pathlib import Path
 import re
 

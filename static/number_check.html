@@ -33,7 +33,7 @@
                             <h2>上传待检查文件</h2>
                         </div>
                     </div>
-                    <p class="upload-desc" id="uploadDesc">优先使用已对齐的 Excel；如没有对照表，可直接上传原文和译文文件。</p>
+                    <p class="upload-desc" id="uploadDesc">选择单个双语对照 Excel，或上传原文+译文双文件直接生成对照和报告。</p>
 
                     <div class="options-panel">
                         <div class="option-card" style="grid-column: 1 / -1;">
@@ -41,14 +41,14 @@
                                 <strong><i class="fas fa-sliders"></i> 检查模式</strong>
                                 <label class="toggle-row">
                                     <input type="radio" name="checkMode" id="modeAlignment" value="alignment">
-                                    <span>对照 Excel</span>
+                                    <span>双语对照 Excel</span>
                                 </label>
                                 <label class="toggle-row">
                                     <input type="radio" name="checkMode" id="modeDirect" value="direct">
-                                    <span>原文+译文</span>
+                                    <span>原文+译文双文件</span>
                                 </label>
                             </div>
-                            <small id="modeHint">上传含“原文”“译文”两列的 Excel，可选上传译文文件生成修订版。</small>
+                            <small id="modeHint">上传含“原文”“译文”两列的双语对照 Excel；如需生成修订版，可再上传译文文件。</small>
                         </div>
 
                         <div class="option-group" style="grid-column: 1 / -1;">
@@ -61,13 +61,13 @@
 
                         <div id="alignmentFields" style="grid-column: 1 / -1;">
                             <div class="option-group">
-                                <label for="alignmentFile"><i class="fas fa-table"></i> 对照 Excel 文件</label>
+                                <label for="alignmentFile"><i class="fas fa-table"></i> 双语对照 Excel 文件</label>
                                 <div class="field-wrap">
                                     <input type="file" id="alignmentFile" accept=".xlsx">
                                 </div>
                             </div>
                             <div class="option-group">
-                                <label for="targetFile"><i class="fas fa-file-pen"></i> 待修订译文文件（可选）</label>
+                                <label for="targetFile"><i class="fas fa-file-pen"></i> 待修订译文文件（可选，支持 PDF）</label>
                                 <div class="field-wrap">
                                     <input type="file" id="targetFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
                                 </div>
@@ -82,15 +82,15 @@
 
                         <div id="directFields" style="grid-column: 1 / -1; display:none;">
                             <div class="option-group">
-                                <label for="sourceFile"><i class="fas fa-file-lines"></i> 原文文件</label>
+                                <label for="sourceFile"><i class="fas fa-file-lines"></i> 原文文件（支持 PDF）</label>
                                 <div class="field-wrap">
-                                    <input type="file" id="sourceFile" accept=".docx,.doc,.xlsx,.pptx">
+                                    <input type="file" id="sourceFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
                                 </div>
                             </div>
                             <div class="option-group">
-                                <label for="directTargetFile"><i class="fas fa-file-pen"></i> 译文文件</label>
+                                <label for="directTargetFile"><i class="fas fa-file-pen"></i> 译文文件（支持 PDF）</label>
                                 <div class="field-wrap">
-                                    <input type="file" id="directTargetFile" accept=".docx,.doc,.xlsx,.pptx">
+                                    <input type="file" id="directTargetFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
                                 </div>
                             </div>
                         </div>

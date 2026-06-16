@@ -2,7 +2,7 @@
 改进的 PDF 替换模块
 利用批注定位来精确替换文本，保留格式和样式
 """
-import fitz
+from pdf.fitz_compat import fitz
 from pathlib import Path
 from typing import Tuple, Optional
 from pdf.pdf_annotator import PDFAnnotator

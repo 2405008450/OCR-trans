@@ -4,7 +4,7 @@ PDF 批注和编辑模块
 使用统一的文本匹配逻辑（与 Word 共用）
 """
 
-import fitz  # PyMuPDF
+from pdf.fitz_compat import fitz  # PyMuPDF
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 from datetime import datetime

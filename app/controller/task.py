@@ -350,12 +350,12 @@ async def get_number_check_config():
         "default_mode": get_number_check_default_mode(),
         "modes": {
             NUMBER_CHECK_MODE_ALIGNMENT: {
-                "label": "对照 Excel 模式",
-                "description": "上传已对齐的原文/译文 Excel，可选上传译文文件生成修订版。",
+                "label": "双语对照 Excel 模式",
+                "description": "上传一个已对齐的原文/译文双语 Excel；如需生成修订版，可选上传译文文件，支持 DOCX、XLSX、PPTX、PDF。",
             },
             NUMBER_CHECK_MODE_DIRECT: {
-                "label": "原文+译文模式",
-                "description": "直接上传原文和译文文件，由新版数检程序抽取内容并生成报告。",
+                "label": "原文+译文双文件模式",
+                "description": "直接上传原文和译文双文件，由新版数检程序抽取内容并生成报告，支持 DOCX、XLSX、PPTX、PDF。",
             },
         },
         "alignment_file_extensions": alignment_file_extensions,

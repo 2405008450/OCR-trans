@@ -24,7 +24,7 @@ import argparse
 # import win32com.client
 from pathlib import Path
 import pdfplumber
-import fitz  # PyMuPDF - 用于更准确的文本提取
+from pdf.fitz_compat import fitz  # PyMuPDF - 用于更准确的文本提取
 from typing import List, Dict, Tuple, Optional, Any
 import re
 from dataclasses import dataclass, field, asdict

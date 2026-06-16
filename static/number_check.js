@@ -79,8 +79,8 @@ async function loadConfig() {
         alignmentFileInput.accept = (data.alignment_file_extensions || ['.xlsx']).join(',');
         targetFileInput.accept = (data.target_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx', '.pdf']).join(',');
         sourceHfFileInput.accept = (data.source_hf_file_extensions || ['.docx', '.doc']).join(',');
-        sourceFileInput.accept = (data.direct_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx']).join(',');
-        directTargetFileInput.accept = (data.direct_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx']).join(',');
+        sourceFileInput.accept = (data.direct_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx', '.pdf']).join(',');
+        directTargetFileInput.accept = (data.direct_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx', '.pdf']).join(',');
     } catch (error) {
         console.error(error);
         modelConfig = {
@@ -89,8 +89,8 @@ async function loadConfig() {
             'gemini-3.1-pro-preview': { label: '增强版V2', description: '推理更强，适合复杂编号和上下文判断场景。' },
         };
         modeConfig = {
-            alignment: { description: '上传含“原文”“译文”两列的 Excel，可选上传译文文件生成修订版。' },
-            direct: { description: '上传原文和译文文件，由新版数检程序直接抽取内容。' },
+            alignment: { description: '上传含“原文”“译文”两列的双语对照 Excel；如需生成修订版，可再上传译文文件。' },
+            direct: { description: '上传原文+译文双文件，由新版数检程序直接抽取内容，支持 DOCX、XLSX、PPTX、PDF。' },
         };
     }
 
@@ -129,16 +129,16 @@ function applyMode(mode) {
 
     const description = modeConfig[currentMode]?.description || (
         directMode
-            ? '上传原文和译文文件，由新版数检程序直接抽取内容。'
-            : '上传含“原文”“译文”两列的 Excel，可选上传译文文件生成修订版。'
+            ? '上传原文+译文双文件，由新版数检程序直接抽取内容，支持 DOCX、XLSX、PPTX、PDF。'
+            : '上传含“原文”“译文”两列的双语对照 Excel；如需生成修订版，可再上传译文文件。'
     );
     modeHint.textContent = description;
     uploadDesc.textContent = directMode
-        ? '原文和译文结构一致时可使用该模式；PDF 建议先制作对照 Excel。'
-        : '对照 Excel 是新版数检推荐输入；上传译文文件后会额外输出修订版。';
+        ? '原文和译文结构一致时可使用该模式；PDF 双文件会强制走新版程序的直接提取路径。'
+        : '单个双语对照 Excel 是新版数检推荐输入；上传译文文件后会额外输出修订版。';
     pageSubtitle.textContent = directMode
-        ? '直接从原文和译文文件抽取内容，生成数值检查报告和可用修订文件。'
-        : '基于已对齐 Excel 执行规则检查与 AI 复核，适合排版复杂或 PDF 来源文件。';
+        ? '直接从原文和译文双文件抽取内容，生成数值检查报告和可用修订文件。'
+        : '基于已对齐双语 Excel 执行规则检查与 AI 复核，适合只有一个对照文件的场景。';
 }
 
 function ensureLogPanel() {
@@ -168,7 +168,7 @@ async function runNumberCheck() {
     if (mode === 'alignment') {
         const alignmentFile = alignmentFileInput.files[0];
         if (!alignmentFile) {
-            alert('请选择对照 Excel 文件。');
+            alert('请选择双语对照 Excel 文件。');
             return;
         }
         formData.append('alignment_file', alignmentFile);
@@ -182,7 +182,7 @@ async function runNumberCheck() {
             return;
         }
         if (isSameLocalFile(sourceFile, targetFile)) {
-            alert('原文文件和译文文件不能选择同一个文件。若只有一个文件，请先生成对照 Excel 后使用“对照 Excel”模式。');
+            alert('原文文件和译文文件不能选择同一个文件。若只有一个双语对照文件，请使用“双语对照 Excel”模式。');
             return;
         }
         formData.append('source_file', sourceFile);

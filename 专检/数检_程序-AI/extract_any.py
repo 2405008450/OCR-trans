@@ -161,7 +161,7 @@ def _from_pdf(path: Path) -> list[Segment]:
     用 pymupdf (fitz) 的 TextBlock 提取 PDF 文本。
     TextBlock 按坐标聚合，比按行提取更接近段落语义。
     """
-    import fitz
+    from pdf.fitz_compat import fitz
 
     segments: list[Segment] = []
     doc = fitz.open(str(path))
