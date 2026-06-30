@@ -169,7 +169,37 @@ def _emit_ocr_status(message: str, status_callback=None) -> None:
 def _ocr_exception_message(exc: Exception) -> str:
     if isinstance(exc, OCRIncompleteResultError):
         return "OCR 输出疑似被截断"
-    return f"OCR 请求失败（{exc.__class__.__name__}）"
+
+    detail_parts = [exc.__class__.__name__]
+    status_code = getattr(exc, "status_code", None)
+    if status_code:
+        detail_parts.append(f"HTTP {status_code}")
+
+    response = getattr(exc, "response", None)
+    response_text = ""
+    if response is not None:
+        try:
+            response_text = getattr(response, "text", "") or ""
+        except Exception:
+            response_text = ""
+
+    body = getattr(exc, "body", None)
+    if not response_text and body:
+        response_text = str(body)
+
+    if response_text:
+        response_text = re.sub(r"\s+", " ", response_text).strip()
+        if len(response_text) > 500:
+            response_text = response_text[:500] + "..."
+        detail_parts.append(response_text)
+
+    message = str(exc).strip()
+    if message and message not in detail_parts:
+        if len(message) > 500:
+            message = message[:500] + "..."
+        detail_parts.append(message)
+
+    return f"OCR 请求失败（{'；'.join(detail_parts)}）"
 
 
 def _route_display_name(route: str) -> str:

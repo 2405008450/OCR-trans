@@ -1,6 +1,8 @@
 const POLL_INTERVAL = 2000;
 const DETAIL_POLL_INTERVAL = 1500;
 const DASHBOARD_TIME_ZONE = 'Asia/Shanghai';
+const INFERRED_BATCH_TYPES = new Set(['pdf2docx', 'doc_translate']);
+const INFERRED_BATCH_WINDOW_MS = 2000;
 
 let currentPage = 1;
 let currentPageSize = 20;
@@ -174,6 +176,245 @@ function renderTable(items) {
       </div></td>
     </tr>`;
   }).join('');
+}
+
+function renderTable(items) {
+  const body = document.getElementById('taskBody');
+  const empty = document.getElementById('emptyState');
+  if (!items.length) {
+    body.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  body.innerHTML = buildTableGroups(items).map((group) => {
+    if (group.type === 'single') {
+      return renderTaskRow(group.task);
+    }
+    return `${renderBatchRow(group)}${group.tasks.map((task) => renderTaskRow(task, true)).join('')}`;
+  }).join('');
+}
+
+function buildTableGroups(items) {
+  const groups = [];
+  const batchMap = new Map();
+  const inferredMap = new Map();
+
+  items.forEach((task) => {
+    const batch = normalizeBatch(task.batch);
+    if (!batch.id) {
+      const inferredKey = buildInferredBatchKey(task);
+      if (!inferredKey) {
+        groups.push({ type: 'single', task });
+        return;
+      }
+      if (!inferredMap.has(inferredKey)) {
+        const group = {
+          type: 'batch',
+          batch: buildInferredBatch(task, inferredKey, []),
+          tasks: [],
+        };
+        inferredMap.set(inferredKey, group);
+        groups.push(group);
+      }
+      inferredMap.get(inferredKey).tasks.push(task);
+      return;
+    }
+    if (!batchMap.has(batch.id)) {
+      const group = { type: 'batch', batch, tasks: [] };
+      batchMap.set(batch.id, group);
+      groups.push(group);
+    }
+    batchMap.get(batch.id).tasks.push(task);
+  });
+  groups.forEach((group) => {
+    if (group.type === 'batch') {
+      if (group.batch.inferred) {
+        group.tasks.sort(compareTasksForInferredBatch);
+        group.batch = buildInferredBatch(group.tasks[0], group.batch.id, group.tasks);
+        return;
+      }
+      group.tasks.sort((left, right) => (normalizeBatch(left.batch).index || 0) - (normalizeBatch(right.batch).index || 0));
+    }
+  });
+  return groups.flatMap((group) => {
+    if (group.type !== 'batch' || !group.batch.inferred) {
+      return [group];
+    }
+    return splitInferredBatchGroup(group);
+  });
+}
+
+function normalizeBatch(batch) {
+  if (!batch || typeof batch !== 'object' || !batch.id) {
+    return { id: '', name: '', index: null, total: null, inferred: false };
+  }
+  return {
+    id: String(batch.id || ''),
+    name: batch.name || '',
+    index: Number(batch.index || 0) || null,
+    total: Number(batch.total || 0) || null,
+    inferred: Boolean(batch.inferred),
+  };
+}
+
+function buildInferredBatchKey(task) {
+  const taskType = String(task.task_type || '').toLowerCase();
+  if (!INFERRED_BATCH_TYPES.has(taskType)) {
+    return '';
+  }
+  const createdAt = parseServerTime(task.created_at);
+  if (Number.isNaN(createdAt.getTime())) {
+    return '';
+  }
+  return `inferred:${taskType}:${Math.floor(createdAt.getTime() / 60000)}`;
+}
+
+function buildInferredBatch(task, inferredKey, tasks) {
+  const taskLabel = task?.task_label || task?.task_type || '任务';
+  const total = tasks.length || null;
+  return {
+    id: inferredKey,
+    name: `${taskLabel} 批量任务（自动识别）`,
+    index: null,
+    total,
+    inferred: true,
+  };
+}
+
+function splitInferredBatchGroup(group) {
+  const chunks = [];
+  let current = [];
+
+  group.tasks.forEach((task) => {
+    const previous = current[current.length - 1];
+    if (!previous || isInferredBatchNeighbor(previous, task)) {
+      current.push(task);
+      return;
+    }
+    chunks.push(current);
+    current = [task];
+  });
+  if (current.length) {
+    chunks.push(current);
+  }
+
+  return chunks.flatMap((tasks) => {
+    if (tasks.length < 2) {
+      return tasks.map((task) => ({ type: 'single', task }));
+    }
+    return [{
+      type: 'batch',
+      batch: buildInferredBatch(tasks[0], `${group.batch.id}:${displayNoSuffix(tasks[0]) || 'group'}`, tasks),
+      tasks,
+    }];
+  });
+}
+
+function isInferredBatchNeighbor(left, right) {
+  const leftNo = displayNoSuffix(left);
+  const rightNo = displayNoSuffix(right);
+  if (leftNo !== null && rightNo !== null && Math.abs(rightNo - leftNo) !== 1) {
+    return false;
+  }
+
+  const leftCreated = parseServerTime(left.created_at);
+  const rightCreated = parseServerTime(right.created_at);
+  if (Number.isNaN(leftCreated.getTime()) || Number.isNaN(rightCreated.getTime())) {
+    return false;
+  }
+  return Math.abs(rightCreated.getTime() - leftCreated.getTime()) <= INFERRED_BATCH_WINDOW_MS;
+}
+
+function compareTasksForInferredBatch(left, right) {
+  const leftNo = displayNoSuffix(left);
+  const rightNo = displayNoSuffix(right);
+  if (leftNo !== null && rightNo !== null && leftNo !== rightNo) {
+    return leftNo - rightNo;
+  }
+  return parseServerTime(left.created_at).getTime() - parseServerTime(right.created_at).getTime();
+}
+
+function displayNoSuffix(task) {
+  const match = String(task?.display_no || '').match(/(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function renderBatchRow(group) {
+  const batch = group.batch;
+  const batchId = escJsString(batch.id);
+  const batchName = batch.name || `批量任务 ${batch.id.slice(0, 8)}`;
+  const visibleTotal = group.tasks.length;
+  const total = batch.total || visibleTotal;
+  const doneCount = group.tasks.filter((task) => task.status === 'done').length;
+  const activeCount = group.tasks.filter((task) => ['queued', 'running'].includes(task.status) && !task.cancel_requested).length;
+  const failedCount = group.tasks.filter((task) => task.status === 'failed').length;
+  const cancelledCount = group.tasks.filter((task) => task.status === 'cancelled').length;
+  const avgProgress = visibleTotal
+    ? Math.round(group.tasks.reduce((sum, task) => sum + Number(task.progress || 0), 0) / visibleTotal)
+    : 0;
+  const statusText = [
+    `${doneCount}/${total} 已完成`,
+    activeCount ? `${activeCount} 处理中` : '',
+    failedCount ? `${failedCount} 失败` : '',
+    cancelledCount ? `${cancelledCount} 已暂停` : '',
+  ].filter(Boolean).join(' · ');
+  const firstCreated = group.tasks[0]?.created_at ? formatTime(group.tasks[0].created_at) : '-';
+  const taskIds = escJsString(group.tasks.map((task) => task.task_id).filter(Boolean).join(','));
+  const actionButtons = batch.inferred
+    ? `<button class="btn-batch" onclick="event.stopPropagation();downloadTaskBatch('${taskIds}')"><i class="fas fa-box-archive"></i> 批量下载</button>
+          ${activeCount ? `<button class="btn-batch btn-batch-warn" onclick="event.stopPropagation();cancelTaskBatch('${taskIds}')"><i class="fas fa-pause"></i> 暂停本批</button>` : ''}`
+    : `<button class="btn-batch" onclick="event.stopPropagation();downloadBatchGroup('${batchId}')"><i class="fas fa-box-archive"></i> 批量下载</button>
+          ${activeCount ? `<button class="btn-batch btn-batch-warn" onclick="event.stopPropagation();cancelBatchGroup('${batchId}')"><i class="fas fa-pause"></i> 暂停本批</button>` : ''}`;
+  return `<tr class="batch-row" data-batch-id="${escAttr(batch.id)}">
+    <td colspan="8">
+      <div class="batch-header">
+        <div class="batch-main">
+          <div class="batch-title"><i class="fas fa-layer-group"></i> ${escHtml(batchName)}</div>
+          <div class="batch-meta">${escHtml(statusText || '批量任务')} · 提交时间 ${escHtml(firstCreated)}</div>
+        </div>
+        <div class="batch-progress">
+          <div class="mini-progress"><div class="mini-progress-fill" style="width:${avgProgress}%"></div></div>
+          <span>${avgProgress}%</span>
+        </div>
+        <div class="batch-actions">
+          ${actionButtons}
+        </div>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function renderTaskRow(task, isBatchChild = false) {
+  const badge = STATUS_BADGE[task.status] || STATUS_BADGE.queued;
+  const progress = task.progress ?? 0;
+  const createdAt = task.created_at ? formatTime(task.created_at) : '-';
+  const fileName = escHtml(task.filename || '-');
+  const shortName = fileName.length > 40 ? `${fileName.slice(0, 37)}...` : fileName;
+  const feedback = normalizeFeedback(task.feedback);
+  const taskId = escJsString(task.task_id || '');
+  const batch = normalizeBatch(task.batch);
+  const displayNo = isBatchChild && batch.index ? `${task.display_no || '-'} · #${batch.index}` : (task.display_no || '-');
+  const feedbackLabel = feedback.marked ? feedbackCategoryText(feedback.category) : '未标记';
+  const feedbackCell = feedback.marked
+    ? `<span class="badge badge-feedback" title="${escAttr(feedback.note || feedbackLabel)}"><i class="fas fa-flag"></i> 已标记</span>`
+    : `<span class="badge badge-feedback-muted"><i class="far fa-flag"></i> 未标记</span>`;
+  return `<tr class="${isBatchChild ? 'batch-child-row' : ''}" data-id="${escAttr(task.task_id || '')}" onclick="openDetail('${taskId}')">
+    <td>${escHtml(displayNo)}</td>
+    <td>${escHtml(task.task_label || task.task_type)}</td>
+    <td class="cell-filename" title="${fileName}">${shortName}</td>
+    <td><span class="badge ${badge.cls}"><i class="fas ${badge.icon}"></i> ${badge.text}</span></td>
+    <td>${feedbackCell}</td>
+    <td><div class="mini-progress"><div class="mini-progress-fill" style="width:${progress}%"></div></div> <span style="font-size:12px;color:var(--muted)">${progress}%</span></td>
+    <td class="cell-time">${createdAt}</td>
+    <td><div class="action-cell">
+      <button class="btn-detail" onclick="event.stopPropagation();openDetail('${taskId}')"><i class="fas fa-eye"></i> 详情</button>
+      <button class="btn-feedback-table ${feedback.marked ? 'is-marked' : ''}" onclick="event.stopPropagation();openFeedbackModal('${taskId}')" title="${feedback.marked ? '更新异常标记' : '标记异常'}"><i class="fas fa-flag"></i></button>
+      ${(task.status === 'queued' || task.status === 'running') && !task.cancel_requested ? `<button class="btn-cancel-table" onclick="event.stopPropagation();cancelTask('${taskId}')" title="取消任务"><i class="fas fa-ban"></i></button>` : ''}
+      ${task.cancel_requested && task.status === 'running' ? `<span style="font-size:11px;color:#94a3b8;margin-left:4px">取消中...</span>` : ''}
+    </div></td>
+  </tr>`;
 }
 
 function renderPagination(total, page, pageSize) {
@@ -498,6 +739,126 @@ function buildSanitizedLogHtml(logText) {
   const sanitized = sanitizeStreamLog(logText);
   if (!sanitized) return '';
   return `<div class="detail-section"><h3><i class="fas fa-terminal"></i> 运行日志</h3><pre class="detail-log">${escHtml(sanitized)}</pre></div>`;
+}
+
+async function downloadBatchGroup(batchId) {
+  try {
+    const response = await fetch(`/task/batch/${encodeURIComponent(batchId)}/download`);
+    if (!response.ok) {
+      let message = '批量下载失败，当前批次可能还没有已完成的输出文件。';
+      try {
+        const payload = await response.json();
+        message = payload.detail || message;
+      } catch (_) {}
+      alert(message);
+      return;
+    }
+    await saveDownloadResponse(response, 'batch_outputs.zip');
+  } catch (error) {
+    console.error('downloadBatchGroup', error);
+    alert('批量下载失败，请稍后重试。');
+  }
+}
+
+async function downloadTaskBatch(taskIdsValue) {
+  const taskIds = parseTaskIds(taskIdsValue);
+  if (!taskIds.length) {
+    alert('没有可下载的批量任务。');
+    return;
+  }
+  try {
+    const response = await fetch('/task/batch-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: taskIds, archive_name: 'batch_outputs.zip' }),
+    });
+    if (!response.ok) {
+      let message = '批量下载失败，当前批次可能还没有已完成的输出文件。';
+      try {
+        const payload = await response.json();
+        message = payload.detail || message;
+      } catch (_) {}
+      alert(message);
+      return;
+    }
+    await saveDownloadResponse(response, 'batch_outputs.zip');
+  } catch (error) {
+    console.error('downloadTaskBatch', error);
+    alert('批量下载失败，请稍后重试。');
+  }
+}
+
+async function cancelBatchGroup(batchId) {
+  if (!confirm('确定要暂停本批还在排队或处理中的任务吗？运行中的任务会在当前步骤结束后停止。')) {
+    return;
+  }
+  try {
+    const response = await fetch(`/task/batch/${encodeURIComponent(batchId)}/cancel`, { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) {
+      alert(data.detail || '暂停本批失败');
+      return;
+    }
+    await loadAll();
+    if (openTaskId) {
+      await loadDetail(openTaskId, true);
+    }
+  } catch (error) {
+    console.error('cancelBatchGroup', error);
+    alert('暂停本批请求失败，请稍后重试。');
+  }
+}
+
+async function cancelTaskBatch(taskIdsValue) {
+  const taskIds = parseTaskIds(taskIdsValue);
+  if (!taskIds.length) {
+    alert('没有可暂停的批量任务。');
+    return;
+  }
+  if (!confirm('确定要暂停本批还在排队或处理中的任务吗？运行中的任务会在当前步骤结束后停止。')) {
+    return;
+  }
+  try {
+    const response = await fetch('/task/batch-cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: taskIds }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      alert(data.detail || '暂停本批失败');
+      return;
+    }
+    await loadAll();
+    if (openTaskId) {
+      await loadDetail(openTaskId, true);
+    }
+  } catch (error) {
+    console.error('cancelTaskBatch', error);
+    alert('暂停本批请求失败，请稍后重试。');
+  }
+}
+
+function parseTaskIds(taskIdsValue) {
+  return String(taskIdsValue || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+async function saveDownloadResponse(response, fallbackFilename) {
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') || '';
+  const filenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^"]+)"?/i);
+  const filename = filenameMatch ? decodeURIComponent(filenameMatch[1] || filenameMatch[2] || fallbackFilename) : fallbackFilename;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function downloadFile(taskId, filePath, friendlyName) {

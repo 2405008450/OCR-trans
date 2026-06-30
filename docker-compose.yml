@@ -37,11 +37,21 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - ALL_PROXY=${ALL_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,fastapi-llm,nginx}
+      - http_proxy=${HTTP_PROXY:-}
+      - https_proxy=${HTTPS_PROXY:-}
+      - all_proxy=${ALL_PROXY:-}
+      - no_proxy=${NO_PROXY:-localhost,127.0.0.1,fastapi-llm,nginx}
       - LIBREOFFICE_PATH=${LIBREOFFICE_PATH:-/usr/bin/soffice}
       - HOST=0.0.0.0
       - PORT=8001
       - DEBUG=False
       - ALLOWED_ORIGINS=*
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Google ADC 凭据（Vertex AI 认证）
       # Linux: GCLOUD_CONFIG_DIR=/root/.config/gcloud

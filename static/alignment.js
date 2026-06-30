@@ -32,6 +32,7 @@ const streamLogEl = document.getElementById('streamLog');
 const POLL_INTERVAL = 1500;
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 let etaHint = null;
+let isSubmitting = false;
 
 function ensureEtaHint() {
     if (etaHint && etaHint.isConnected) return etaHint;
@@ -297,6 +298,7 @@ btnStart.addEventListener('click', startAlignment);
 btnReset.addEventListener('click', resetPage);
 
 async function startAlignment() {
+    if (isSubmitting) return;
     const origFile = originalFileInput.files[0];
     const transFile = translatedFileInput.files[0];
 
@@ -318,6 +320,8 @@ async function startAlignment() {
         return;
     }
 
+    isSubmitting = true;
+    btnStart.disabled = true;
     uploadSection.style.display = 'none';
     processingSection.style.display = 'block';
     updateProgressUI(0, '正在提交任务...');
@@ -365,6 +369,11 @@ async function startAlignment() {
     } catch (err) {
         alert(`提交失败: ${err.message}`);
         resetPage();
+    } finally {
+        if (uploadSection.style.display !== 'none') {
+            isSubmitting = false;
+            btnStart.disabled = false;
+        }
     }
 }
 
@@ -511,6 +520,8 @@ function showResult(result) {
 }
 
 function resetPage() {
+    isSubmitting = false;
+    btnStart.disabled = false;
     originalFileInput.value = '';
     translatedFileInput.value = '';
     uploadSection.style.display = 'block';

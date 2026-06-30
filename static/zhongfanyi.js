@@ -57,6 +57,7 @@ let streamLogEl = null;
 let etaHint = null;
 let sessionRuleContent = null;
 let retryBtn = null;
+let isSubmitting = false;
 
 init();
 
@@ -267,6 +268,7 @@ function formatEtaDate(date) {
 }
 
 async function runZhongfanyi() {
+    if (isSubmitting) return;
     const mode = currentMode;
     const formData = new FormData();
 
@@ -299,6 +301,8 @@ async function runZhongfanyi() {
         formData.append('session_rule_content', sessionRuleContent.trim());
     }
 
+    isSubmitting = true;
+    btnRun.disabled = true;
     uploadSection.style.display = 'none';
     resultSection.style.display = 'none';
     processingSection.style.display = 'block';
@@ -334,6 +338,11 @@ async function runZhongfanyi() {
         showResult(submitResp.result || submitResp);
     } catch (error) {
         showFailure(`中翻译专检失败: ${error.message}`);
+    } finally {
+        if (uploadSection.style.display !== 'none') {
+            isSubmitting = false;
+            btnRun.disabled = false;
+        }
     }
 }
 
@@ -504,6 +513,8 @@ function buildCountSuffix(value) {
 }
 
 function resetPage() {
+    isSubmitting = false;
+    btnRun.disabled = false;
     originalFileInput.value = '';
     translatedFileInput.value = '';
     singleFileInput.value = '';

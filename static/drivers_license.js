@@ -26,6 +26,7 @@ const resultFileList = document.getElementById('resultFileList');
 let selectedFiles = [];
 let pollingTimer = null;
 let config = { processing_modes: {} };
+let isSubmitting = false;
 
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 let etaHint = null;
@@ -206,12 +207,15 @@ function updateModeTip() {
 function updateProcessButton() {
     const mode = processingMode.value;
     const fileCount = selectedFiles.length;
-    btnProcess.disabled = fileCount === 0 || (mode === 'single' && fileCount !== 1);
+    btnProcess.disabled = isSubmitting || fileCount === 0 || (mode === 'single' && fileCount !== 1);
 }
 
 async function processFiles() {
+    if (isSubmitting) return;
     if (!selectedFiles.length) return;
 
+    isSubmitting = true;
+    updateProcessButton();
     uploadSection.style.display = 'none';
     resultSection.style.display = 'none';
     processingSection.style.display = 'block';
@@ -237,6 +241,11 @@ async function processFiles() {
         startPolling(data.task_id);
     } catch (error) {
         showFailure(error.message);
+    } finally {
+        if (uploadSection.style.display !== 'none') {
+            isSubmitting = false;
+            updateProcessButton();
+        }
     }
 }
 
@@ -367,6 +376,7 @@ function showResult(result) {
 }
 
 function resetPage() {
+    isSubmitting = false;
     clearFiles();
     clearLog();
     stopPolling();

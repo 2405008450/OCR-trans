@@ -66,6 +66,7 @@ let retryBtn = null;
 let batchPollingTimer = null;
 let batchTaskStates = [];
 let openSmartSelect = null;
+let isSubmitting = false;
 
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 let etaHint = null;
@@ -755,7 +756,7 @@ function updateTranslationRulesCount() {
 }
 
 function updateProcessButton() {
-    btnProcess.disabled = !(selectedFiles.length > 0 && getSelectedSourceLangs().length > 0 && getSelectedTargetLangs().length > 0);
+    btnProcess.disabled = isSubmitting || !(selectedFiles.length > 0 && getSelectedSourceLangs().length > 0 && getSelectedTargetLangs().length > 0);
 }
 
 function getSelectedTranslateMode() {
@@ -827,13 +828,21 @@ function clearFiles() {
 }
 
 async function processFiles() {
+    if (isSubmitting) return;
     if (selectedFiles.length === 0) return;
     const sourceLangs = getSelectedSourceLangs();
     const targetLangs = getSelectedTargetLangs();
     if (sourceLangs.length === 0) { alert('请至少选择一种源语言。'); return; }
     if (targetLangs.length === 0) { alert('请至少选择一种目标翻译语言。'); return; }
-    if (selectedFiles.length === 1) { await processSingleFile(sourceLangs, targetLangs); return; }
-    await processBatchFiles(sourceLangs, targetLangs);
+    isSubmitting = true;
+    updateProcessButton();
+    try {
+        if (selectedFiles.length === 1) { await processSingleFile(sourceLangs, targetLangs); return; }
+        await processBatchFiles(sourceLangs, targetLangs);
+    } finally {
+        isSubmitting = false;
+        updateProcessButton();
+    }
 }
 
 async function processSingleFile(sourceLangs, targetLangs) {
@@ -1092,6 +1101,7 @@ function showResult(result) {
 }
 
 function resetPage() {
+    isSubmitting = false;
     clearFiles();
     stopPolling();
     stopBatchPolling();

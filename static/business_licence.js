@@ -41,6 +41,7 @@ let defaultModel = 'google/gemini-3.1-pro-preview';
 let defaultRoute = 'openrouter';
 let etaHint = null;
 let pendingCompanyNameDialog = null;
+let isSubmitting = false;
 
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp', '.gif'];
@@ -175,14 +176,17 @@ function clearFile() {
 }
 
 function updateProcessButton() {
-    btnProcess.disabled = !selectedFile;
+    btnProcess.disabled = isSubmitting || !selectedFile;
 }
 
 async function processFile() {
+    if (isSubmitting) return;
     if (!selectedFile) {
         return;
     }
 
+    isSubmitting = true;
+    updateProcessButton();
     uploadSection.style.display = 'none';
     resultSection.style.display = 'none';
     processingSection.style.display = 'block';
@@ -223,6 +227,11 @@ async function processFile() {
             return;
         }
         showFailure(error?.message || '处理失败');
+    } finally {
+        if (uploadSection.style.display !== 'none') {
+            isSubmitting = false;
+            updateProcessButton();
+        }
     }
 }
 
@@ -610,6 +619,7 @@ function showResult(result) {
 }
 
 function resetPage() {
+    isSubmitting = false;
     closeCompanyNameDialog();
     clearFile();
     clearLog();

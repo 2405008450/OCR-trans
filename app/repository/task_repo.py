@@ -22,9 +22,12 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
-def create_task(db: Session, *, task_id: str, task_type: str, filename: str, status: str = 'queued', progress: int = 0, message: Optional[str] = None, params_json: Optional[str] = None, input_files_json: Optional[str] = None) -> Task:
+ACTIVE_DEDUPE_STATUSES = ('queued', 'running')
+
+
+def create_task(db: Session, *, task_id: str, task_type: str, filename: str, status: str = 'queued', progress: int = 0, message: Optional[str] = None, params_json: Optional[str] = None, input_files_json: Optional[str] = None, request_fingerprint: Optional[str] = None, file_fingerprints_json: Optional[str] = None, batch_id: Optional[str] = None, batch_name: Optional[str] = None, batch_index: Optional[int] = None, batch_total: Optional[int] = None) -> Task:
     now = _now()
-    task = Task(task_id=task_id, task_type=task_type, task_label=TASK_TYPE_LABELS.get(task_type, task_type), filename=filename, status=status, progress=progress, message=message, params_json=params_json, input_files_json=input_files_json, created_at=now, updated_at=now)
+    task = Task(task_id=task_id, task_type=task_type, task_label=TASK_TYPE_LABELS.get(task_type, task_type), filename=filename, status=status, progress=progress, message=message, params_json=params_json, input_files_json=input_files_json, request_fingerprint=request_fingerprint, file_fingerprints_json=file_fingerprints_json, batch_id=batch_id, batch_name=batch_name, batch_index=batch_index, batch_total=batch_total, created_at=now, updated_at=now)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -37,6 +40,23 @@ def create_task(db: Session, *, task_id: str, task_type: str, filename: str, sta
 
 def get_task_by_task_id(db: Session, task_id: str) -> Optional[Task]:
     return db.query(Task).filter(Task.task_id == task_id).first()
+
+
+def get_active_task_by_request_fingerprint(db: Session, request_fingerprint: str) -> Optional[Task]:
+    return (
+        db.query(Task)
+        .filter(
+            Task.request_fingerprint == request_fingerprint,
+            Task.status.in_(ACTIVE_DEDUPE_STATUSES),
+            Task.cancel_requested.is_(False),
+        )
+        .order_by(Task.created_at.asc(), Task.id.asc())
+        .first()
+    )
+
+
+def list_tasks_by_batch_id(db: Session, batch_id: str) -> List[Task]:
+    return db.query(Task).filter(Task.batch_id == batch_id).order_by(Task.batch_index.asc(), Task.id.asc()).all()
 
 
 def update_task_input_files(db: Session, task_id: str, input_files_json: str) -> Optional[Task]:
@@ -193,6 +213,17 @@ def mark_cancelled(db: Session, task_id: str) -> Optional[Task]:
     task.message = 'Cancelled by user'
     task.finished_at = now
     task.updated_at = now
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def update_task_params(db: Session, task_id: str, params_json: str) -> Optional[Task]:
+    task = get_task_by_task_id(db, task_id)
+    if not task:
+        return None
+    task.params_json = params_json
+    task.updated_at = _now()
     db.commit()
     db.refresh(task)
     return task

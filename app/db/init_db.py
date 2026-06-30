@@ -30,6 +30,12 @@ def _ensure_task_table_columns():
         'message': 'ALTER TABLE task ADD COLUMN message VARCHAR',
         'params_json': 'ALTER TABLE task ADD COLUMN params_json TEXT',
         'input_files_json': 'ALTER TABLE task ADD COLUMN input_files_json TEXT',
+        'request_fingerprint': 'ALTER TABLE task ADD COLUMN request_fingerprint VARCHAR',
+        'file_fingerprints_json': 'ALTER TABLE task ADD COLUMN file_fingerprints_json TEXT',
+        'batch_id': 'ALTER TABLE task ADD COLUMN batch_id VARCHAR',
+        'batch_name': 'ALTER TABLE task ADD COLUMN batch_name VARCHAR',
+        'batch_index': 'ALTER TABLE task ADD COLUMN batch_index INTEGER',
+        'batch_total': 'ALTER TABLE task ADD COLUMN batch_total INTEGER',
         'result_json': 'ALTER TABLE task ADD COLUMN result_json TEXT',
         'output_files_json': 'ALTER TABLE task ADD COLUMN output_files_json TEXT',
         'error_message': 'ALTER TABLE task ADD COLUMN error_message TEXT',
@@ -52,6 +58,9 @@ def _ensure_task_table_columns():
         connection.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_task_display_no ON task (display_no)'))
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_status ON task (status)'))
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_task_type ON task (task_type)'))
+        connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_request_fingerprint ON task (request_fingerprint)'))
+        connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_batch_id ON task (batch_id)'))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_task_active_request_fingerprint ON task (request_fingerprint) WHERE request_fingerprint IS NOT NULL AND status IN ('queued', 'running')"))
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_created_at ON task (created_at)'))
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_updated_at ON task (updated_at)'))
         connection.execute(text('CREATE INDEX IF NOT EXISTS ix_task_feedback_marked ON task (feedback_marked)'))

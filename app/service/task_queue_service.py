@@ -1,13 +1,16 @@
 ﻿import asyncio
+import hashlib
 import io
 import json
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import UploadFile
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.file_naming import build_storage_filename, build_user_visible_filename
@@ -37,7 +40,25 @@ class TaskCancelledError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class TaskSubmitResult:
+    task_id: str
+    deduped: bool = False
+
+
+@dataclass
+class StagedUpload:
+    role: str
+    original_filename: str
+    fallback_name: str
+    temp_path: Path
+    size: int
+    sha256: str
+    ext: str
+
+
 class TaskQueueService:
+    UPLOAD_CHUNK_SIZE = 1024 * 1024
     MAX_AUTO_REQUEUE_ATTEMPTS = 1
     DEFAULT_TASK_TYPE_LIMITS: Dict[str, int] = {
         'pdf2docx': 1,
@@ -81,6 +102,153 @@ class TaskQueueService:
         for task_type, limit in settings.TASK_QUEUE_TYPE_LIMITS.items():
             limits[task_type] = limit
         return limits
+
+    @staticmethod
+    def _normalize_for_fingerprint(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {
+                str(key): TaskQueueService._normalize_for_fingerprint(item)
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            }
+        if isinstance(value, (list, tuple)):
+            return [TaskQueueService._normalize_for_fingerprint(item) for item in value]
+        return str(value)
+
+    @classmethod
+    def _build_file_fingerprints(cls, staged_uploads: list[StagedUpload]) -> list[Dict[str, Any]]:
+        return [
+            {
+                'role': item.role,
+                'filename': item.original_filename,
+                'size': item.size,
+                'sha256': item.sha256,
+            }
+            for item in staged_uploads
+        ]
+
+    @classmethod
+    def build_request_fingerprint(cls, task_type: str, params: Dict[str, Any], file_fingerprints: list[Dict[str, Any]]) -> str:
+        payload = {
+            'task_type': task_type,
+            'params': cls._normalize_for_fingerprint(params),
+            'files': cls._normalize_for_fingerprint(file_fingerprints),
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        return hashlib.sha256(encoded).hexdigest()
+
+    async def _stage_upload(self, task_type: str, role: str, upload: UploadFile, fallback_name: str) -> StagedUpload:
+        original_filename = upload.filename or fallback_name
+        ext = Path(original_filename).suffix or Path(fallback_name).suffix or '.bin'
+        temp_dir = Path(settings.UPLOAD_DIR) / '_tmp_uploads' / task_type
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = temp_dir / f'{uuid.uuid4().hex}{ext}'
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with temp_path.open('wb') as target:
+                while True:
+                    chunk = await upload.read(self.UPLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+        return StagedUpload(
+            role=role,
+            original_filename=original_filename,
+            fallback_name=fallback_name,
+            temp_path=temp_path,
+            size=size,
+            sha256=digest.hexdigest(),
+            ext=ext,
+        )
+
+    async def _stage_uploads(self, task_type: str, uploads: list[tuple[str, Optional[UploadFile], str]]) -> list[StagedUpload]:
+        staged_uploads: list[StagedUpload] = []
+        try:
+            for role, upload, fallback_name in uploads:
+                if upload is None:
+                    continue
+                staged_uploads.append(await self._stage_upload(task_type, role, upload, fallback_name))
+        except Exception:
+            self._cleanup_staged_uploads(staged_uploads)
+            raise
+        return staged_uploads
+
+    @staticmethod
+    def _cleanup_staged_uploads(staged_uploads: list[StagedUpload]) -> None:
+        for item in staged_uploads:
+            item.temp_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _move_staged_upload(staged_upload: StagedUpload, upload_dir: Path, display_no: str, task_id: str) -> str:
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        input_path = upload_dir / build_storage_filename(
+            display_no,
+            staged_upload.original_filename,
+            task_id,
+            role=staged_upload.role,
+            ext=staged_upload.ext,
+        )
+        staged_upload.temp_path.replace(input_path)
+        return str(input_path).replace('\\', '/')
+
+    def _reserve_task_submission(
+        self,
+        *,
+        task_type: str,
+        filename: str,
+        params: Dict[str, Any],
+        staged_uploads: list[StagedUpload],
+        batch_id: Optional[str] = None,
+        batch_name: Optional[str] = None,
+        batch_index: Optional[int] = None,
+        batch_total: Optional[int] = None,
+    ):
+        file_fingerprints = self._build_file_fingerprints(staged_uploads)
+        request_fingerprint = self.build_request_fingerprint(task_type, params, file_fingerprints)
+        file_fingerprints_json = json.dumps(file_fingerprints, ensure_ascii=False)
+
+        with SessionLocal() as db:
+            existing_task = task_repo.get_active_task_by_request_fingerprint(db, request_fingerprint)
+            if existing_task:
+                self._append_task_log(existing_task.task_id, '[dedupe] duplicate submission reused this task')
+                return TaskSubmitResult(existing_task.task_id, deduped=True), None
+
+            task_id = str(uuid.uuid4())
+            self._set_task_log(task_id, f'[queue] queued: {filename}')
+            try:
+                task = task_repo.create_task(
+                    db,
+                    task_id=task_id,
+                    task_type=task_type,
+                    filename=filename,
+                    status='queued',
+                    progress=0,
+                    message='Queued',
+                    params_json=json.dumps(params, ensure_ascii=False),
+                    input_files_json='{}',
+                    request_fingerprint=request_fingerprint,
+                    file_fingerprints_json=file_fingerprints_json,
+                    batch_id=batch_id,
+                    batch_name=batch_name,
+                    batch_index=batch_index,
+                    batch_total=batch_total,
+                )
+            except IntegrityError:
+                db.rollback()
+                existing_task = task_repo.get_active_task_by_request_fingerprint(db, request_fingerprint)
+                if existing_task:
+                    self._append_task_log(existing_task.task_id, '[dedupe] duplicate submission reused this task')
+                    return TaskSubmitResult(existing_task.task_id, deduped=True), None
+                raise
+
+        return TaskSubmitResult(task.task_id), task
 
     async def start(self):
         if self._worker_task and not self._worker_task.done():
@@ -136,146 +304,180 @@ class TaskQueueService:
         source_hf_file: Optional[UploadFile],
         gemini_route: str,
         model_name: str,
-    ) -> str:
+    ) -> TaskSubmitResult:
         if mode == NUMBER_CHECK_MODE_ALIGNMENT:
             alignment_name = alignment_file.filename if alignment_file else 'alignment.xlsx'
             target_name = target_file.filename if target_file else None
             display_name = f'{alignment_name} | {target_name}' if target_name else alignment_name
+            if alignment_file is None:
+                raise ValueError('alignment_file is required for alignment mode')
+            upload_specs = [
+                ('alignment', alignment_file, 'alignment.xlsx'),
+                ('target', target_file, 'target.docx'),
+                ('source_hf', source_hf_file, 'source_hf.docx'),
+            ]
         else:
             source_name = source_file.filename if source_file else 'source.docx'
             target_name = target_file.filename if target_file else 'target.docx'
             display_name = f'{source_name} | {target_name}'
-        reserved_task = self._create_db_task(
-            'number_check',
-            display_name,
-            {'mode': mode, 'gemini_route': gemini_route, 'model_name': model_name},
-            {},
-        )
+            if source_file is None or target_file is None:
+                raise ValueError('source_file and target_file are required for direct mode')
+            upload_specs = [
+                ('source', source_file, 'source.docx'),
+                ('target', target_file, 'target.docx'),
+            ]
+
+        params = {'mode': mode, 'gemini_route': gemini_route, 'model_name': model_name}
+        staged_uploads = await self._stage_uploads('number_check', upload_specs)
+        reserved_task = None
         try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='number_check',
+                filename=display_name,
+                params=params,
+                staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
             upload_dir = Path(settings.UPLOAD_DIR) / 'number_check' / reserved_task.display_no
-            upload_dir.mkdir(parents=True, exist_ok=True)
-
             input_files: Dict[str, Any] = {}
-
-            async def save_role(role: str, upload: Optional[UploadFile], fallback_name: str) -> None:
-                if upload is None:
-                    return
-                ext = Path(upload.filename or fallback_name).suffix or Path(fallback_name).suffix
-                path = upload_dir / build_storage_filename(
-                    reserved_task.display_no,
-                    upload.filename,
-                    reserved_task.task_id,
-                    role=role,
-                    ext=ext,
-                )
-                path.write_bytes(await upload.read())
-                input_files[f'{role}_path'] = str(path).replace('\\', '/')
-                input_files[f'{role}_filename'] = upload.filename
-
-            if mode == NUMBER_CHECK_MODE_ALIGNMENT:
-                if alignment_file is None:
-                    raise ValueError('alignment_file is required for alignment mode')
-                await save_role('alignment', alignment_file, 'alignment.xlsx')
-                await save_role('target', target_file, 'target.docx')
-                await save_role('source_hf', source_hf_file, 'source_hf.docx')
-            else:
-                if source_file is None or target_file is None:
-                    raise ValueError('source_file and target_file are required for direct mode')
-                await save_role('source', source_file, 'source.docx')
-                await save_role('target', target_file, 'target.docx')
+            for item in staged_uploads:
+                input_files[f'{item.role}_path'] = self._move_staged_upload(item, upload_dir, reserved_task.display_no, reserved_task.task_id)
+                input_files[f'{item.role}_filename'] = item.original_filename
 
             self._update_task_input_files(reserved_task.task_id, input_files)
             self._notify_dispatcher()
-            return reserved_task.task_id
+            return submit_result
         except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_zhongfanyi_task(self, *, mode: str, original_file: Optional[UploadFile], translated_file: Optional[UploadFile], single_file: Optional[UploadFile], use_ai_rule: bool, gemini_route: str, model_name: str, rule_file: Optional[UploadFile], session_rule_content: Optional[str]) -> str:
+    async def submit_zhongfanyi_task(self, *, mode: str, original_file: Optional[UploadFile], translated_file: Optional[UploadFile], single_file: Optional[UploadFile], use_ai_rule: bool, gemini_route: str, model_name: str, rule_file: Optional[UploadFile], session_rule_content: Optional[str]) -> TaskSubmitResult:
+        session_rule_text = (session_rule_content.strip() or None) if session_rule_content else None
         if mode == zf_service.ZHONGFANYI_MODE_SINGLE:
             display_name = single_file.filename if single_file else 'single.docx'
+            if single_file is None:
+                raise ValueError('single_file is required for single mode')
+            upload_specs = [('single', single_file, 'single.docx')]
         else:
             original_name = original_file.filename if original_file else 'original.docx'
             translated_name = translated_file.filename if translated_file else 'translated.docx'
             display_name = f'{original_name} | {translated_name}'
-        reserved_task = self._create_db_task('zhongfanyi', display_name, {'mode': mode, 'use_ai_rule': use_ai_rule, 'gemini_route': gemini_route, 'model_name': model_name, 'ai_rule_file_path': None, 'session_rule_text': (session_rule_content.strip() or None) if session_rule_content else None}, {})
+            if original_file is None or translated_file is None:
+                raise ValueError('original_file and translated_file are required for double mode')
+            upload_specs = [('original', original_file, 'original.docx'), ('translated', translated_file, 'translated.docx')]
+        if rule_file and use_ai_rule:
+            upload_specs.append(('rule', rule_file, 'rule.txt'))
+
+        params = {
+            'mode': mode,
+            'use_ai_rule': use_ai_rule,
+            'gemini_route': gemini_route,
+            'model_name': model_name,
+            'ai_rule_file_path': None,
+            'session_rule_text': session_rule_text,
+        }
+        staged_uploads = await self._stage_uploads('zhongfanyi', upload_specs)
+        reserved_task = None
         try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='zhongfanyi',
+                filename=display_name,
+                params=params,
+                staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
             upload_dir = Path(settings.UPLOAD_DIR) / 'zhongfanyi' / reserved_task.display_no
-            upload_dir.mkdir(parents=True, exist_ok=True)
             input_files = {}
-            if mode == zf_service.ZHONGFANYI_MODE_SINGLE:
-                ext_single = Path(single_file.filename or 'single.docx').suffix.lower()
-                single_path = upload_dir / build_storage_filename(reserved_task.display_no, single_file.filename, reserved_task.task_id, role='single', ext=ext_single)
-                single_path.write_bytes(await single_file.read())
-                input_files.update({'single_path': str(single_path).replace('\\', '/'), 'single_filename': single_file.filename})
-            else:
-                ext_orig = Path(original_file.filename or 'original.docx').suffix.lower()
-                ext_tran = Path(translated_file.filename or 'translated.docx').suffix.lower()
-                original_path = upload_dir / build_storage_filename(reserved_task.display_no, original_file.filename, reserved_task.task_id, role='original', ext=ext_orig)
-                translated_path = upload_dir / build_storage_filename(reserved_task.display_no, translated_file.filename, reserved_task.task_id, role='translated', ext=ext_tran)
-                original_path.write_bytes(await original_file.read())
-                translated_path.write_bytes(await translated_file.read())
-                input_files.update({
-                    'original_path': str(original_path).replace('\\', '/'),
-                    'translated_path': str(translated_path).replace('\\', '/'),
-                    'original_filename': original_file.filename,
-                    'translated_filename': translated_file.filename,
-                })
             ai_rule_file_path = None
-            if rule_file and use_ai_rule:
-                ext_rule = Path(rule_file.filename or 'rule.txt').suffix.lower()
-                ai_rule_path = upload_dir / build_storage_filename(reserved_task.display_no, rule_file.filename, reserved_task.task_id, role='rule', ext=ext_rule)
-                ai_rule_path.write_bytes(await rule_file.read())
-                ai_rule_file_path = str(ai_rule_path).replace('\\', '/')
-            with SessionLocal() as db:
-                task = task_repo.get_task_by_task_id(db, reserved_task.task_id)
-                if task:
-                    params = json.loads(task.params_json or '{}')
-                    params['ai_rule_file_path'] = ai_rule_file_path
-                    task.params_json = json.dumps(params, ensure_ascii=False)
-                    db.commit()
+            for item in staged_uploads:
+                moved_path = self._move_staged_upload(item, upload_dir, reserved_task.display_no, reserved_task.task_id)
+                if item.role == 'rule':
+                    ai_rule_file_path = moved_path
+                else:
+                    input_files[f'{item.role}_path'] = moved_path
+                    input_files[f'{item.role}_filename'] = item.original_filename
+
+            final_params = dict(params)
+            final_params['ai_rule_file_path'] = ai_rule_file_path
+            self._update_task_params(reserved_task.task_id, final_params)
             self._update_task_input_files(reserved_task.task_id, input_files)
             self._notify_dispatcher()
-            return reserved_task.task_id
+            return submit_result
         except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_alignment_task(self, *, original_file: UploadFile, translated_file: UploadFile, source_lang: str, target_lang: str, model_name: str, gemini_route: str, enable_post_split: bool, threshold_2: int, threshold_3: int, threshold_4: int, threshold_5: int, threshold_6: int, threshold_7: int, threshold_8: int, buffer_chars: int) -> str:
-        reserved_task = self._create_db_task('alignment', f'{original_file.filename} | {translated_file.filename}', {'source_lang': source_lang, 'target_lang': target_lang, 'model_name': model_name, 'gemini_route': gemini_route, 'enable_post_split': enable_post_split, 'threshold_2': threshold_2, 'threshold_3': threshold_3, 'threshold_4': threshold_4, 'threshold_5': threshold_5, 'threshold_6': threshold_6, 'threshold_7': threshold_7, 'threshold_8': threshold_8, 'buffer_chars': buffer_chars}, {})
+    async def submit_alignment_task(self, *, original_file: UploadFile, translated_file: UploadFile, source_lang: str, target_lang: str, model_name: str, gemini_route: str, enable_post_split: bool, threshold_2: int, threshold_3: int, threshold_4: int, threshold_5: int, threshold_6: int, threshold_7: int, threshold_8: int, buffer_chars: int) -> TaskSubmitResult:
+        display_name = f'{original_file.filename} | {translated_file.filename}'
+        params = {'source_lang': source_lang, 'target_lang': target_lang, 'model_name': model_name, 'gemini_route': gemini_route, 'enable_post_split': enable_post_split, 'threshold_2': threshold_2, 'threshold_3': threshold_3, 'threshold_4': threshold_4, 'threshold_5': threshold_5, 'threshold_6': threshold_6, 'threshold_7': threshold_7, 'threshold_8': threshold_8, 'buffer_chars': buffer_chars}
+        staged_uploads = await self._stage_uploads(
+            'alignment',
+            [('original', original_file, 'original.docx'), ('translated', translated_file, 'translated.docx')],
+        )
+        reserved_task = None
         try:
-            upload_dir = Path(settings.UPLOAD_DIR) / 'alignment' / reserved_task.display_no
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            orig_ext = Path(original_file.filename or 'original.docx').suffix.lower()
-            trans_ext = Path(translated_file.filename or 'translated.docx').suffix.lower()
-            original_path = upload_dir / build_storage_filename(reserved_task.display_no, original_file.filename, reserved_task.task_id, role='original', ext=orig_ext)
-            translated_path = upload_dir / build_storage_filename(reserved_task.display_no, translated_file.filename, reserved_task.task_id, role='translated', ext=trans_ext)
-            original_path.write_bytes(await original_file.read())
-            translated_path.write_bytes(await translated_file.read())
-            self._update_task_input_files(
-                reserved_task.task_id,
-                {
-                    'original_path': str(original_path).replace('\\', '/'),
-                    'translated_path': str(translated_path).replace('\\', '/'),
-                    'original_filename': original_file.filename,
-                    'translated_filename': translated_file.filename,
-                },
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='alignment',
+                filename=display_name,
+                params=params,
+                staged_uploads=staged_uploads,
             )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            upload_dir = Path(settings.UPLOAD_DIR) / 'alignment' / reserved_task.display_no
+            input_files = {}
+            for item in staged_uploads:
+                input_files[f'{item.role}_path'] = self._move_staged_upload(item, upload_dir, reserved_task.display_no, reserved_task.task_id)
+                input_files[f'{item.role}_filename'] = item.original_filename
+            self._update_task_input_files(reserved_task.task_id, input_files)
             self._notify_dispatcher()
-            return reserved_task.task_id
+            return submit_result
         except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_doc_translate_task(self, *, file: UploadFile, source_lang: str, target_langs: str, translate_mode: str, ocr_model: str, gemini_route: str, translation_engine: str, translation_rules: str = "") -> str:
-        reserved_task = self._create_db_task('doc_translate', file.filename or 'input.bin', {'source_lang': source_lang, 'target_langs': target_langs, 'translate_mode': translate_mode, 'ocr_model': ocr_model, 'gemini_route': gemini_route, 'translation_engine': translation_engine, 'translation_rules': translation_rules}, {})
+    async def submit_doc_translate_task(self, *, file: UploadFile, source_lang: str, target_langs: str, translate_mode: str, ocr_model: str, gemini_route: str, translation_engine: str, translation_rules: str = "", batch_id: Optional[str] = None, batch_name: Optional[str] = None, batch_index: Optional[int] = None, batch_total: Optional[int] = None) -> TaskSubmitResult:
+        params = {'source_lang': source_lang, 'target_langs': target_langs, 'translate_mode': translate_mode, 'ocr_model': ocr_model, 'gemini_route': gemini_route, 'translation_engine': translation_engine, 'translation_rules': translation_rules}
+        staged_uploads = await self._stage_uploads('doc_translate', [('input', file, 'input.bin')])
+        reserved_task = None
         try:
-            input_path, original_filename = await self._save_single_upload(file, 'doc_translate', reserved_task.display_no, reserved_task.task_id)
-            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='doc_translate',
+                filename=file.filename or 'input.bin',
+                params=params,
+                staged_uploads=staged_uploads,
+                batch_id=batch_id,
+                batch_name=batch_name,
+                batch_index=batch_index,
+                batch_total=batch_total,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            item = staged_uploads[0]
+            input_path = self._move_staged_upload(item, Path(settings.UPLOAD_DIR) / 'doc_translate' / reserved_task.display_no, reserved_task.display_no, reserved_task.task_id)
+            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': item.original_filename})
             self._notify_dispatcher()
-            return reserved_task.task_id
+            return submit_result
         except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
     async def submit_business_licence_task(
@@ -286,54 +488,95 @@ class TaskQueueService:
         gemini_route: str,
         parsed_data: Optional[Dict[str, Any]] = None,
         company_name_override: Optional[str] = None,
-    ) -> str:
-        reserved_task = self._create_db_task(
-            'business_licence',
-            file.filename or 'input.bin',
-            {
-                'model': model,
-                'gemini_route': gemini_route,
-                'parsed_data': parsed_data,
-                'company_name_override': company_name_override,
-            },
-            {},
-        )
+    ) -> TaskSubmitResult:
+        params = {
+            'model': model,
+            'gemini_route': gemini_route,
+            'parsed_data': parsed_data,
+            'company_name_override': company_name_override,
+        }
+        staged_uploads = await self._stage_uploads('business_licence', [('input', file, 'input.bin')])
+        reserved_task = None
         try:
-            input_path, original_filename = await self._save_single_upload(file, 'business_licence', reserved_task.display_no, reserved_task.task_id)
-            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='business_licence',
+                filename=file.filename or 'input.bin',
+                params=params,
+                staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            item = staged_uploads[0]
+            input_path = self._move_staged_upload(item, Path(settings.UPLOAD_DIR) / 'business_licence' / reserved_task.display_no, reserved_task.display_no, reserved_task.task_id)
+            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': item.original_filename})
             self._notify_dispatcher()
-            return reserved_task.task_id
+            return submit_result
         except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_pdf2docx_task(self, *, file: UploadFile, model: str, gemini_route: str) -> str:
-        reserved_task = self._create_db_task('pdf2docx', file.filename or 'input.bin', {'model': model, 'gemini_route': gemini_route}, {})
+    async def submit_pdf2docx_task(self, *, file: UploadFile, model: str, gemini_route: str, batch_id: Optional[str] = None, batch_name: Optional[str] = None, batch_index: Optional[int] = None, batch_total: Optional[int] = None) -> TaskSubmitResult:
+        params = {'model': model, 'gemini_route': gemini_route}
+        staged_uploads = await self._stage_uploads('pdf2docx', [('input', file, 'input.bin')])
+        reserved_task = None
         try:
-            input_path, original_filename = await self._save_single_upload(file, 'pdf2docx', reserved_task.display_no, reserved_task.task_id)
-            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': original_filename})
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='pdf2docx',
+                filename=file.filename or 'input.bin',
+                params=params,
+                staged_uploads=staged_uploads,
+                batch_id=batch_id,
+                batch_name=batch_name,
+                batch_index=batch_index,
+                batch_total=batch_total,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            item = staged_uploads[0]
+            input_path = self._move_staged_upload(item, Path(settings.UPLOAD_DIR) / 'pdf2docx' / reserved_task.display_no, reserved_task.display_no, reserved_task.task_id)
+            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': item.original_filename})
             self._notify_dispatcher()
-            return reserved_task.task_id
+            return submit_result
         except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_drivers_license_task(self, *, files: list[UploadFile], processing_mode: str) -> str:
-        reserved_task = self._create_db_task('drivers_license', ' | '.join([(file.filename or 'input.bin') for file in files]), {'processing_mode': processing_mode}, {})
+    async def submit_drivers_license_task(self, *, files: list[UploadFile], processing_mode: str) -> TaskSubmitResult:
+        display_name = ' | '.join([(file.filename or 'input.bin') for file in files])
+        upload_specs = [(f'image{index:02d}', file, f'image_{index}.bin') for index, file in enumerate(files, start=1)]
+        staged_uploads = await self._stage_uploads('drivers_license', upload_specs)
+        reserved_task = None
         try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='drivers_license',
+                filename=display_name,
+                params={'processing_mode': processing_mode},
+                staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
             upload_dir = Path(settings.UPLOAD_DIR) / 'drivers_license' / reserved_task.display_no
-            upload_dir.mkdir(parents=True, exist_ok=True)
             saved_files = []
-            for index, file in enumerate(files, start=1):
-                file_ext = Path(file.filename or f'image_{index}.bin').suffix or '.bin'
-                input_path = upload_dir / build_storage_filename(reserved_task.display_no, file.filename, reserved_task.task_id, role=f'image{index:02d}', ext=file_ext)
-                input_path.write_bytes(await file.read())
-                saved_files.append({'index': index, 'path': str(input_path).replace('\\', '/'), 'original_filename': file.filename or input_path.name})
+            for index, item in enumerate(staged_uploads, start=1):
+                input_path = self._move_staged_upload(item, upload_dir, reserved_task.display_no, reserved_task.task_id)
+                saved_files.append({'index': index, 'path': input_path, 'original_filename': item.original_filename})
             self._update_task_input_files(reserved_task.task_id, {'files': saved_files})
             self._notify_dispatcher()
-            return reserved_task.task_id
+            return submit_result
         except Exception as exc:
-            self._fail_reserved_task(reserved_task.task_id, exc)
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -359,6 +602,10 @@ class TaskQueueService:
     def _update_task_input_files(self, task_id: str, input_files: Dict[str, Any]) -> None:
         with SessionLocal() as db:
             task_repo.update_task_input_files(db, task_id, json.dumps(input_files, ensure_ascii=False))
+
+    def _update_task_params(self, task_id: str, params: Dict[str, Any]) -> None:
+        with SessionLocal() as db:
+            task_repo.update_task_params(db, task_id, json.dumps(params, ensure_ascii=False))
 
     def _fail_reserved_task(self, task_id: str, exc: Exception) -> None:
         self._append_task_log(task_id, f'[error] upload save failed: {exc}')

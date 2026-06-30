@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import tempfile
+import uuid
 import zipfile
 from pathlib import Path
 from typing import List, Optional
@@ -72,6 +73,10 @@ class BatchDownloadBody(BaseModel):
     archive_name: Optional[str] = None
 
 
+class BatchCancelBody(BaseModel):
+    task_ids: List[str]
+
+
 class TaskFeedbackBody(BaseModel):
     marked: bool = True
     category: Optional[str] = None
@@ -100,6 +105,12 @@ def _task_to_dict(task) -> dict:
         "message": task.message or "",
         "error": task.error_message,
         "cancel_requested": bool(task.cancel_requested),
+        "batch": {
+            "id": task.batch_id,
+            "name": task.batch_name,
+            "index": task.batch_index,
+            "total": task.batch_total,
+        } if task.batch_id else None,
         "feedback": {
             "marked": bool(task.feedback_marked),
             "category": task.feedback_category,
@@ -165,6 +176,31 @@ def _build_archive_name(task, display_name: str, used_names: set[str]) -> str:
         index += 1
     used_names.add(candidate)
     return candidate
+
+
+def _build_archive_response(archive_sources: list[tuple[Path, str]], download_name: str) -> FileResponse:
+    if not archive_sources:
+        raise HTTPException(status_code=400, detail="No matching output files found")
+
+    temp_dir = BASE_DIR / "outputs" / "_tmp_batch_downloads"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    normalized_name = (download_name or "batch_outputs.zip").strip() or "batch_outputs.zip"
+    if not normalized_name.lower().endswith(".zip"):
+        normalized_name = f"{normalized_name}.zip"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip", dir=temp_dir) as temp_file:
+        archive_path = Path(temp_file.name)
+
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        for source_path, archive_name in archive_sources:
+            zip_file.write(source_path, arcname=archive_name)
+
+    return FileResponse(
+        str(archive_path),
+        filename=normalized_name,
+        media_type="application/zip",
+        background=BackgroundTask(lambda path=archive_path: path.unlink(missing_ok=True)),
+    )
 
 
 def _merge_queue_timestamps(payload: Optional[dict], queue_task: Optional[dict]) -> Optional[dict]:
@@ -268,28 +304,74 @@ async def batch_download(body: BatchDownloadBody):
             archive_name = _build_archive_name(task, item["display_name"], used_names)
             archive_sources.append((item["resolved"], archive_name))
 
-    if not archive_sources:
-        raise HTTPException(status_code=400, detail="No matching output files found")
+    return _build_archive_response(archive_sources, body.archive_name or "batch_outputs.zip")
 
-    temp_dir = BASE_DIR / "outputs" / "_tmp_batch_downloads"
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    download_name = (body.archive_name or "batch_outputs.zip").strip() or "batch_outputs.zip"
-    if not download_name.lower().endswith(".zip"):
-        download_name = f"{download_name}.zip"
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip", dir=temp_dir) as temp_file:
-        archive_path = Path(temp_file.name)
+@router.post("/batch-cancel")
+async def batch_cancel(body: BatchCancelBody):
+    if not body.task_ids:
+        raise HTTPException(status_code=400, detail="At least one task_id is required")
 
-    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for source_path, archive_name in archive_sources:
-            zip_file.write(source_path, arcname=archive_name)
+    cancelled = 0
+    skipped = 0
+    missing = 0
+    seen_task_ids: set[str] = set()
+    with SessionLocal() as db:
+        for task_id in body.task_ids:
+            if not task_id or task_id in seen_task_ids:
+                continue
+            seen_task_ids.add(task_id)
+            task = task_repo.get_task_by_task_id(db, task_id)
+            if not task:
+                missing += 1
+                continue
+            if task.status in {"done", "failed", "cancelled"}:
+                skipped += 1
+                continue
+            task_repo.cancel_task(db, task.task_id)
+            cancelled += 1
+    return {"status": "ok", "cancelled": cancelled, "skipped": skipped, "missing": missing}
 
-    return FileResponse(
-        str(archive_path),
-        filename=download_name,
-        media_type="application/zip",
-        background=BackgroundTask(lambda path=archive_path: path.unlink(missing_ok=True)),
-    )
+
+@router.get("/batch/{batch_id}/download")
+async def batch_group_download(batch_id: str, extensions: Optional[str] = Query(None), archive_name: Optional[str] = Query(None)):
+    normalized_extensions = None
+    if extensions:
+        normalized_extensions = _normalize_extensions([item.strip() for item in extensions.split(",") if item.strip()])
+
+    with SessionLocal() as db:
+        tasks = task_repo.list_tasks_by_batch_id(db, batch_id)
+
+    if not tasks:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    archive_sources: list[tuple[Path, str]] = []
+    used_names: set[str] = set()
+    for task in tasks:
+        if task.status != "done":
+            continue
+        for item in _iter_task_output_files(task, normalized_extensions):
+            archive_sources.append((item["resolved"], _build_archive_name(task, item["display_name"], used_names)))
+
+    safe_batch_name = archive_name or tasks[0].batch_name or f"batch_{batch_id[:8]}.zip"
+    return _build_archive_response(archive_sources, safe_batch_name)
+
+
+@router.post("/batch/{batch_id}/cancel")
+async def batch_group_cancel(batch_id: str):
+    cancelled = 0
+    skipped = 0
+    with SessionLocal() as db:
+        tasks = task_repo.list_tasks_by_batch_id(db, batch_id)
+        if not tasks:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        for task in tasks:
+            if task.status in {"done", "failed", "cancelled"}:
+                skipped += 1
+                continue
+            task_repo.cancel_task(db, task.task_id)
+            cancelled += 1
+    return {"status": "ok", "batch_id": batch_id, "cancelled": cancelled, "skipped": skipped}
 
 
 @router.post("/number-check")
@@ -324,7 +406,7 @@ async def run_number_check(
     else:
         raise HTTPException(status_code=400, detail=f"不支持的数字专检模式: {mode}")
 
-    task_id = await task_queue_service.submit_number_check_task(
+    submit_result = await task_queue_service.submit_number_check_task(
         mode=resolved_mode,
         alignment_file=alignment_upload,
         source_file=source_upload,
@@ -333,7 +415,7 @@ async def run_number_check(
         gemini_route=gemini_route,
         model_name=model_name,
     )
-    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+    return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 
 @router.get("/number-check/config")
@@ -413,7 +495,7 @@ async def run_zhongfanyi(
     else:
         raise HTTPException(status_code=400, detail=f"不支持的中翻译模式: {mode}")
 
-    task_id = await task_queue_service.submit_zhongfanyi_task(
+    submit_result = await task_queue_service.submit_zhongfanyi_task(
         mode=resolved_mode,
         original_file=original_file,
         translated_file=translated_file,
@@ -424,7 +506,7 @@ async def run_zhongfanyi(
         rule_file=rule_file,
         session_rule_content=session_rule_content,
     )
-    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+    return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 
 @router.get("/zhongfanyi/config")
@@ -495,8 +577,8 @@ async def run_alignment(original_file: UploadFile = File(...), translated_file: 
         raise HTTPException(status_code=400, detail="Unsupported original file format")
     if os.path.splitext(translated_file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported translated file format")
-    task_id = await task_queue_service.submit_alignment_task(original_file=original_file, translated_file=translated_file, source_lang=source_lang, target_lang=target_lang, model_name=model_name, gemini_route=gemini_route, enable_post_split=enable_post_split, threshold_2=threshold_2, threshold_3=threshold_3, threshold_4=threshold_4, threshold_5=threshold_5, threshold_6=threshold_6, threshold_7=threshold_7, threshold_8=threshold_8, buffer_chars=buffer_chars)
-    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+    submit_result = await task_queue_service.submit_alignment_task(original_file=original_file, translated_file=translated_file, source_lang=source_lang, target_lang=target_lang, model_name=model_name, gemini_route=gemini_route, enable_post_split=enable_post_split, threshold_2=threshold_2, threshold_3=threshold_3, threshold_4=threshold_4, threshold_5=threshold_5, threshold_6=threshold_6, threshold_7=threshold_7, threshold_8=threshold_8, buffer_chars=buffer_chars)
+    return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 
 @router.get("/alignment/status/{task_id}")
@@ -539,8 +621,8 @@ async def submit_drivers_license(files: List[UploadFile] = File(...), processing
     for file in files:
         if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
             raise HTTPException(status_code=400, detail="Unsupported image format")
-    task_id = await task_queue_service.submit_drivers_license_task(files=files, processing_mode=processing_mode)
-    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+    submit_result = await task_queue_service.submit_drivers_license_task(files=files, processing_mode=processing_mode)
+    return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 
 @router.get("/drivers-license/status/{task_id}")
@@ -641,7 +723,7 @@ async def submit_business_licence(
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid parsed_data_json: {exc}") from exc
 
-    task_id = await task_queue_service.submit_business_licence_task(
+    submit_result = await task_queue_service.submit_business_licence_task(
         file=file,
         model=model,
         gemini_route=BUSINESS_LICENCE_DEFAULT_ROUTE,
@@ -650,9 +732,10 @@ async def submit_business_licence(
     )
     return {
         "status": "ACCEPTED",
-        "task_id": task_id,
+        "task_id": submit_result.task_id,
         "message": "Task submitted",
         "gemini_route": BUSINESS_LICENCE_DEFAULT_ROUTE,
+        "deduped": submit_result.deduped,
     }
 
 
@@ -691,8 +774,8 @@ async def submit_doc_translate(file: UploadFile = File(...), source_lang: str = 
         translation_rules = normalize_doc_translate_translation_rules(translation_rules)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route, translation_engine=translation_engine, translation_rules=translation_rules)
-    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+    submit_result = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route, translation_engine=translation_engine, translation_rules=translation_rules)
+    return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 
 @router.post("/doc-translate/batch")
@@ -708,17 +791,20 @@ async def submit_doc_translate_batch(files: List[UploadFile] = File(...), source
         translation_rules = normalize_doc_translate_translation_rules(translation_rules)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    batch_id = str(uuid.uuid4())
+    batch_name = f"通用证件批量翻译_{batch_id[:8]}.zip"
+    batch_total = len(files)
     results = []
-    for file in files:
+    for index, file in enumerate(files, start=1):
         if os.path.splitext(file.filename or "")[1].lower() not in allowed_ext:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": "Unsupported file format"})
             continue
         try:
-            task_id = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route, translation_engine=translation_engine, translation_rules=translation_rules)
-            results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
+            submit_result = await task_queue_service.submit_doc_translate_task(file=file, source_lang=source_lang, target_langs=target_langs, translate_mode=translate_mode, ocr_model=ocr_model, gemini_route=gemini_route, translation_engine=translation_engine, translation_rules=translation_rules, batch_id=batch_id, batch_name=batch_name, batch_index=index, batch_total=batch_total)
+            results.append({"filename": file.filename, "task_id": submit_result.task_id, "status": "ACCEPTED", "deduped": submit_result.deduped, "batch_id": batch_id, "batch_index": index, "batch_total": batch_total})
         except Exception as exc:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
-    return {"status": "ACCEPTED", "tasks": results, "total": len(results)}
+    return {"status": "ACCEPTED", "tasks": results, "total": len(results), "batch_id": batch_id, "batch_name": batch_name}
 
 
 @router.get("/doc-translate/status/{task_id}")
@@ -740,8 +826,8 @@ async def run_pdf2docx(file: UploadFile = File(...), model: str = Query(PDF2DOCX
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
-    task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
-    return {"status": "ACCEPTED", "task_id": task_id, "message": "Task submitted"}
+    submit_result = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
+    return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 
 @router.post("/pdf2docx/batch")
@@ -751,18 +837,21 @@ async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Q
         raise HTTPException(status_code=400, detail="At least one file is required")
     if len(files) > 50:
         raise HTTPException(status_code=400, detail="Too many files (max 50)")
+    batch_id = str(uuid.uuid4())
+    batch_name = f"不可编辑预处理批量结果_{batch_id[:8]}.zip"
+    batch_total = len(files)
     results = []
-    for file in files:
+    for index, file in enumerate(files, start=1):
         ext = os.path.splitext(file.filename or "")[1].lower()
         if ext not in allowed_ext:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": "Unsupported file format"})
             continue
         try:
-            task_id = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
-            results.append({"filename": file.filename, "task_id": task_id, "status": "ACCEPTED"})
+            submit_result = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route, batch_id=batch_id, batch_name=batch_name, batch_index=index, batch_total=batch_total)
+            results.append({"filename": file.filename, "task_id": submit_result.task_id, "status": "ACCEPTED", "deduped": submit_result.deduped, "batch_id": batch_id, "batch_index": index, "batch_total": batch_total})
         except Exception as exc:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})
-    return {"status": "ACCEPTED", "tasks": results, "total": len(results)}
+    return {"status": "ACCEPTED", "tasks": results, "total": len(results), "batch_id": batch_id, "batch_name": batch_name}
 
 
 @router.get("/pdf2docx/status/{task_id}")

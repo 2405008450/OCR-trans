@@ -56,6 +56,7 @@ let streamLogEl = null;
 let retryBtn = null;
 let batchPollingTimer = null;
 let batchTaskStates = [];
+let isSubmitting = false;
 
 const ETA_TIME_ZONE = 'Asia/Shanghai';
 let etaHint = null;
@@ -264,14 +265,24 @@ function clearFiles() {
 }
 
 async function processFiles() {
+    if (isSubmitting) return;
     if (selectedFiles.length === 0) return;
     const uploadLimitError = validateSelectedFiles();
     if (uploadLimitError) {
         showPageLimitModal(uploadLimitError);
         return;
     }
-    if (selectedFiles.length === 1) { await processSingleFile(); return; }
-    await processBatchFiles();
+    isSubmitting = true;
+    btnProcess.disabled = true;
+    try {
+        if (selectedFiles.length === 1) { await processSingleFile(); return; }
+        await processBatchFiles();
+    } finally {
+        isSubmitting = false;
+        if (uploadSection.style.display !== 'none' && selectedFiles.length > 0) {
+            syncSelectedFilesView();
+        }
+    }
 }
 
 async function processSingleFile() {
@@ -544,6 +555,7 @@ function showResult(result) {
 }
 
 function resetPage() {
+    isSubmitting = false;
     clearFiles();
     stopPolling();
     stopBatchPolling();
