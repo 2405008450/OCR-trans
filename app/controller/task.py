@@ -4,6 +4,7 @@ import os
 import tempfile
 import uuid
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from app.db.session import SessionLocal
+from app.core.file_naming import build_user_visible_filename
 from app.core.task_model_display import build_task_model_info
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
@@ -166,16 +168,61 @@ def _iter_task_output_files(task, allowed_extensions: Optional[set[str]] = None)
 
 
 def _build_archive_name(task, display_name: str, used_names: set[str]) -> str:
-    stem = Path(display_name).stem or "output"
-    suffix = Path(display_name).suffix
-    prefix = task.display_no or task.task_id or "task"
-    candidate = f"{prefix}_{stem}{suffix}"
+    candidate = Path(display_name or "").name.strip() or "output"
+    for prefix in (getattr(task, "display_no", None), getattr(task, "task_id", None)):
+        if prefix and candidate.startswith(f"{prefix}_"):
+            candidate = candidate[len(prefix) + 1 :].lstrip(" _-") or candidate
+
+    stem = Path(candidate).stem or "output"
+    suffix = Path(candidate).suffix
     index = 2
-    while candidate in used_names:
-        candidate = f"{prefix}_{stem}_{index}{suffix}"
+    while candidate.casefold() in used_names:
+        candidate = f"{stem}_{index}{suffix}"
         index += 1
-    used_names.add(candidate)
+    used_names.add(candidate.casefold())
     return candidate
+
+
+def _is_legacy_default_archive_name(download_name: Optional[str]) -> bool:
+    return (download_name or "").strip().lower() == "batch_outputs.zip"
+
+
+def _fallback_archive_download_name() -> str:
+    return f"batch_download_{datetime.now():%Y%m%d_%H%M%S}.zip"
+
+
+def _task_primary_input_filename(task) -> Optional[str]:
+    try:
+        input_files = json.loads(task.input_files_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        input_files = {}
+
+    if isinstance(input_files, dict):
+        for key in (
+            "original_filename",
+            "single_filename",
+            "target_filename",
+            "translated_filename",
+            "source_filename",
+            "alignment_filename",
+        ):
+            value = input_files.get(key)
+            if value:
+                return Path(str(value)).name
+
+    if getattr(task, "filename", None):
+        return str(task.filename)
+    return None
+
+
+def _build_batch_archive_download_name(tasks: list) -> str:
+    completed_tasks = [task for task in tasks if getattr(task, "status", None) == "done"] or tasks
+    first_filename = next((name for name in (_task_primary_input_filename(task) for task in completed_tasks) if name), None)
+    if not first_filename:
+        return _fallback_archive_download_name()
+
+    suffix = "批量结果" if len(completed_tasks) <= 1 else f"等{len(completed_tasks)}个文件"
+    return build_user_visible_filename(first_filename, suffix=suffix, ext=".zip")
 
 
 def _build_archive_response(archive_sources: list[tuple[Path, str]], download_name: str) -> FileResponse:
@@ -184,7 +231,8 @@ def _build_archive_response(archive_sources: list[tuple[Path, str]], download_na
 
     temp_dir = BASE_DIR / "outputs" / "_tmp_batch_downloads"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    normalized_name = (download_name or "batch_outputs.zip").strip() or "batch_outputs.zip"
+    normalized_name = Path((download_name or _fallback_archive_download_name()).strip()).name
+    normalized_name = normalized_name or _fallback_archive_download_name()
     if not normalized_name.lower().endswith(".zip"):
         normalized_name = f"{normalized_name}.zip"
 
@@ -304,7 +352,8 @@ async def batch_download(body: BatchDownloadBody):
             archive_name = _build_archive_name(task, item["display_name"], used_names)
             archive_sources.append((item["resolved"], archive_name))
 
-    return _build_archive_response(archive_sources, body.archive_name or "batch_outputs.zip")
+    requested_archive_name = None if _is_legacy_default_archive_name(body.archive_name) else body.archive_name
+    return _build_archive_response(archive_sources, requested_archive_name or _build_batch_archive_download_name(tasks))
 
 
 @router.post("/batch-cancel")
@@ -353,7 +402,8 @@ async def batch_group_download(batch_id: str, extensions: Optional[str] = Query(
         for item in _iter_task_output_files(task, normalized_extensions):
             archive_sources.append((item["resolved"], _build_archive_name(task, item["display_name"], used_names)))
 
-    safe_batch_name = archive_name or tasks[0].batch_name or f"batch_{batch_id[:8]}.zip"
+    requested_archive_name = None if _is_legacy_default_archive_name(archive_name) else archive_name
+    safe_batch_name = requested_archive_name or _build_batch_archive_download_name(tasks)
     return _build_archive_response(archive_sources, safe_batch_name)
 
 

@@ -160,7 +160,7 @@ function renderTable(items) {
     const feedbackCell = feedback.marked
       ? `<span class="badge badge-feedback" title="${escAttr(feedback.note || feedbackLabel)}"><i class="fas fa-flag"></i> 已标记</span>`
       : `<span class="badge badge-feedback-muted"><i class="far fa-flag"></i> 未标记</span>`;
-    return `<tr data-id="${escAttr(task.task_id || '')}" onclick="openDetail('${taskId}')">
+    return `<tr data-id="${escAttr(task.task_id || '')}">
       <td>${escHtml(task.display_no || '-')}</td>
       <td>${escHtml(task.task_label || task.task_type)}</td>
       <td class="cell-filename" title="${fileName}">${shortName}</td>
@@ -400,7 +400,7 @@ function renderTaskRow(task, isBatchChild = false) {
   const feedbackCell = feedback.marked
     ? `<span class="badge badge-feedback" title="${escAttr(feedback.note || feedbackLabel)}"><i class="fas fa-flag"></i> 已标记</span>`
     : `<span class="badge badge-feedback-muted"><i class="far fa-flag"></i> 未标记</span>`;
-  return `<tr class="${isBatchChild ? 'batch-child-row' : ''}" data-id="${escAttr(task.task_id || '')}" onclick="openDetail('${taskId}')">
+  return `<tr class="${isBatchChild ? 'batch-child-row' : ''}" data-id="${escAttr(task.task_id || '')}">
     <td>${escHtml(displayNo)}</td>
     <td>${escHtml(task.task_label || task.task_type)}</td>
     <td class="cell-filename" title="${fileName}">${shortName}</td>
@@ -753,7 +753,7 @@ async function downloadBatchGroup(batchId) {
       alert(message);
       return;
     }
-    await saveDownloadResponse(response, 'batch_outputs.zip');
+    await saveDownloadResponse(response, buildFallbackArchiveName());
   } catch (error) {
     console.error('downloadBatchGroup', error);
     alert('批量下载失败，请稍后重试。');
@@ -770,7 +770,7 @@ async function downloadTaskBatch(taskIdsValue) {
     const response = await fetch('/task/batch-download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_ids: taskIds, archive_name: 'batch_outputs.zip' }),
+      body: JSON.stringify({ task_ids: taskIds }),
     });
     if (!response.ok) {
       let message = '批量下载失败，当前批次可能还没有已完成的输出文件。';
@@ -781,7 +781,7 @@ async function downloadTaskBatch(taskIdsValue) {
       alert(message);
       return;
     }
-    await saveDownloadResponse(response, 'batch_outputs.zip');
+    await saveDownloadResponse(response, buildFallbackArchiveName());
   } catch (error) {
     console.error('downloadTaskBatch', error);
     alert('批量下载失败，请稍后重试。');
@@ -844,6 +844,21 @@ function parseTaskIds(taskIdsValue) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function buildFallbackArchiveName() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  const stamp = [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    '_',
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+  ].join('');
+  return `batch_download_${stamp}.zip`;
 }
 
 async function saveDownloadResponse(response, fallbackFilename) {
