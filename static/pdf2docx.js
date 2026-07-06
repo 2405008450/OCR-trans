@@ -11,6 +11,7 @@ const FRONTEND_UPLOAD_LIMIT_MB = 95;
 const FRONTEND_UPLOAD_LIMIT_BYTES = FRONTEND_UPLOAD_LIMIT_MB * 1024 * 1024;
 const NGINX_UPLOAD_LIMIT_LABEL = `${NGINX_UPLOAD_LIMIT_MB}MB`;
 const FRONTEND_UPLOAD_LIMIT_LABEL = `${FRONTEND_UPLOAD_LIMIT_MB}MB`;
+const WEB_ASSET_RECOMMENDED_MODEL = 'anthropic/claude-sonnet-5';
 
 const MODEL_DISPLAY_NAMES = {
     'google/gemini-3.1-flash-lite': '极速版V2',
@@ -159,7 +160,7 @@ function bindEvents() {
     btnNewTask?.addEventListener('click', resetPage);
     document.getElementById('btnBatchNewTask')?.addEventListener('click', resetPage);
     btnBatchDownloadAll?.addEventListener('click', downloadAllBatchResults);
-    layoutModeSelect?.addEventListener('change', updateLayoutModeInfo);
+    layoutModeSelect?.addEventListener('change', () => updateLayoutModeInfo(true));
     modelSelect?.addEventListener('change', updateModelInfo);
 }
 
@@ -180,12 +181,14 @@ async function loadConfig() {
         layoutModeConfig = {
             ocr_html: { label: '通用文档', description: '沿用当前 OCR 到 Word 流程，适合票据、扫描件、表格型页面。' },
             chat_preserve: { label: '聊天截图（保头像/表情）', description: '聊天记录专用：文字保持可编辑，并保留头像、图片表情和贴纸。' },
+            web_asset_preserve: { label: '网页截图（保重要图片）', description: '网页截图专用：文字保持可编辑，并保留产品图、图表、流程图、地图、二维码等重要图片。', recommended_model: WEB_ASSET_RECOMMENDED_MODEL },
         };
         modelConfig = {
             'google/gemini-3.1-flash-lite': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规场景。' },
             'google/gemini-3.5-flash': { label: '新模型', description: 'OpenRouter 新模型，适合常规场景。' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '更强的复杂版面理解能力。' },
+            'anthropic/claude-sonnet-5': { label: 'Claude Sonnet 5', description: '适合对比测试截图布局和网页重要图片定位效果。' },
         };
     }
     renderLayoutModes();
@@ -217,12 +220,17 @@ function updateModelInfo() {
     modelLabel.textContent = getModelDisplayName(info.label || model);
     modelDesc.textContent = info.description || '';
 }
-function updateLayoutModeInfo() {
+function updateLayoutModeInfo(userTriggered = false) {
     if (!layoutModeSelect) return;
     const mode = layoutModeSelect.value;
     const info = layoutModeConfig[mode] || {};
     if (layoutModeLabel) layoutModeLabel.textContent = info.label || mode || '';
     if (layoutModeDesc) layoutModeDesc.textContent = info.description || '';
+    const recommendedModel = info.recommended_model || (mode === 'web_asset_preserve' ? WEB_ASSET_RECOMMENDED_MODEL : '');
+    if (userTriggered && recommendedModel && modelConfig[recommendedModel] && modelSelect.value !== recommendedModel) {
+        modelSelect.value = recommendedModel;
+        updateModelInfo();
+    }
 }
 
 function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); uploadArea.style.borderColor = 'var(--primary-color)'; }

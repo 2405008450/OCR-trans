@@ -7,6 +7,10 @@ from app.core.config import settings
 from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
 from app.service.chat_preserve_docx_service import convert_chat_screenshot_to_docx
+from app.service.web_asset_preserve_docx_service import (
+    WEB_RECOMMENDED_MODEL,
+    convert_web_screenshot_to_docx,
+)
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
@@ -14,6 +18,7 @@ PDF2DOCX_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
 PDF2DOCX_DEFAULT_MODEL = "google/gemini-3-flash-preview"
 PDF2DOCX_LAYOUT_MODE_OCR_HTML = "ocr_html"
 PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE = "chat_preserve"
+PDF2DOCX_LAYOUT_MODE_WEB_ASSET_PRESERVE = "web_asset_preserve"
 PDF2DOCX_DEFAULT_LAYOUT_MODE = PDF2DOCX_LAYOUT_MODE_OCR_HTML
 
 PDF2DOCX_LAYOUT_MODES: Dict[str, Dict[str, str]] = {
@@ -24,6 +29,11 @@ PDF2DOCX_LAYOUT_MODES: Dict[str, Dict[str, str]] = {
     PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE: {
         "label": "聊天截图（保头像/表情）",
         "description": "聊天记录专用：文字保持可编辑，并裁剪保留头像、图片表情和贴纸。",
+    },
+    PDF2DOCX_LAYOUT_MODE_WEB_ASSET_PRESERVE: {
+        "label": "网页截图（保重要图片）",
+        "description": "网页截图专用：文字保持可编辑，并保留产品图、图表、流程图、地图、二维码等重要图片。",
+        "recommended_model": WEB_RECOMMENDED_MODEL,
     },
 }
 
@@ -46,7 +56,7 @@ PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
     },
     "anthropic/claude-sonnet-5": {
         "label": "Claude Sonnet 5",
-        "description": "用于对比测试聊天截图布局、头像和表情定位效果。",
+        "description": "用于对比测试截图布局、头像、表情和网页重要图片定位效果。",
     },
 }
 
@@ -212,6 +222,65 @@ async def execute_pdf2docx_task_from_path(
             "blank_pages": [],
             "asset_count": chat_result.asset_count,
             "fallback_count": chat_result.fallback_count,
+        }
+
+    if layout_mode == PDF2DOCX_LAYOUT_MODE_WEB_ASSET_PRESERVE:
+        await _maybe_report(progress_callback, 10, "正在分析网页截图布局和重要图片")
+
+        def web_status_callback(message: str):
+            if not progress_callback:
+                return
+            future = asyncio.run_coroutine_threadsafe(
+                progress_callback(35, message),
+                loop,
+            )
+            future.result(timeout=30)
+
+        web_result = await loop.run_in_executor(
+            executor,
+            lambda: convert_web_screenshot_to_docx(
+                input_path=input_path,
+                output_docx_path=docx_output_path,
+                layout_json_path=layout_json_path,
+                assets_dir=assets_dir,
+                model=model,
+                gemini_route=gemini_route,
+                status_callback=web_status_callback,
+            ),
+        )
+        raw_output_path.write_text(web_result.raw_text, encoding="utf-8")
+        await _maybe_report(progress_callback, 90, "网页截图 Word 文档已生成，正在整理输出结果")
+        debug_overlays = (
+            web_result.layout.get("render", {}).get("debug_overlays", [])
+            if isinstance(web_result.layout, dict)
+            else []
+        )
+
+        final_docx_path = ensure_unique_path(
+            task_output_dir / build_user_visible_filename(original_filename, ext=".docx"),
+            existing_path=docx_output_path,
+        )
+        if docx_output_path != final_docx_path:
+            docx_output_path.replace(final_docx_path)
+            docx_output_path = final_docx_path
+
+        await _maybe_report(progress_callback, 95, "正在整理输出结果")
+        return {
+            "task_id": task_id,
+            "filename": original_filename,
+            "model": model,
+            "gemini_route": gemini_route,
+            "layout_mode": layout_mode,
+            "raw_output_txt": _normalize_path(raw_output_path),
+            "output_layout_json": _normalize_path(layout_json_path),
+            "output_debug_overlay": debug_overlays[0] if debug_overlays else None,
+            "output_debug_overlays": debug_overlays,
+            "output_docx": _normalize_path(docx_output_path),
+            "total_pages": web_result.total_pages,
+            "blank_page_count": 0,
+            "blank_pages": [],
+            "asset_count": web_result.asset_count,
+            "fallback_count": web_result.fallback_count,
         }
 
     page_state: Dict[str, Any] = {"current": 0, "total": 0}
