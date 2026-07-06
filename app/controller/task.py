@@ -54,8 +54,11 @@ from app.service.number_check_service import (
 )
 from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    PDF2DOCX_DEFAULT_LAYOUT_MODE,
     PDF2DOCX_DEFAULT_MODEL,
+    get_pdf2docx_layout_modes,
     get_pdf2docx_models,
+    normalize_pdf2docx_layout_mode,
 )
 from app.service.task_queue_service import task_queue_service
 
@@ -867,26 +870,34 @@ async def get_doc_translate_status(task_id: str):
 
 @router.get("/pdf2docx/config")
 async def get_pdf2docx_config():
-    return {"models": get_pdf2docx_models(), "default_model": PDF2DOCX_DEFAULT_MODEL, "routes": get_gemini_routes(), "default_route": PDF2DOCX_DEFAULT_GEMINI_ROUTE}
+    return {"models": get_pdf2docx_models(), "default_model": PDF2DOCX_DEFAULT_MODEL, "routes": get_gemini_routes(), "default_route": PDF2DOCX_DEFAULT_GEMINI_ROUTE, "layout_modes": get_pdf2docx_layout_modes(), "default_layout_mode": PDF2DOCX_DEFAULT_LAYOUT_MODE}
 
 
 @router.post("/pdf2docx")
-async def run_pdf2docx(file: UploadFile = File(...), model: str = Query(PDF2DOCX_DEFAULT_MODEL), gemini_route: str = Query(PDF2DOCX_DEFAULT_GEMINI_ROUTE)):
+async def run_pdf2docx(file: UploadFile = File(...), model: str = Query(PDF2DOCX_DEFAULT_MODEL), gemini_route: str = Query(PDF2DOCX_DEFAULT_GEMINI_ROUTE), layout_mode: str = Query(PDF2DOCX_DEFAULT_LAYOUT_MODE)):
     allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported file format")
-    submit_result = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route)
+    try:
+        normalized_layout_mode = normalize_pdf2docx_layout_mode(layout_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    submit_result = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route, layout_mode=normalized_layout_mode)
     return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 
 @router.post("/pdf2docx/batch")
-async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Query(PDF2DOCX_DEFAULT_MODEL), gemini_route: str = Query(PDF2DOCX_DEFAULT_GEMINI_ROUTE)):
+async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Query(PDF2DOCX_DEFAULT_MODEL), gemini_route: str = Query(PDF2DOCX_DEFAULT_GEMINI_ROUTE), layout_mode: str = Query(PDF2DOCX_DEFAULT_LAYOUT_MODE)):
     allowed_ext = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     if not files:
         raise HTTPException(status_code=400, detail="At least one file is required")
     if len(files) > 50:
         raise HTTPException(status_code=400, detail="Too many files (max 50)")
+    try:
+        normalized_layout_mode = normalize_pdf2docx_layout_mode(layout_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     batch_id = str(uuid.uuid4())
     batch_name = f"不可编辑预处理批量结果_{batch_id[:8]}.zip"
     batch_total = len(files)
@@ -897,7 +908,7 @@ async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Q
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": "Unsupported file format"})
             continue
         try:
-            submit_result = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route, batch_id=batch_id, batch_name=batch_name, batch_index=index, batch_total=batch_total)
+            submit_result = await task_queue_service.submit_pdf2docx_task(file=file, model=model, gemini_route=gemini_route, layout_mode=normalized_layout_mode, batch_id=batch_id, batch_name=batch_name, batch_index=index, batch_total=batch_total)
             results.append({"filename": file.filename, "task_id": submit_result.task_id, "status": "ACCEPTED", "deduped": submit_result.deduped, "batch_id": batch_id, "batch_index": index, "batch_total": batch_total})
         except Exception as exc:
             results.append({"filename": file.filename, "task_id": None, "status": "FAILED", "error": str(exc)})

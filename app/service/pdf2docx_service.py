@@ -6,11 +6,26 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from app.core.config import settings
 from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
+from app.service.chat_preserve_docx_service import convert_chat_screenshot_to_docx
 from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 PDF2DOCX_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
 PDF2DOCX_DEFAULT_MODEL = "google/gemini-3-flash-preview"
+PDF2DOCX_LAYOUT_MODE_OCR_HTML = "ocr_html"
+PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE = "chat_preserve"
+PDF2DOCX_DEFAULT_LAYOUT_MODE = PDF2DOCX_LAYOUT_MODE_OCR_HTML
+
+PDF2DOCX_LAYOUT_MODES: Dict[str, Dict[str, str]] = {
+    PDF2DOCX_LAYOUT_MODE_OCR_HTML: {
+        "label": "通用文档",
+        "description": "沿用当前 OCR 到 Word 流程，适合票据、扫描件、表格型页面。",
+    },
+    PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE: {
+        "label": "聊天截图（保头像/表情）",
+        "description": "聊天记录专用：文字保持可编辑，并裁剪保留头像、图片表情和贴纸。",
+    },
+}
 
 PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
     "google/gemini-3.1-flash-lite": {
@@ -28,6 +43,10 @@ PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
     "google/gemini-3.1-pro-preview": {
         "label": "Google Gemini 3.1 Pro Preview",
         "description": "更强的复杂版面与细节理解能力，适合高难度文档。",
+    },
+    "anthropic/claude-sonnet-5": {
+        "label": "Claude Sonnet 5",
+        "description": "用于对比测试聊天截图布局、头像和表情定位效果。",
     },
 }
 
@@ -54,9 +73,20 @@ def get_pdf2docx_models() -> Dict[str, Dict[str, str]]:
     return PDF2DOCX_MODELS
 
 
+def get_pdf2docx_layout_modes() -> Dict[str, Dict[str, str]]:
+    return PDF2DOCX_LAYOUT_MODES
+
+
 def normalize_pdf2docx_model(model: Optional[str]) -> str:
     candidate = (model or PDF2DOCX_DEFAULT_MODEL).strip()
     return PDF2DOCX_MODEL_ALIASES.get(candidate, candidate)
+
+
+def normalize_pdf2docx_layout_mode(layout_mode: Optional[str]) -> str:
+    candidate = (layout_mode or PDF2DOCX_DEFAULT_LAYOUT_MODE).strip()
+    if candidate not in PDF2DOCX_LAYOUT_MODES:
+        raise ValueError(f"不支持的处理模式: {candidate}")
+    return candidate
 
 
 def _normalize_ocr_payload(ocr_result: Any, fallback_total_pages: int = 0) -> Dict[str, Any]:
@@ -102,6 +132,7 @@ async def execute_pdf2docx_task_from_path(
     original_filename: str,
     model: str = PDF2DOCX_DEFAULT_MODEL,
     gemini_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    layout_mode: str = PDF2DOCX_DEFAULT_LAYOUT_MODE,
     progress_callback: Optional[ProgressCallback] = None,
     executor: Optional[Executor] = None,
 ) -> Dict[str, Any]:
@@ -109,6 +140,7 @@ async def execute_pdf2docx_task_from_path(
     if model not in PDF2DOCX_MODELS:
         raise ValueError(f"不支持的模型: {model}")
     gemini_route = ensure_gemini_route_configured(gemini_route)
+    layout_mode = normalize_pdf2docx_layout_mode(layout_mode)
 
     loop = asyncio.get_running_loop()
     input_file = Path(input_path)
@@ -117,9 +149,70 @@ async def execute_pdf2docx_task_from_path(
 
     raw_output_path = task_output_dir / f"{input_file.stem}_raw.txt"
     html_output_path = task_output_dir / f"{input_file.stem}.html"
+    layout_json_path = task_output_dir / f"{input_file.stem}_layout.json"
+    assets_dir = task_output_dir / f"{input_file.stem}_assets"
     docx_output_path = task_output_dir / f"{input_file.stem}.docx"
 
     await _maybe_report(progress_callback, 5, "文件已入队，准备调用视觉模型")
+
+    if layout_mode == PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE:
+        await _maybe_report(progress_callback, 10, "正在分析聊天截图布局")
+
+        def chat_status_callback(message: str):
+            if not progress_callback:
+                return
+            future = asyncio.run_coroutine_threadsafe(
+                progress_callback(35, message),
+                loop,
+            )
+            future.result(timeout=30)
+
+        chat_result = await loop.run_in_executor(
+            executor,
+            lambda: convert_chat_screenshot_to_docx(
+                input_path=input_path,
+                output_docx_path=docx_output_path,
+                layout_json_path=layout_json_path,
+                assets_dir=assets_dir,
+                model=model,
+                gemini_route=gemini_route,
+                status_callback=chat_status_callback,
+            ),
+        )
+        raw_output_path.write_text(chat_result.raw_text, encoding="utf-8")
+        await _maybe_report(progress_callback, 90, "聊天截图 Word 文档已生成，正在整理输出结果")
+        debug_overlays = (
+            chat_result.layout.get("render", {}).get("debug_overlays", [])
+            if isinstance(chat_result.layout, dict)
+            else []
+        )
+
+        final_docx_path = ensure_unique_path(
+            task_output_dir / build_user_visible_filename(original_filename, ext=".docx"),
+            existing_path=docx_output_path,
+        )
+        if docx_output_path != final_docx_path:
+            docx_output_path.replace(final_docx_path)
+            docx_output_path = final_docx_path
+
+        await _maybe_report(progress_callback, 95, "正在整理输出结果")
+        return {
+            "task_id": task_id,
+            "filename": original_filename,
+            "model": model,
+            "gemini_route": gemini_route,
+            "layout_mode": layout_mode,
+            "raw_output_txt": _normalize_path(raw_output_path),
+            "output_layout_json": _normalize_path(layout_json_path),
+            "output_debug_overlay": debug_overlays[0] if debug_overlays else None,
+            "output_debug_overlays": debug_overlays,
+            "output_docx": _normalize_path(docx_output_path),
+            "total_pages": chat_result.total_pages,
+            "blank_page_count": 0,
+            "blank_pages": [],
+            "asset_count": chat_result.asset_count,
+            "fallback_count": chat_result.fallback_count,
+        }
 
     page_state: Dict[str, Any] = {"current": 0, "total": 0}
 
@@ -199,6 +292,7 @@ async def execute_pdf2docx_task_from_path(
         "filename": original_filename,
         "model": model,
         "gemini_route": gemini_route,
+        "layout_mode": layout_mode,
         "raw_output_txt": _normalize_path(raw_output_path),
         "output_html": _normalize_path(html_output_path),
         "output_docx": _normalize_path(docx_output_path),

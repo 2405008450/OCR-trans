@@ -85,6 +85,14 @@
 
                         <div class="options-panel">
                             <div class="option-group option-card">
+                                <label for="layoutModeSelect">处理模式</label>
+                                <div class="field-wrap">
+                                    <i class="fas fa-layer-group"></i>
+                                    <select id="layoutModeSelect"></select>
+                                </div>
+                            </div>
+
+                            <div class="option-group option-card">
                                 <label for="modelSelect">转换模型</label>
                                 <div class="field-wrap">
                                     <i class="fas fa-robot"></i>
@@ -100,8 +108,10 @@
                                 </div>
                             </div>
                             <div class="option-group option-card">
-                                <label>模型说明</label>
+                                <label>模式与模型说明</label>
                                 <div style="line-height: 1.8; color: var(--text-secondary);">
+                                    <div id="layoutModeLabel" style="font-weight: 700; color: var(--text-primary);"></div>
+                                    <div id="layoutModeDesc" style="margin-bottom:6px;"></div>
                                     <div id="modelLabel" style="font-weight: 700; color: var(--text-primary);"></div>
                                     <div id="modelDesc"></div>
                                 </div>

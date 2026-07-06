@@ -2,8 +2,10 @@ let selectedFiles = [];
 let pollingTimer = null;
 let modelConfig = {};
 let routeConfig = {};
+let layoutModeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultRoute = 'openrouter';
+let defaultLayoutMode = 'ocr_html';
 const NGINX_UPLOAD_LIMIT_MB = 100;
 const FRONTEND_UPLOAD_LIMIT_MB = 95;
 const FRONTEND_UPLOAD_LIMIT_BYTES = FRONTEND_UPLOAD_LIMIT_MB * 1024 * 1024;
@@ -17,9 +19,11 @@ const MODEL_DISPLAY_NAMES = {
     'google/gemini-3-flash-preview': '快速版V2',
     'google/gemini-3.5-flash': '新模型',
     'google/gemini-3.1-pro-preview': '增强版V2',
+    'anthropic/claude-sonnet-5': 'Claude Sonnet 5',
     'Google Gemini 3 Flash Preview': '快速版V2',
     '新模型': '新模型',
     'Google Gemini 3.1 Pro Preview': '增强版V2',
+    'Claude Sonnet 5': 'Claude Sonnet 5',
 };
 
 const uploadArea = document.getElementById('uploadArea');
@@ -32,8 +36,11 @@ const btnRemove = document.getElementById('btnRemove');
 const btnProcess = document.getElementById('btnProcess');
 const btnNewTask = document.getElementById('btnNewTask');
 const btnBatchDownloadAll = document.getElementById('btnBatchDownloadAll');
+const layoutModeSelect = document.getElementById('layoutModeSelect');
 const modelSelect = document.getElementById('modelSelect');
 let geminiRouteSelect = document.getElementById('geminiRouteSelect');
+const layoutModeLabel = document.getElementById('layoutModeLabel');
+const layoutModeDesc = document.getElementById('layoutModeDesc');
 const modelLabel = document.getElementById('modelLabel');
 const modelDesc = document.getElementById('modelDesc');
 
@@ -152,6 +159,7 @@ function bindEvents() {
     btnNewTask?.addEventListener('click', resetPage);
     document.getElementById('btnBatchNewTask')?.addEventListener('click', resetPage);
     btnBatchDownloadAll?.addEventListener('click', downloadAllBatchResults);
+    layoutModeSelect?.addEventListener('change', updateLayoutModeInfo);
     modelSelect?.addEventListener('change', updateModelInfo);
 }
 
@@ -162,11 +170,17 @@ async function loadConfig() {
         const data = await response.json();
         modelConfig = data.models || {};
         routeConfig = data.routes || {};
+        layoutModeConfig = data.layout_modes || {};
         defaultModel = data.default_model || defaultModel;
         defaultRoute = data.default_route || defaultRoute;
+        defaultLayoutMode = data.default_layout_mode || defaultLayoutMode;
     } catch (error) {
         console.error(error);
         routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };
+        layoutModeConfig = {
+            ocr_html: { label: '通用文档', description: '沿用当前 OCR 到 Word 流程，适合票据、扫描件、表格型页面。' },
+            chat_preserve: { label: '聊天截图（保头像/表情）', description: '聊天记录专用：文字保持可编辑，并保留头像、图片表情和贴纸。' },
+        };
         modelConfig = {
             'google/gemini-3.1-flash-lite': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规场景。' },
@@ -174,10 +188,18 @@ async function loadConfig() {
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '更强的复杂版面理解能力。' },
         };
     }
+    renderLayoutModes();
     renderModels();
     renderRoutes();
 }
 
+function renderLayoutModes() {
+    if (!layoutModeSelect) return;
+    layoutModeSelect.innerHTML = '';
+    Object.entries(layoutModeConfig).forEach(([value, info]) => layoutModeSelect.add(new Option(info.label || value, value)));
+    layoutModeSelect.value = layoutModeConfig[defaultLayoutMode] ? defaultLayoutMode : Object.keys(layoutModeConfig)[0];
+    updateLayoutModeInfo();
+}
 function renderModels() {
     modelSelect.innerHTML = '';
     Object.entries(modelConfig).forEach(([value, info]) => modelSelect.add(new Option(getModelDisplayName(info.label || value), value)));
@@ -194,6 +216,13 @@ function updateModelInfo() {
     const info = modelConfig[model] || {};
     modelLabel.textContent = getModelDisplayName(info.label || model);
     modelDesc.textContent = info.description || '';
+}
+function updateLayoutModeInfo() {
+    if (!layoutModeSelect) return;
+    const mode = layoutModeSelect.value;
+    const info = layoutModeConfig[mode] || {};
+    if (layoutModeLabel) layoutModeLabel.textContent = info.label || mode || '';
+    if (layoutModeDesc) layoutModeDesc.textContent = info.description || '';
 }
 
 function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); uploadArea.style.borderColor = 'var(--primary-color)'; }
@@ -288,7 +317,7 @@ async function processFiles() {
 async function processSingleFile() {
     const formData = new FormData();
     formData.append('file', selectedFiles[0]);
-    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
+    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, layout_mode: layoutModeSelect?.value || defaultLayoutMode });
 
     let response;
     try { response = await fetch(`/task/pdf2docx?${params.toString()}`, { method: 'POST', body: formData }); }
@@ -320,7 +349,7 @@ async function processBatchFiles() {
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
 
-    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute });
+    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, layout_mode: layoutModeSelect?.value || defaultLayoutMode });
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append('files', file));
 
@@ -542,15 +571,24 @@ function showResult(result) {
     resultStats.innerHTML = `
         <div class="stat-card"><i class="fas fa-file-alt"></i><h3>${escapeHtml(result.filename || '-')}</h3><p>源文件</p></div>
         <div class="stat-card"><i class="fas fa-robot"></i><h3>${escapeHtml(getModelDisplayName(result.model || '-'))}</h3><p>使用模型</p></div>
+        <div class="stat-card"><i class="fas fa-layer-group"></i><h3>${escapeHtml(getLayoutModeDisplayName(result.layout_mode || defaultLayoutMode))}</h3><p>处理模式</p></div>
         <div class="stat-card"><i class="fas fa-file-word"></i><h3>DOCX</h3><p>输出格式</p></div>
         <div class="stat-card"><i class="fas fa-check-circle"></i><h3>成功</h3><p>任务状态</p></div>
         ${ocrStats.totalPages ? `<div class="stat-card"><i class="fas fa-file-lines"></i><h3>${ocrStats.totalPages}</h3><p>总页数</p></div>` : ''}
         ${ocrStats.totalPages ? `<div class="stat-card"><i class="fas fa-circle-minus"></i><h3>${ocrStats.blankPageCount}</h3><p>空白页</p></div>` : ''}
     `;
     const blankSummary = buildBlankPageSummary(result);
+    const layoutJsonLink = result.output_layout_json
+        ? `<a href="/${result.output_layout_json}" download class="download-btn"><i class="fas fa-code"></i> 下载布局 JSON</a>`
+        : '';
+    const debugOverlayLinks = Array.isArray(result.output_debug_overlays) && result.output_debug_overlays.length
+        ? result.output_debug_overlays.map((path, index) => `<a href="/${path}" download class="download-btn"><i class="fas fa-object-group"></i> 下载叠框图${result.output_debug_overlays.length > 1 ? ` ${index + 1}` : ''}</a>`).join('')
+        : (result.output_debug_overlay ? `<a href="/${result.output_debug_overlay}" download class="download-btn"><i class="fas fa-object-group"></i> 下载叠框图</a>` : '');
     resultGrid.innerHTML = `<div class="result-item"><h3>下载结果</h3><div class="download-links">
         <a href="/${result.output_docx}" download class="download-btn"><i class="fas fa-file-word"></i> 下载 Word 文档</a>
         <a href="/${result.raw_output_txt}" download class="download-btn"><i class="fas fa-file-lines"></i> 下载原始 OCR 文本</a>
+        ${layoutJsonLink}
+        ${debugOverlayLinks}
     </div></div>${blankSummary ? `<div class="result-item"><h3>OCR 摘要</h3><p>${escapeHtml(blankSummary)}</p></div>` : ''}`;
 }
 
@@ -650,3 +688,4 @@ async function safeReadError(response) { try { const p = await response.json(); 
 function formatFileSize(size) { if (size < 1024) return `${size} B`; if (size < 1024*1024) return `${(size/1024).toFixed(1)} KB`; return `${(size/1024/1024).toFixed(1)} MB`; }
 function escapeHtml(v) { return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;'); }
 function getModelDisplayName(name) { return MODEL_DISPLAY_NAMES[name] || name; }
+function getLayoutModeDisplayName(mode) { return layoutModeConfig?.[mode]?.label || mode; }

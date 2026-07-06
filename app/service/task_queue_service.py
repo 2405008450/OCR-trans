@@ -30,6 +30,7 @@ from app.service.number_check_service import (
     run_number_check_task,
 )
 from app.service.pdf2docx_service import (
+    PDF2DOCX_DEFAULT_LAYOUT_MODE,
     PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     PDF2DOCX_DEFAULT_MODEL,
     execute_pdf2docx_task_from_path,
@@ -519,8 +520,8 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_pdf2docx_task(self, *, file: UploadFile, model: str, gemini_route: str, batch_id: Optional[str] = None, batch_name: Optional[str] = None, batch_index: Optional[int] = None, batch_total: Optional[int] = None) -> TaskSubmitResult:
-        params = {'model': model, 'gemini_route': gemini_route}
+    async def submit_pdf2docx_task(self, *, file: UploadFile, model: str, gemini_route: str, layout_mode: str = PDF2DOCX_DEFAULT_LAYOUT_MODE, batch_id: Optional[str] = None, batch_name: Optional[str] = None, batch_index: Optional[int] = None, batch_total: Optional[int] = None) -> TaskSubmitResult:
+        params = {'model': model, 'gemini_route': gemini_route, 'layout_mode': layout_mode}
         staged_uploads = await self._stage_uploads('pdf2docx', [('input', file, 'input.bin')])
         reserved_task = None
         try:
@@ -1000,7 +1001,7 @@ class TaskQueueService:
 
     async def _execute_pdf2docx(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'pdf2docx started')
-        return await execute_pdf2docx_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', model=params.get('model', PDF2DOCX_DEFAULT_MODEL), gemini_route=params.get('gemini_route', PDF2DOCX_DEFAULT_GEMINI_ROUTE), progress_callback=update, executor=self._task_executor)
+        return await execute_pdf2docx_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', model=params.get('model', PDF2DOCX_DEFAULT_MODEL), gemini_route=params.get('gemini_route', PDF2DOCX_DEFAULT_GEMINI_ROUTE), layout_mode=params.get('layout_mode', PDF2DOCX_DEFAULT_LAYOUT_MODE), progress_callback=update, executor=self._task_executor)
 
     @staticmethod
     def _extract_output_files(task_type: str, result: Optional[Dict[str, Any]], output_path: Optional[str], original_filename: Optional[str] = None) -> list:
