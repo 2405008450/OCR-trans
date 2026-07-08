@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>字数统计</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg: #07111f;
+            --panel: rgba(255, 255, 255, 0.07);
+            --panel-strong: rgba(255, 255, 255, 0.11);
+            --line: rgba(255, 255, 255, 0.12);
+            --text: #f8fafc;
+            --muted: rgba(226, 232, 240, 0.72);
+            --cyan: #38bdf8;
+            --green: #22c55e;
+            --amber: #f59e0b;
+            --red: #ef4444;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            background:
+                radial-gradient(circle at 18% 6%, rgba(56, 189, 248, 0.20), transparent 28%),
+                radial-gradient(circle at 90% 16%, rgba(34, 197, 94, 0.13), transparent 24%),
+                linear-gradient(145deg, #050b14 0%, #07111f 48%, #102235 100%);
+        }
+
+        .page {
+            width: min(1280px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 24px 0 54px;
+        }
+
+        .title-row {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 30px;
+            letter-spacing: 0;
+        }
+
+        .subtitle {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--panel);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+        }
+
+        .panel-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 18px 18px 0;
+        }
+
+        .panel-head h2 {
+            margin: 0;
+            font-size: 17px;
+        }
+
+        .panel-body {
+            padding: 18px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #e2e8f0;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            min-height: 44px;
+            padding: 0 13px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            outline: none;
+            color: var(--text);
+            background: rgba(15, 23, 42, 0.72);
+        }
+
+        input[type="text"]:focus {
+            border-color: rgba(56, 189, 248, 0.68);
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.13);
+        }
+
+        .field {
+            margin-bottom: 16px;
+        }
+
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 34px;
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .check-row input {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--cyan);
+        }
+
+        .hint-list {
+            display: grid;
+            gap: 8px;
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .root-list {
+            display: grid;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .root-item {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            min-width: 0;
+            padding: 9px 10px;
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.55);
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .root-item span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        button,
+        .download-link {
+            min-height: 42px;
+            border: none;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 0 15px;
+            cursor: pointer;
+            color: #082032;
+            background: linear-gradient(135deg, #9be7ff, var(--cyan));
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        button.secondary,
+        .download-link.secondary {
+            color: var(--text);
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.58;
+        }
+
+        .progress-shell {
+            height: 12px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--green), var(--cyan));
+            transition: width 0.2s ease;
+        }
+
+        .status-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 10px 0 18px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+
+        .metric {
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 14px;
+            background: rgba(15, 23, 42, 0.46);
+            min-width: 0;
+        }
+
+        .metric small {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .metric strong {
+            display: block;
+            overflow-wrap: anywhere;
+            font-size: 24px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 760px;
+            font-size: 13px;
+        }
+
+        th, td {
+            padding: 11px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            color: #cbd5e1;
+            background: rgba(15, 23, 42, 0.72);
+            font-size: 12px;
+        }
+
+        .column-head {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .hint-popover {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border: 1px solid rgba(56, 189, 248, 0.38);
+            border-radius: 999px;
+            color: var(--cyan);
+            background: rgba(56, 189, 248, 0.1);
+            cursor: help;
+            outline: none;
+        }
+
+        .hint-popover i {
+            font-size: 11px;
+        }
+
+        .hint-popover::before,
+        .hint-popover::after {
+            position: absolute;
+            left: 50%;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.16s ease, transform 0.16s ease;
+            z-index: 20;
+        }
+
+        .hint-popover::before {
+            content: "";
+            top: calc(100% + 3px);
+            width: 9px;
+            height: 9px;
+            border-left: 1px solid rgba(148, 163, 184, 0.28);
+            border-top: 1px solid rgba(148, 163, 184, 0.28);
+            background: #0f172a;
+            transform: translateX(-50%) translateY(-3px) rotate(45deg);
+        }
+
+        .hint-popover::after {
+            content: attr(data-tooltip);
+            top: calc(100% + 8px);
+            width: min(320px, calc(100vw - 40px));
+            padding: 10px 12px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 8px;
+            color: rgba(248, 250, 252, 0.94);
+            background: #0f172a;
+            box-shadow: 0 16px 38px rgba(0, 0, 0, 0.34);
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1.6;
+            white-space: normal;
+            transform: translateX(-50%) translateY(-3px);
+        }
+
+        .hint-popover:hover::before,
+        .hint-popover:hover::after,
+        .hint-popover:focus::before,
+        .hint-popover:focus::after {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0) rotate(45deg);
+        }
+
+        .hint-popover:hover::after,
+        .hint-popover:focus::after {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        td {
+            color: rgba(248, 250, 252, 0.9);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 0 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .badge.counted { color: #bbf7d0; background: rgba(34, 197, 94, 0.16); }
+        .badge.needs_ocr,
+        .badge.needs_cad_parser { color: #fde68a; background: rgba(245, 158, 11, 0.16); }
+        .badge.failed { color: #fecaca; background: rgba(239, 68, 68, 0.16); }
+        .badge.skipped { color: #cbd5e1; background: rgba(148, 163, 184, 0.15); }
+
+        .empty {
+            padding: 30px;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        @media (max-width: 980px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .metric-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 620px) {
+            .page {
+                width: min(100% - 20px, 1280px);
+            }
+
+            .title-row {
+                display: block;
+            }
+
+            .metric-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="title-row">
+            <div>
+                <h1>字数统计</h1>
+                <p class="subtitle">递归扫描服务器可访问目录，生成可下载的 Excel 与 JSON 统计报告。</p>
+            </div>
+            <a class="download-link secondary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
+        </div>
+
+        <div class="layout">
+            <section class="panel">
+                <div class="panel-head">
+                    <h2><i class="fas fa-folder-tree"></i> 扫描任务</h2>
+                </div>
+                <div class="panel-body">
+                    <div class="field">
+                        <label for="directoryPath">目录路径</label>
+                        <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\ 或 \\win-server\" />
+                    </div>
+
+                    <div class="field">
+                        <label for="extensionsInput">扩展名筛选</label>
+                        <input id="extensionsInput" type="text" placeholder="留空表示默认格式；例如 docx,pdf,xlsx" />
+                    </div>
+
+                    <label class="check-row"><input id="recursiveInput" type="checkbox" checked /> 递归扫描子目录</label>
+                    <label class="check-row"><input id="hiddenInput" type="checkbox" /> 包含隐藏文件和临时文件</label>
+
+                    <div class="button-row">
+                        <button id="submitBtn"><i class="fas fa-play"></i> 开始统计</button>
+                        <button id="resetBtn" class="secondary"><i class="fas fa-rotate-left"></i> 清空</button>
+                    </div>
+
+                    <div class="hint-list">
+                        <div><strong>允许根目录</strong></div>
+                        <div id="allowedRoots" class="root-list"></div>
+                        <div id="formatHint"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2><i class="fas fa-chart-simple"></i> 统计结果</h2>
+                    <span id="taskIdText" class="subtitle"></span>
+                </div>
+                <div class="panel-body">
+                    <div class="progress-shell"><div id="progressFill" class="progress-fill"></div></div>
+                    <div class="status-line">
+                        <span id="statusText">等待提交</span>
+                        <strong id="progressText">0%</strong>
+                    </div>
+
+                    <div class="metric-grid">
+                        <div class="metric"><small>主字数</small><strong id="mainWords">0</strong></div>
+                        <div class="metric"><small>额外内容字数</small><strong id="extraWords">0</strong></div>
+                        <div class="metric"><small>已统计文件</small><strong id="countedFiles">0</strong></div>
+                        <div class="metric"><small>需处理/失败</small><strong id="issueFiles">0</strong></div>
+                    </div>
+
+                    <div id="downloadArea" class="button-row" style="display:none"></div>
+
+                    <div class="table-wrap" style="margin-top:18px">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>文件</th>
+                                    <th>状态</th>
+                                    <th>主字数</th>
+                                    <th>
+                                        <span class="column-head">
+                                            额外字数
+                                            <span class="hint-popover" tabindex="0" aria-label="额外字数说明" data-tooltip="额外字数来自 Word 文档中可提取但不并入主字数的区域，例如页眉、页脚、脚注、尾注、批注、图表或图形文字等；正文表格和正文普通文本框仍计入主字数。">
+                                                <i class="fas fa-circle-info" aria-hidden="true"></i>
+                                            </span>
+                                        </span>
+                                    </th>
+                                    <th>信息</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fileRows">
+                                <tr><td colspan="5"><div class="empty">暂无结果</div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+    <script src="/static/word_count.js"></script>
+</body>
+</html>

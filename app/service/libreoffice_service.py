@@ -152,3 +152,88 @@ def convert_doc_to_docx_via_libreoffice(
         output_path=output_path,
         libreoffice_path=libreoffice_path,
     )
+
+
+def _convert_office_file_via_libreoffice(
+    input_path: str | Path,
+    output_path: str | Path | None,
+    *,
+    expected_input_exts: set[str],
+    output_ext: str,
+    convert_to: str,
+    libreoffice_path: str | None = None,
+) -> str:
+    input_file = Path(input_path).resolve()
+    if input_file.suffix.lower() not in expected_input_exts:
+        allowed = " / ".join(sorted(expected_input_exts))
+        raise ValueError(f"仅支持 {allowed} 输入，当前为: {input_file.name}")
+    if not input_file.exists():
+        raise FileNotFoundError(f"待转换文件不存在: {input_file}")
+
+    output_file = Path(output_path).resolve() if output_path else input_file.with_suffix(output_ext)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if input_file.suffix.lower() == output_ext:
+        if output_file != input_file:
+            if output_file.exists():
+                output_file.unlink()
+            shutil.copy2(input_file, output_file)
+        return str(output_file)
+
+    expected_output = output_file.parent / f"{input_file.stem}{output_ext}"
+    if expected_output.exists() and expected_output != input_file:
+        expected_output.unlink()
+    if output_file.exists() and output_file != input_file and output_file != expected_output:
+        output_file.unlink()
+
+    result = _run_libreoffice_convert(
+        input_path=input_file,
+        output_dir=output_file.parent,
+        convert_to=convert_to,
+        libreoffice_path=libreoffice_path,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "LibreOffice 转换失败: "
+            f"returncode={result.returncode}, stdout={result.stdout}, stderr={result.stderr}"
+        )
+    if not expected_output.exists():
+        raise RuntimeError(
+            f"LibreOffice 未生成 {output_ext.upper()} 文件: "
+            f"stdout={result.stdout}, stderr={result.stderr}"
+        )
+    if expected_output != output_file:
+        expected_output.replace(output_file)
+    return str(output_file)
+
+
+def convert_spreadsheet_to_xlsx_via_libreoffice(
+    input_path: str | Path,
+    output_path: str | Path | None = None,
+    *,
+    libreoffice_path: str | None = None,
+) -> str:
+    return _convert_office_file_via_libreoffice(
+        input_path=input_path,
+        output_path=output_path,
+        expected_input_exts={".xls", ".xlsx"},
+        output_ext=".xlsx",
+        convert_to="xlsx:Calc MS Excel 2007 XML",
+        libreoffice_path=libreoffice_path,
+    )
+
+
+def convert_presentation_to_pptx_via_libreoffice(
+    input_path: str | Path,
+    output_path: str | Path | None = None,
+    *,
+    libreoffice_path: str | None = None,
+) -> str:
+    return _convert_office_file_via_libreoffice(
+        input_path=input_path,
+        output_path=output_path,
+        expected_input_exts={".ppt", ".pptx"},
+        output_ext=".pptx",
+        convert_to="pptx:Impress MS PowerPoint 2007 XML",
+        libreoffice_path=libreoffice_path,
+    )

@@ -40,6 +40,7 @@ GLOBAL_NAV_ITEMS = [
     ("/number-check", "fa-check-double", "数字专检"),
     ("/alignment", "fa-object-group", "多语对照"),
     ("/zhongfanyi", "fa-spell-check", "中翻专检"),
+    ("/word-count", "fa-calculator", "字数统计"),
 ]
 NAV_ACTIVE_ALIASES = {
     "/certificate-translation": (
@@ -615,6 +616,11 @@ async def zhongfanyi_page():
 @app.get("/pdf2docx", response_class=HTMLResponse)
 async def pdf2docx_page():
     return _render_page("pdf2docx.html", "/pdf2docx")
+
+
+@app.get("/word-count", response_class=HTMLResponse)
+async def word_count_page():
+    return _render_page("word_count.html", "/word-count")
 
 
 @app.get("/healthz")

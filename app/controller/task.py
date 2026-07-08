@@ -61,6 +61,7 @@ from app.service.pdf2docx_service import (
     normalize_pdf2docx_layout_mode,
 )
 from app.service.task_queue_service import task_queue_service
+from app.service.word_count_service import get_word_count_config as build_word_count_config
 
 router = APIRouter(prefix="/task", tags=["Task"])
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -86,6 +87,13 @@ class TaskFeedbackBody(BaseModel):
     marked: bool = True
     category: Optional[str] = None
     note: Optional[str] = None
+
+
+class WordCountSubmitBody(BaseModel):
+    directory_path: str
+    recursive: bool = True
+    include_hidden: bool = False
+    extensions: Optional[List[str]] = None
 
 
 def _safe_resolve(file_path: str) -> Path:
@@ -656,6 +664,38 @@ async def get_alignment_status(task_id: str):
         return queue_task
     if progress and queue_task.get("status") != "queued":
         return _merge_queue_timestamps(progress, queue_task)
+    return queue_task
+
+
+@router.get("/word-count/config")
+async def get_word_count_page_config():
+    return build_word_count_config()
+
+
+@router.post("/word-count")
+async def submit_word_count(body: WordCountSubmitBody):
+    try:
+        submit_result = await task_queue_service.submit_word_count_task(
+            directory_path=body.directory_path,
+            recursive=body.recursive,
+            include_hidden=body.include_hidden,
+            extensions=body.extensions,
+        )
+    except (ValueError, FileNotFoundError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.get("/word-count/status/{task_id}")
+async def get_word_count_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
     return queue_task
 
 

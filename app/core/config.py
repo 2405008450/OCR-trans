@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     TASK_QUEUE_POLL_INTERVAL_SECONDS: float = float(os.getenv("TASK_QUEUE_POLL_INTERVAL_SECONDS", "0.5"))
     TASK_QUEUE_CANDIDATE_BATCH_SIZE: int = int(os.getenv("TASK_QUEUE_CANDIDATE_BATCH_SIZE", "20"))
     TASK_QUEUE_TYPE_LIMITS_JSON: str = os.getenv("TASK_QUEUE_TYPE_LIMITS_JSON", "")
+    WORD_COUNT_ALLOWED_ROOTS_JSON: str = os.getenv("WORD_COUNT_ALLOWED_ROOTS_JSON", "")
+    WORD_COUNT_ALLOW_LOCAL_PATHS: str = os.getenv("WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
+    WORD_COUNT_MAX_FILES: int = int(os.getenv("WORD_COUNT_MAX_FILES", "5000"))
+    WORD_COUNT_MAX_FILE_MB: int = int(os.getenv("WORD_COUNT_MAX_FILE_MB", "200"))
+    WORD_COUNT_FOLLOW_SYMLINKS: str = os.getenv("WORD_COUNT_FOLLOW_SYMLINKS", "False")
 
     if _USE_SETTINGS_CONFIG_DICT:
         model_config = SettingsConfigDict(
@@ -102,6 +107,30 @@ class Settings(BaseSettings):
             if limit > 0:
                 limits[str(key)] = limit
         return limits
+
+    @property
+    def WORD_COUNT_ALLOWED_ROOTS(self) -> list[str]:
+        raw = (self.WORD_COUNT_ALLOWED_ROOTS_JSON or "").strip()
+        if not raw:
+            return [str(_ROOT_DIR)]
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return [str(_ROOT_DIR)]
+        if isinstance(parsed, str):
+            parsed = [parsed]
+        if not isinstance(parsed, list):
+            return [str(_ROOT_DIR)]
+        roots = [str(item).strip() for item in parsed if str(item).strip()]
+        return roots or [str(_ROOT_DIR)]
+
+    @property
+    def WORD_COUNT_FOLLOW_SYMLINKS_ENABLED(self) -> bool:
+        return str(self.WORD_COUNT_FOLLOW_SYMLINKS).strip().lower() in {"1", "true", "yes", "on"}
+
+    @property
+    def WORD_COUNT_ALLOW_LOCAL_PATHS_ENABLED(self) -> bool:
+        return str(self.WORD_COUNT_ALLOW_LOCAL_PATHS).strip().lower() in {"1", "true", "yes", "on"}
 
 
 settings = Settings()

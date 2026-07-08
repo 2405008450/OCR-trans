@@ -81,6 +81,7 @@ Rules:
 
 
 LOCAL_ASSET_RECHECK_MAX_MESSAGES = 25
+AVATAR_CANDIDATE_MAX_PER_PAGE = 80
 
 
 @dataclass
@@ -462,24 +463,46 @@ def _visual_width_inches(bbox: tuple[int, int, int, int]) -> float:
 def _refine_layout_assets(image: Image.Image, layout: dict[str, Any]) -> dict[str, Any]:
     refined = copy.deepcopy(layout if isinstance(layout, dict) else {})
     messages = _normalize_messages(refined)
+    avatar_candidates = _detect_chat_avatar_candidates(image)
+    assigned_avatars = _assign_detected_avatar_candidates(
+        messages=messages,
+        candidates=avatar_candidates,
+        image_size=image.size,
+    )
 
     for message in messages:
         message_bbox = _coerce_bbox(message.get("message_bbox"), image.size)
         avatar_bbox = _coerce_bbox(message.get("avatar_bbox"), image.size)
         if avatar_bbox:
-            message["avatar_bbox_original"] = _bbox_to_list(avatar_bbox)
-            snapped = _refine_asset_bbox(
-                image=image,
-                bbox=avatar_bbox,
-                kind="avatar",
-                bounds=message_bbox,
-            )
-            message["avatar_bbox_refined"] = _bbox_to_list(snapped or avatar_bbox)
-            message["avatar_bbox_refine_method"] = "edge_snap" if snapped else "original"
+            original_avatar_bbox = _coerce_bbox(message.get("avatar_bbox_model"), image.size) or avatar_bbox
+            message["avatar_bbox_original"] = _bbox_to_list(original_avatar_bbox)
+            if message.get("avatar_bbox_source") == "local_candidate_detection":
+                message["avatar_bbox_refined"] = _bbox_to_list(avatar_bbox)
+                message["avatar_bbox_refine_method"] = "local_candidate"
+            else:
+                snapped = _refine_asset_bbox(
+                    image=image,
+                    bbox=avatar_bbox,
+                    kind="avatar",
+                    bounds=message_bbox,
+                )
+                message["avatar_bbox_refined"] = _bbox_to_list(snapped or avatar_bbox)
+                message["avatar_bbox_refine_method"] = "edge_snap" if snapped else "original"
 
+        filtered_visuals = []
         for visual in _normalize_visuals(message):
             visual_bbox = _coerce_bbox(visual.get("bbox"), image.size)
             if not visual_bbox:
+                continue
+            if not _should_keep_chat_visual(
+                image=image,
+                visual=visual,
+                visual_bbox=visual_bbox,
+                avatar_bbox=avatar_bbox,
+                message_bbox=message_bbox,
+            ):
+                visual["_filtered_out"] = True
+                visual["filter_reason"] = "non_preserved_chat_visual"
                 continue
             visual["bbox_original"] = _bbox_to_list(visual_bbox)
             snapped = _refine_asset_bbox(
@@ -490,13 +513,433 @@ def _refine_layout_assets(image: Image.Image, layout: dict[str, Any]) -> dict[st
             )
             visual["bbox_refined"] = _bbox_to_list(snapped or visual_bbox)
             visual["bbox_refine_method"] = "edge_snap" if snapped else "original"
+            filtered_visuals.append(visual)
+        if message.get("visuals") is not None:
+            message["visuals"] = filtered_visuals
 
     refined["_asset_refine"] = {
-        "method": "local_asset_pass_then_edge_snap",
+        "method": "local_avatar_candidates_then_asset_refine",
         "image_width": image.width,
         "image_height": image.height,
+        "avatar_candidate_count": len(avatar_candidates),
+        "avatar_candidate_assigned": assigned_avatars,
     }
+    if avatar_candidates:
+        refined["_avatar_candidate_detection"] = {
+            "method": "local_margin_cv_candidates",
+            "candidates": [
+                {
+                    "bbox": _bbox_to_list(candidate["bbox"]),
+                    "side": candidate["side"],
+                    "score": round(float(candidate["score"]), 3),
+                }
+                for candidate in avatar_candidates[:AVATAR_CANDIDATE_MAX_PER_PAGE]
+            ],
+        }
     return refined
+
+
+def _detect_chat_avatar_candidates(image: Image.Image) -> list[dict[str, Any]]:
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.asarray(image.convert("RGB"))
+        if arr.size == 0:
+            return []
+
+        height, width = arr.shape[:2]
+        if width < 80 or height < 80:
+            return []
+
+        mobile_like = height / max(width, 1) > 1.8
+        top_skip = max(64, int(width * 0.18)) if mobile_like else 0
+        bottom_skip = max(48, int(width * 0.12)) if mobile_like else 0
+        y_limit = max(top_skip + 1, height - bottom_skip)
+        band_width = min(width, max(56, int(width * 0.16)))
+        min_size = max(18, int(width * 0.065))
+        max_size = min(220, max(56, int(width * 0.20)))
+        bands = [
+            ("left", 0, band_width),
+            ("right", max(0, width - band_width), width),
+        ]
+
+        candidates: list[dict[str, Any]] = []
+        for side, band_left, band_right in bands:
+            crop = arr[top_skip:y_limit, band_left:band_right]
+            if crop.size == 0:
+                continue
+            gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+            edges = cv2.Canny(gray, 45, 140)
+            kernel = np.ones((5, 5), dtype="uint8")
+            mask = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+            mask = cv2.dilate(mask, kernel, iterations=1)
+            contours, _hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            for contour in contours:
+                x, y, candidate_width, candidate_height = cv2.boundingRect(contour)
+                bbox = (
+                    int(band_left + x),
+                    int(top_skip + y),
+                    int(band_left + x + candidate_width),
+                    int(top_skip + y + candidate_height),
+                )
+                bbox = _trim_avatar_candidate_to_outer_visual(arr, bbox, side=side) or bbox
+                candidate_width = bbox[2] - bbox[0]
+                candidate_height = bbox[3] - bbox[1]
+                if candidate_width < min_size or candidate_height < min_size:
+                    continue
+                if candidate_width > max_size or candidate_height > max_size:
+                    continue
+                aspect = candidate_width / max(candidate_height, 1)
+                if not 0.65 <= aspect <= 1.45:
+                    continue
+                bbox = _normalize_avatar_candidate_bbox(bbox, image_size=(width, height))
+                if not bbox:
+                    continue
+                score = _score_avatar_candidate(arr, bbox, side=side)
+                if score < 22:
+                    continue
+                candidates.append(
+                    {
+                        "bbox": bbox,
+                        "side": side,
+                        "score": score,
+                    }
+                )
+
+        return _dedupe_avatar_candidates(candidates)[:AVATAR_CANDIDATE_MAX_PER_PAGE]
+    except Exception:
+        return []
+
+
+def _should_keep_chat_visual(
+    *,
+    image: Image.Image,
+    visual: dict[str, Any],
+    visual_bbox: tuple[int, int, int, int],
+    avatar_bbox: tuple[int, int, int, int] | None,
+    message_bbox: tuple[int, int, int, int] | None,
+) -> bool:
+    kind = _clean_text(visual.get("type")).lower()
+    alt = _clean_text(visual.get("alt")).lower()
+    label = f"{kind} {alt}"
+    if "avatar" in label or "头像" in label:
+        return False
+    if any(marker in label for marker in ("icon", "pdf", "file", "文件", "图标")):
+        return False
+    if avatar_bbox and (
+        _bbox_iou(visual_bbox, avatar_bbox) > 0.08
+        or _bbox_center_distance(visual_bbox, avatar_bbox)
+        < max(visual_bbox[2] - visual_bbox[0], visual_bbox[3] - visual_bbox[1], avatar_bbox[2] - avatar_bbox[0], avatar_bbox[3] - avatar_bbox[1])
+    ):
+        return False
+
+    width = visual_bbox[2] - visual_bbox[0]
+    height = visual_bbox[3] - visual_bbox[1]
+    area = width * height
+    if width < 16 or height < 16:
+        return False
+    if kind == "image" and area < 2500:
+        return False
+    if kind not in {"emoji", "sticker", "image"} and area < 4096:
+        return False
+    if message_bbox and kind == "image" and area < _bbox_area(message_bbox) * 0.04:
+        return False
+    return True
+
+
+def _trim_avatar_candidate_to_outer_visual(
+    arr: Any,
+    bbox: tuple[int, int, int, int],
+    *,
+    side: str,
+) -> tuple[int, int, int, int] | None:
+    try:
+        import cv2
+        import numpy as np
+
+        image_height, image_width = arr.shape[:2]
+        left, top, right, bottom = bbox
+        width = right - left
+        height = bottom - top
+        if side != "right" or image_width >= 600 or height <= width * 1.08:
+            return None
+
+        crop = arr[top:bottom, left:right]
+        if crop.size == 0:
+            return None
+
+        focus_start = max(0, int(crop.shape[1] * 0.42))
+        focus = crop[:, focus_start:]
+        hsv = cv2.cvtColor(focus, cv2.COLOR_RGB2HSV)
+        mask = (((hsv[:, :, 1] > 28) & (hsv[:, :, 2] < 248))).astype("uint8") * 255
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), dtype="uint8"), iterations=1)
+        count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask, 8)
+
+        best = None
+        best_area = 0
+        for label in range(1, count):
+            x, y, component_width, component_height, area = stats[label]
+            if area < 24:
+                continue
+            aspect = component_width / max(component_height, 1)
+            if not 0.55 <= aspect <= 1.8:
+                continue
+            if int(area) > best_area:
+                best_area = int(area)
+                best = (
+                    left + focus_start + int(x),
+                    top + int(y),
+                    left + focus_start + int(x + component_width),
+                    top + int(y + component_height),
+                )
+        if best and side == "right":
+            best_width = best[2] - best[0]
+            best_height = best[3] - best[1]
+            size = max(best_width, best_height, int(round(image_width * 0.10)))
+            best = (
+                max(0, best[2] - size),
+                best[1],
+                best[2],
+                min(image_height, best[1] + size),
+            )
+        return best
+    except Exception:
+        return None
+
+
+def _normalize_avatar_candidate_bbox(
+    bbox: tuple[int, int, int, int],
+    *,
+    image_size: tuple[int, int],
+) -> tuple[int, int, int, int] | None:
+    left, top, right, bottom = bbox
+    width = right - left
+    height = bottom - top
+    if width <= 0 or height <= 0:
+        return None
+
+    if height > width * 1.18:
+        bottom = top + width
+    elif width > height * 1.18:
+        right = left + height
+
+    return _intersect_bbox((left, top, right, bottom), (0, 0, image_size[0], image_size[1]))
+
+
+def _score_avatar_candidate(
+    arr: Any,
+    bbox: tuple[int, int, int, int],
+    *,
+    side: str,
+) -> float:
+    try:
+        import cv2
+        import numpy as np
+
+        height, width = arr.shape[:2]
+        left, top, right, bottom = bbox
+        patch = arr[top:bottom, left:right]
+        if patch.size == 0:
+            return 0.0
+        patch_height, patch_width = patch.shape[:2]
+        gray = cv2.cvtColor(patch, cv2.COLOR_RGB2GRAY)
+        edges = cv2.Canny(gray, 45, 140)
+        edge_density = float(np.count_nonzero(edges) / max(patch_width * patch_height, 1))
+        gray_std = float(gray.std())
+        color_std = float(patch.reshape(-1, 3).std(axis=0).mean())
+        size_balance = 1.0 - min(abs(patch_width - patch_height) / max(patch_width, patch_height, 1), 1.0)
+
+        ring_padding = max(5, int(max(patch_width, patch_height) * 0.12))
+        ring_bbox = _expand_bbox(bbox, (width, height), padding=ring_padding)
+        ring = arr[ring_bbox[1] : ring_bbox[3], ring_bbox[0] : ring_bbox[2]]
+        center_mask = np.ones(ring.shape[:2], dtype=bool)
+        inner_left = left - ring_bbox[0]
+        inner_top = top - ring_bbox[1]
+        inner_right = right - ring_bbox[0]
+        inner_bottom = bottom - ring_bbox[1]
+        center_mask[inner_top:inner_bottom, inner_left:inner_right] = False
+        ring_pixels = ring[center_mask]
+        ring_contrast = 0.0
+        if ring_pixels.size:
+            ring_contrast = float(np.linalg.norm(patch.reshape(-1, 3).mean(axis=0) - ring_pixels.reshape(-1, 3).mean(axis=0)))
+
+        margin_bonus = 0.0
+        center_x = (left + right) / 2
+        if side == "left":
+            margin_bonus = max(0.0, 1.0 - center_x / max(width * 0.28, 1)) * 8
+        else:
+            margin_bonus = max(0.0, 1.0 - (width - center_x) / max(width * 0.28, 1)) * 8
+
+        return (
+            gray_std * 0.38
+            + color_std * 0.32
+            + edge_density * 105
+            + ring_contrast * 0.12
+            + size_balance * 12
+            + margin_bonus
+        )
+    except Exception:
+        return 0.0
+
+
+def _dedupe_avatar_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for candidate in sorted(candidates, key=lambda item: float(item.get("score", 0)), reverse=True):
+        bbox = candidate["bbox"]
+        duplicate = False
+        for existing in selected:
+            existing_bbox = existing["bbox"]
+            if _bbox_iou(bbox, existing_bbox) > 0.18:
+                duplicate = True
+                break
+            if _bbox_center_distance(bbox, existing_bbox) < max(bbox[2] - bbox[0], bbox[3] - bbox[1]) * 0.55:
+                duplicate = True
+                break
+        if not duplicate:
+            selected.append(candidate)
+    return sorted(selected, key=lambda item: (item["bbox"][1], item["bbox"][0]))
+
+
+def _assign_detected_avatar_candidates(
+    *,
+    messages: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    image_size: tuple[int, int],
+) -> int:
+    if not messages or not candidates:
+        return 0
+
+    remaining = list(candidates)
+    assigned = 0
+    for message in messages:
+        if not _message_accepts_detected_avatar(message):
+            continue
+        message_bbox = _coerce_bbox(message.get("message_bbox"), image_size)
+        existing_bbox = _coerce_bbox(message.get("avatar_bbox"), image_size)
+        preferred_side = _preferred_avatar_side(
+            message=message,
+            existing_bbox=existing_bbox,
+            message_bbox=message_bbox,
+            image_size=image_size,
+        )
+        match_index = _select_avatar_candidate_for_message(
+            message_bbox=message_bbox,
+            existing_bbox=existing_bbox,
+            candidates=remaining,
+            image_size=image_size,
+            preferred_side=preferred_side,
+        )
+        if match_index is None:
+            match_index = _select_next_avatar_candidate_by_sequence(
+                candidates=remaining,
+                preferred_side=preferred_side,
+            )
+        if match_index is None:
+            continue
+
+        candidate = remaining.pop(match_index)
+        candidate_bbox = candidate["bbox"]
+        if message.get("avatar_bbox") is not None and message.get("avatar_bbox_model") is None:
+            message["avatar_bbox_model"] = message.get("avatar_bbox")
+        message["avatar_bbox"] = _bbox_to_list(candidate_bbox)
+        message["avatar_bbox_detected"] = _bbox_to_list(candidate_bbox)
+        message["avatar_bbox_source"] = "local_candidate_detection"
+        message["avatar_candidate_score"] = round(float(candidate["score"]), 3)
+        message["avatar_candidate_side"] = candidate["side"]
+        assigned += 1
+    return assigned
+
+
+def _message_accepts_detected_avatar(message: dict[str, Any]) -> bool:
+    if message.get("avatar_bbox") is not None:
+        return True
+    return bool(_clean_text(message.get("sender")))
+
+
+def _preferred_avatar_side(
+    *,
+    message: dict[str, Any],
+    existing_bbox: tuple[int, int, int, int] | None,
+    message_bbox: tuple[int, int, int, int] | None,
+    image_size: tuple[int, int],
+) -> str | None:
+    image_mid_x = image_size[0] / 2
+    if existing_bbox:
+        center_x = (existing_bbox[0] + existing_bbox[2]) / 2
+        return "left" if center_x < image_mid_x else "right"
+    if message_bbox:
+        center_x = (message_bbox[0] + message_bbox[2]) / 2
+        if center_x > image_mid_x * 1.12:
+            return "right"
+    if _clean_text(message.get("sender")):
+        return "left"
+    return None
+
+
+def _select_next_avatar_candidate_by_sequence(
+    *,
+    candidates: list[dict[str, Any]],
+    preferred_side: str | None,
+) -> int | None:
+    if not candidates:
+        return None
+    if preferred_side:
+        for index, candidate in enumerate(candidates):
+            if candidate.get("side") == preferred_side:
+                return index
+    return 0
+
+
+def _select_avatar_candidate_for_message(
+    *,
+    message_bbox: tuple[int, int, int, int] | None,
+    existing_bbox: tuple[int, int, int, int] | None,
+    candidates: list[dict[str, Any]],
+    image_size: tuple[int, int],
+    preferred_side: str | None,
+) -> int | None:
+    best_index = None
+    best_score = None
+    has_preferred_candidate = bool(preferred_side and any(candidate.get("side") == preferred_side for candidate in candidates))
+    for index, candidate in enumerate(candidates):
+        bbox = candidate["bbox"]
+        candidate_score = float(candidate["score"])
+        score = candidate_score
+
+        if preferred_side and candidate.get("side") != preferred_side:
+            if has_preferred_candidate:
+                continue
+            score -= 70.0
+        elif preferred_side:
+            score += 35.0
+
+        if message_bbox:
+            tolerance = max(36, bbox[3] - bbox[1], int(image_size[1] * 0.015))
+            if not _bbox_y_matches(bbox, message_bbox, tolerance=tolerance):
+                continue
+            y_overlap = _bbox_y_overlap(bbox, message_bbox)
+            score += min(45.0, y_overlap / max(bbox[3] - bbox[1], 1) * 45.0)
+            candidate_center_y = (bbox[1] + bbox[3]) / 2
+            message_center_y = (message_bbox[1] + message_bbox[3]) / 2
+            score -= min(18.0, abs(candidate_center_y - message_center_y) * 0.025)
+        elif existing_bbox:
+            distance = _bbox_center_distance(bbox, existing_bbox)
+            if distance > max(image_size) * 0.35:
+                continue
+            score -= min(22.0, distance * 0.04)
+        else:
+            continue
+
+        if existing_bbox:
+            existing_distance = _bbox_center_distance(bbox, existing_bbox)
+            score -= min(10.0, existing_distance * 0.015)
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best_index = index
+    return best_index
 
 
 def _refine_asset_bbox(
@@ -668,9 +1111,12 @@ def _save_debug_overlay(image: Image.Image, layout: dict[str, Any], output_path:
             _draw_bbox(draw, message_bbox, "#2F80ED", f"m{index}")
 
         avatar_original = _coerce_bbox(message.get("avatar_bbox_original"), overlay.size)
+        avatar_detected = _coerce_bbox(message.get("avatar_bbox_detected"), overlay.size)
         avatar_refined = _coerce_bbox(message.get("avatar_bbox_refined") or message.get("avatar_bbox"), overlay.size)
         if avatar_original:
             _draw_bbox(draw, avatar_original, "#EB5757", "avatar original")
+        if avatar_detected and avatar_detected != avatar_refined:
+            _draw_bbox(draw, avatar_detected, "#F2C94C", "avatar detected")
         if avatar_refined:
             _draw_bbox(draw, avatar_refined, "#27AE60", "avatar refined")
 
@@ -1012,10 +1458,40 @@ def _intersect_bbox(
     return left, top, right, bottom
 
 
+def _bbox_y_overlap(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> int:
+    return max(0, min(first[3], second[3]) - max(first[1], second[1]))
+
+
+def _bbox_y_matches(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+    *,
+    tolerance: int,
+) -> bool:
+    if _bbox_y_overlap(first, second) > 0:
+        return True
+    first_center_y = (first[1] + first[3]) / 2
+    return second[1] - tolerance <= first_center_y <= second[3] + tolerance
+
+
 def _bbox_area(bbox: tuple[int, int, int, int] | None) -> int:
     if not bbox:
         return 0
     return max(0, bbox[2] - bbox[0]) * max(0, bbox[3] - bbox[1])
+
+
+def _bbox_iou(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> float:
+    intersection = _bbox_area(_intersect_bbox(first, second))
+    if intersection <= 0:
+        return 0.0
+    union = _bbox_area(first) + _bbox_area(second) - intersection
+    return intersection / max(union, 1)
 
 
 def _bbox_center_distance(

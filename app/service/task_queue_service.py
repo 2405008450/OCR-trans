@@ -35,6 +35,7 @@ from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_MODEL,
     execute_pdf2docx_task_from_path,
 )
+from app.service.word_count_service import execute_word_count_task, prepare_word_count_request
 
 
 class TaskCancelledError(Exception):
@@ -69,6 +70,7 @@ class TaskQueueService:
         'business_licence': 2,
         'number_check': 2,
         'zhongfanyi': 2,
+        'word_count': 1,
     }
     SHARED_TASK_GROUPS: Dict[str, str] = {
         'number_check': 'specialist_text',
@@ -550,6 +552,40 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
+    async def submit_word_count_task(
+        self,
+        *,
+        directory_path: str,
+        recursive: bool = True,
+        include_hidden: bool = False,
+        extensions: Optional[list[str]] = None,
+    ) -> TaskSubmitResult:
+        prepared = prepare_word_count_request(
+            directory_path=directory_path,
+            recursive=recursive,
+            include_hidden=include_hidden,
+            extensions=extensions,
+        )
+        params = prepared['params']
+        input_files = prepared['input_files']
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='word_count',
+                filename=prepared['filename'],
+                params=params,
+                staged_uploads=[],
+            )
+            if submit_result.deduped:
+                return submit_result
+            self._update_task_input_files(reserved_task.task_id, input_files)
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
     async def submit_drivers_license_task(self, *, files: list[UploadFile], processing_mode: str) -> TaskSubmitResult:
         display_name = ' | '.join([(file.filename or 'input.bin') for file in files])
         upload_specs = [(f'image{index:02d}', file, f'image_{index}.bin') for index, file in enumerate(files, start=1)]
@@ -650,6 +686,9 @@ class TaskQueueService:
     def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
         if task_type in {'doc_translate', 'business_licence', 'pdf2docx'}:
             return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
+
+        if task_type == 'word_count':
+            return [] if self._get_input_value(input_files, 'directory_path') else ['directory_path']
 
         if task_type == 'drivers_license':
             return [] if (input_files.get('files') or []) else ['files']
@@ -858,6 +897,9 @@ class TaskQueueService:
             elif task_type == 'pdf2docx':
                 result = await self._execute_pdf2docx(task_id, display_no, input_files, params, update)
                 output_path = result.get('output_docx') if result else None
+            elif task_type == 'word_count':
+                result = await self._execute_word_count(task_id, display_no, input_files, params, update)
+                output_path = result.get('report_excel') if result else None
             else:
                 raise ValueError(f'unsupported task type: {task_type}')
             output_files = self._extract_output_files(task_type, result, output_path, filename)
@@ -1003,6 +1045,19 @@ class TaskQueueService:
         await update(5, 'pdf2docx started')
         return await execute_pdf2docx_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', model=params.get('model', PDF2DOCX_DEFAULT_MODEL), gemini_route=params.get('gemini_route', PDF2DOCX_DEFAULT_GEMINI_ROUTE), layout_mode=params.get('layout_mode', PDF2DOCX_DEFAULT_LAYOUT_MODE), progress_callback=update, executor=self._task_executor)
 
+    async def _execute_word_count(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        await update(5, 'word count started')
+        return await execute_word_count_task(
+            task_id=task_id,
+            display_no=display_no,
+            directory_path=input_files['directory_path'],
+            recursive=bool(params.get('recursive', True)),
+            include_hidden=bool(params.get('include_hidden', False)),
+            extensions=params.get('extensions') or None,
+            progress_callback=update,
+            executor=self._task_executor,
+        )
+
     @staticmethod
     def _extract_output_files(task_type: str, result: Optional[Dict[str, Any]], output_path: Optional[str], original_filename: Optional[str] = None) -> list:
         def friendly(real_path: str, fallback_name: Optional[str] = None, fallback_suffix: Optional[str] = None) -> str:
@@ -1069,6 +1124,9 @@ class TaskQueueService:
             add_result('output_docx')
         elif task_type == 'pdf2docx':
             add_result('output_docx')
+        elif task_type == 'word_count':
+            add_result('report_excel', ftype='report')
+            add_result('report_json', ftype='report')
         if not files and output_path:
             files.append({'name': friendly(output_path, original_filename, 'output'), 'path': output_path, 'type': 'output'})
 
