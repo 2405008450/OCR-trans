@@ -64,8 +64,12 @@ services:
       - ./temp_images:/app/temp_images
       - ./businesslicence/uploads:/app/businesslicence/uploads
       - ./businesslicence/outputs:/app/businesslicence/outputs
-      # 字数统计读取局域网共享目录时，先在宿主机挂载 SMB/CIFS，再映射进容器并配置 WORD_COUNT_UNC_MOUNT_MAP_JSON
-      # - /mnt/win-server:/mnt/win-server:ro
+      # 字数统计读取 Windows Server 共享目录：
+      # 1. Linux 宿主机：先把 //win-server/服务器资料7 挂载到 /mnt/win-server/服务器资料7
+      # 2. Windows/Docker Desktop：WORD_COUNT_SHARE7_HOST_PATH 可尝试填写 //win-server/服务器资料7
+      # 3. 容器内固定映射到 /mnt/win-server/服务器资料7，网页仍填写 \\win-server\服务器资料7\...
+      - ${WORD_COUNT_SHARE7_HOST_PATH:-./data/word_count_share/服务器资料7}:/mnt/win-server/服务器资料7:ro
+      - ${WORD_COUNT_SHARE3_HOST_PATH:-./data/word_count_share/服务器资料3}:/mnt/win-server/服务器资料3:ro
     # 如果云服务器有 NVIDIA GPU，取消以下注释：
     # deploy:
     #   resources:

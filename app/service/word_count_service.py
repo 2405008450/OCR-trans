@@ -327,8 +327,9 @@ def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
         candidates = _format_unc_auto_candidates(raw_text)
         suffix = f" 自动尝试过: {candidates}" if candidates else ""
         raise FileNotFoundError(
-            "Docker/Linux 容器不能直接读取 Windows UNC 路径。请把共享目录挂载进容器，"
-            "或配置 WORD_COUNT_UNC_MOUNT_MAP_JSON 将 UNC 映射到容器内路径。"
+            "Docker/Linux 容器不能直接读取 Windows UNC 路径；/mnt 是容器内挂载点，不是 Windows Server 路径。"
+            "请在 docker-compose.yml 中把 Windows Server 共享目录挂载到 /mnt/win-server/服务器资料7，"
+            "或配置 WORD_COUNT_UNC_MOUNT_MAP_JSON 将 UNC 映射到实际容器内路径。"
             f"{suffix}"
         )
 
