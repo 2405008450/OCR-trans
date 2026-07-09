@@ -136,6 +136,7 @@ def get_word_count_config() -> dict[str, Any]:
         "max_files": settings.WORD_COUNT_MAX_FILES,
         "max_file_mb": settings.WORD_COUNT_MAX_FILE_MB,
         "unc_mount_mappings": unc_mount_mappings,
+        "unc_auto_mount_roots": settings.WORD_COUNT_UNC_AUTO_MOUNT_ROOTS,
         "follow_symlinks": settings.WORD_COUNT_FOLLOW_SYMLINKS_ENABLED,
         "allow_local_paths": settings.WORD_COUNT_ALLOW_LOCAL_PATHS_ENABLED,
         "count_policy": "Word 近似口径：中日韩字符逐字计数，拉丁/数字按连续词计数，标点和空白不计。",
@@ -316,16 +317,19 @@ def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
             )
         if not candidate.is_dir():
             raise ValueError(f"路径不是目录: {candidate}（由 {matched_unc} 映射而来）")
-        allowed_root = _match_allowed_root_for_mapped_unc(raw_text, candidate)
+        allowed_root = _match_allowed_root_for_mapped_unc(raw_text, candidate, matched_root)
         if allowed_root is None:
             allowed_text = "；".join(settings.WORD_COUNT_ALLOWED_ROOTS)
             raise PermissionError(f"目录不在允许扫描范围内。允许根目录: {allowed_text}")
         return candidate, allowed_root
 
     if _is_unc_text(raw_text) and os.name != "nt":
+        candidates = _format_unc_auto_candidates(raw_text)
+        suffix = f" 自动尝试过: {candidates}" if candidates else ""
         raise FileNotFoundError(
-            "Docker/Linux 容器不能直接读取 Windows UNC 路径，请配置 "
-            "WORD_COUNT_UNC_MOUNT_MAP_JSON 将共享目录映射到容器内挂载路径。"
+            "Docker/Linux 容器不能直接读取 Windows UNC 路径。请把共享目录挂载进容器，"
+            "或配置 WORD_COUNT_UNC_MOUNT_MAP_JSON 将 UNC 映射到容器内路径。"
+            f"{suffix}"
         )
 
     candidate = Path(raw_text).expanduser().resolve(strict=False)
@@ -361,10 +365,13 @@ def _map_unc_path_to_local(raw_path: str) -> Optional[tuple[Path, Path, str]]:
             continue
         mount_root = Path(mount_path)
         return mount_root.joinpath(*remainder), mount_root, unc_prefix
+    for unc_prefix, mount_root, candidate in _iter_unc_auto_mapping_candidates(raw_unc):
+        if mount_root.exists() or candidate.exists():
+            return candidate, mount_root, unc_prefix
     return None
 
 
-def _match_allowed_root_for_mapped_unc(raw_unc_path: str, candidate: Path) -> Optional[Path]:
+def _match_allowed_root_for_mapped_unc(raw_unc_path: str, candidate: Path, fallback_mapped_root: Optional[Path] = None) -> Optional[Path]:
     raw_unc = _normalize_unc_text(raw_unc_path)
     for raw_root in settings.WORD_COUNT_ALLOWED_ROOTS:
         root_unc = _normalize_unc_text(raw_root)
@@ -372,12 +379,59 @@ def _match_allowed_root_for_mapped_unc(raw_unc_path: str, candidate: Path) -> Op
             mapped_root = _map_unc_path_to_local(root_unc)
             if mapped_root is not None:
                 return mapped_root[0].expanduser().resolve(strict=False)
+            if fallback_mapped_root is not None:
+                return fallback_mapped_root.expanduser().resolve(strict=False)
             return Path(raw_root)
         if not root_unc:
             allowed_root = Path(raw_root).expanduser().resolve(strict=False)
             if _is_relative_to_path(candidate, allowed_root):
                 return allowed_root
     return None
+
+
+def _iter_unc_auto_mapping_candidates(raw_unc: str) -> Iterable[tuple[str, Path, Path]]:
+    parts = _unc_parts_from_text(raw_unc)
+    if len(parts) < 2:
+        return
+    server, share = parts[0], parts[1]
+    remainder = parts[2:]
+    share_unc = _normalize_unc_text(f"\\\\{server}\\{share}\\")
+    server_unc = _normalize_unc_text(f"\\\\{server}\\")
+    for root_text in settings.WORD_COUNT_UNC_AUTO_MOUNT_ROOTS:
+        base = Path(root_text).expanduser()
+        share_mounts = [
+            base / server / share,
+            base / share,
+        ]
+        seen: set[str] = set()
+        for mount_root in share_mounts:
+            key = os.path.normcase(str(mount_root))
+            if key in seen:
+                continue
+            seen.add(key)
+            yield share_unc, mount_root, mount_root.joinpath(*remainder)
+        server_mount = base / server
+        server_key = os.path.normcase(str(server_mount))
+        if server_key not in seen:
+            yield server_unc, server_mount, server_mount.joinpath(share, *remainder)
+
+
+def _format_unc_auto_candidates(raw_path: str, limit: int = 8) -> str:
+    raw_unc = _normalize_unc_text(raw_path)
+    if not raw_unc:
+        return ""
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for _, _, candidate in _iter_unc_auto_mapping_candidates(raw_unc):
+        text = str(candidate)
+        key = os.path.normcase(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(text)
+        if len(candidates) >= limit:
+            break
+    return "；".join(candidates)
 
 
 def _is_relative_to_path(candidate: Path, root: Path) -> bool:

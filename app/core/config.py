@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     TASK_QUEUE_TYPE_LIMITS_JSON: str = os.getenv("TASK_QUEUE_TYPE_LIMITS_JSON", "")
     WORD_COUNT_ALLOWED_ROOTS_JSON: str = os.getenv("WORD_COUNT_ALLOWED_ROOTS_JSON", "")
     WORD_COUNT_UNC_MOUNT_MAP_JSON: str = os.getenv("WORD_COUNT_UNC_MOUNT_MAP_JSON", "")
+    WORD_COUNT_UNC_AUTO_MOUNT_ROOTS_JSON: str = os.getenv(
+        "WORD_COUNT_UNC_AUTO_MOUNT_ROOTS_JSON",
+        '["/mnt","/media","/shares","/srv","/data","/app/data","/app/mnt","/app"]',
+    )
     WORD_COUNT_ALLOW_LOCAL_PATHS: str = os.getenv("WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
     WORD_COUNT_MAX_FILES: int = int(os.getenv("WORD_COUNT_MAX_FILES", "5000"))
     WORD_COUNT_MAX_FILE_MB: int = int(os.getenv("WORD_COUNT_MAX_FILE_MB", "200"))
@@ -151,6 +155,21 @@ class Settings(BaseSettings):
             if unc_text and mount_text:
                 mappings[unc_text] = mount_text
         return mappings
+
+    @property
+    def WORD_COUNT_UNC_AUTO_MOUNT_ROOTS(self) -> list[str]:
+        raw = (self.WORD_COUNT_UNC_AUTO_MOUNT_ROOTS_JSON or "").strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, str):
+            parsed = [parsed]
+        if not isinstance(parsed, list):
+            return []
+        return [str(item).strip() for item in parsed if str(item).strip()]
 
     @property
     def WORD_COUNT_FOLLOW_SYMLINKS_ENABLED(self) -> bool:
