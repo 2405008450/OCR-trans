@@ -312,9 +312,7 @@ def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
         candidate = candidate.expanduser().resolve(strict=False)
         matched_root = matched_root.expanduser().resolve(strict=False)
         if not candidate.exists():
-            raise FileNotFoundError(
-                f"目录不存在: {candidate}（由 {matched_unc} 映射而来；请确认 Docker 已挂载局域网共享目录）"
-            )
+            raise FileNotFoundError(_build_mapped_path_missing_message(candidate, matched_root, matched_unc))
         if not candidate.is_dir():
             raise ValueError(f"路径不是目录: {candidate}（由 {matched_unc} 映射而来）")
         allowed_root = _match_allowed_root_for_mapped_unc(raw_text, candidate, matched_root)
@@ -370,6 +368,50 @@ def _map_unc_path_to_local(raw_path: str) -> Optional[tuple[Path, Path, str]]:
         if mount_root.exists() or candidate.exists():
             return candidate, mount_root, unc_prefix
     return None
+
+
+def _build_mapped_path_missing_message(candidate: Path, matched_root: Path, matched_unc: str) -> str:
+    base = f"目录不存在: {candidate}（由 {matched_unc} 映射而来）。"
+    if not matched_root.exists():
+        return (
+            f"{base} 容器内共享根目录也不存在: {matched_root}。"
+            "这表示 Docker 还没有把 Windows Server 共享目录挂载进容器；请检查 docker-compose 的 volume 或宿主机 CIFS 挂载。"
+        )
+    if not matched_root.is_dir():
+        return (
+            f"{base} 容器内共享根路径存在但不是目录: {matched_root}。"
+            "请检查 volume 目标路径是否被文件占用。"
+        )
+
+    nearest = _nearest_existing_parent(candidate, stop_at=matched_root)
+    entries = _sample_directory_entries(nearest)
+    entry_text = "、".join(entries) if entries else "未看到任何条目"
+    return (
+        f"{base} 容器内共享根目录存在: {matched_root}；最近存在的父目录: {nearest}；"
+        f"该目录下可见条目: {entry_text}。"
+        "如果这里是空的或不是 Windows Server 上的内容，说明 Docker 当前挂载到了本地空目录，"
+        "而不是 \\\\win-server\\服务器资料7。请检查 WORD_COUNT_SHARE7_HOST_PATH 或宿主机 CIFS 挂载。"
+    )
+
+
+def _nearest_existing_parent(path: Path, *, stop_at: Path) -> Path:
+    current = path
+    stop_text = os.path.normcase(str(stop_at.resolve(strict=False)))
+    while not current.exists() and current != current.parent:
+        current = current.parent
+        current_text = os.path.normcase(str(current.resolve(strict=False)))
+        if current_text == stop_text:
+            break
+    return current
+
+
+def _sample_directory_entries(path: Path, limit: int = 8) -> list[str]:
+    try:
+        if not path.is_dir():
+            return []
+        return sorted(item.name for item in path.iterdir())[:limit]
+    except OSError:
+        return []
 
 
 def _match_allowed_root_for_mapped_unc(raw_unc_path: str, candidate: Path, fallback_mapped_root: Optional[Path] = None) -> Optional[Path]:
