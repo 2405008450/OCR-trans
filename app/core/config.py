@@ -3,9 +3,10 @@ import os
 from pathlib import Path
 
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values, load_dotenv
 except ImportError:
     load_dotenv = None
+    dotenv_values = None
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,9 +26,36 @@ except ImportError:
 
 _ROOT_DIR = Path(__file__).resolve().parents[2]
 _ENV_FILE = _ROOT_DIR / ".env"
+_PROXY_ENV_KEYS = {
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+}
+
+
+def _apply_dotenv_proxy_overrides(env_file: Path) -> None:
+    if not dotenv_values:
+        return
+    values = dotenv_values(env_file)
+    for key, value in values.items():
+        if key not in _PROXY_ENV_KEYS:
+            continue
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            os.environ[key] = text
+        else:
+            os.environ.pop(key, None)
 
 if load_dotenv and _ENV_FILE.exists():
     load_dotenv(_ENV_FILE, override=False)
+    _apply_dotenv_proxy_overrides(_ENV_FILE)
 
 
 class Settings(BaseSettings):
