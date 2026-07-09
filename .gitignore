@@ -62,3 +62,5 @@ Driver's_License/.cache/
 businesslicence/outputs/*
 !businesslicence/outputs/.gitkeep
 *.tar
+
+tmp/
