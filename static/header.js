@@ -21,6 +21,7 @@
         { href: '/number-check', icon: 'fa-check-double', text: '数字专检' },
         { href: '/alignment', icon: 'fa-object-group', text: '多语对照' },
         { href: '/zhongfanyi', icon: 'fa-spell-check', text: '中翻专检' },
+        { href: '/word-count', icon: 'fa-calculator', text: '\u5b57\u6570\u7edf\u8ba1' },
     ];
     const navActiveAliases = {
         '/certificate-translation': ['/certificate-translation', '/doc-translate', '/drivers-license', '/business-licence'],
