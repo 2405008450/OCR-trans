@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     TASK_QUEUE_CANDIDATE_BATCH_SIZE: int = int(os.getenv("TASK_QUEUE_CANDIDATE_BATCH_SIZE", "20"))
     TASK_QUEUE_TYPE_LIMITS_JSON: str = os.getenv("TASK_QUEUE_TYPE_LIMITS_JSON", "")
     WORD_COUNT_ALLOWED_ROOTS_JSON: str = os.getenv("WORD_COUNT_ALLOWED_ROOTS_JSON", "")
+    WORD_COUNT_UNC_MOUNT_MAP_JSON: str = os.getenv("WORD_COUNT_UNC_MOUNT_MAP_JSON", "")
     WORD_COUNT_ALLOW_LOCAL_PATHS: str = os.getenv("WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
     WORD_COUNT_MAX_FILES: int = int(os.getenv("WORD_COUNT_MAX_FILES", "5000"))
     WORD_COUNT_MAX_FILE_MB: int = int(os.getenv("WORD_COUNT_MAX_FILE_MB", "200"))
@@ -123,6 +124,33 @@ class Settings(BaseSettings):
             return [str(_ROOT_DIR)]
         roots = [str(item).strip() for item in parsed if str(item).strip()]
         return roots or [str(_ROOT_DIR)]
+
+    @property
+    def WORD_COUNT_UNC_MOUNT_MAP(self) -> dict[str, str]:
+        raw = (self.WORD_COUNT_UNC_MOUNT_MAP_JSON or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        mappings: dict[str, str] = {}
+        if isinstance(parsed, dict):
+            items = parsed.items()
+        elif isinstance(parsed, list):
+            items = (
+                (item.get("unc") or item.get("source") or item.get("from"), item.get("mount") or item.get("target") or item.get("to"))
+                for item in parsed
+                if isinstance(item, dict)
+            )
+        else:
+            return {}
+        for unc_path, mount_path in items:
+            unc_text = str(unc_path or "").strip()
+            mount_text = str(mount_path or "").strip()
+            if unc_text and mount_text:
+                mappings[unc_text] = mount_text
+        return mappings
 
     @property
     def WORD_COUNT_FOLLOW_SYMLINKS_ENABLED(self) -> bool:

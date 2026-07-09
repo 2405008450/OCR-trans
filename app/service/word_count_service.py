@@ -101,14 +101,25 @@ def get_word_count_config() -> dict[str, Any]:
     allowed_roots = []
     for raw_root in settings.WORD_COUNT_ALLOWED_ROOTS:
         root = Path(raw_root).expanduser()
+        mapped_root = _map_unc_path_to_local(str(raw_root))
+        mapped_path = mapped_root[0] if mapped_root is not None else None
         scope_only = _is_unc_server_root(root) and not root.exists()
+        exists = mapped_path.exists() if mapped_path is not None else root.exists() or scope_only
         allowed_roots.append(
             {
                 "path": str(root),
-                "exists": root.exists() or scope_only,
+                "exists": exists,
                 "scope_only": scope_only,
+                "mount_path": str(mapped_path) if mapped_path is not None else "",
             }
         )
+    unc_mount_mappings = [
+        {
+            "unc": _normalize_unc_text(unc_path) or unc_path,
+            "mount": mount_path,
+        }
+        for unc_path, mount_path in settings.WORD_COUNT_UNC_MOUNT_MAP.items()
+    ]
     if settings.WORD_COUNT_ALLOW_LOCAL_PATHS_ENABLED:
         allowed_roots.append(
             {
@@ -124,6 +135,7 @@ def get_word_count_config() -> dict[str, Any]:
         "default_extensions": DEFAULT_SCAN_EXTENSIONS,
         "max_files": settings.WORD_COUNT_MAX_FILES,
         "max_file_mb": settings.WORD_COUNT_MAX_FILE_MB,
+        "unc_mount_mappings": unc_mount_mappings,
         "follow_symlinks": settings.WORD_COUNT_FOLLOW_SYMLINKS_ENABLED,
         "allow_local_paths": settings.WORD_COUNT_ALLOW_LOCAL_PATHS_ENABLED,
         "count_policy": "Word 近似口径：中日韩字符逐字计数，拉丁/数字按连续词计数，标点和空白不计。",
@@ -289,9 +301,34 @@ def _report(callback: Optional[Callable[[int, str], None]], progress: int, messa
 
 
 def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
-    if not str(raw_path or "").strip():
+    raw_text = str(raw_path or "").strip()
+    if not raw_text:
         raise ValueError("目录路径不能为空")
-    candidate = Path(str(raw_path).strip()).expanduser().resolve(strict=False)
+
+    mapped = _map_unc_path_to_local(raw_text)
+    if mapped is not None:
+        candidate, matched_root, matched_unc = mapped
+        candidate = candidate.expanduser().resolve(strict=False)
+        matched_root = matched_root.expanduser().resolve(strict=False)
+        if not candidate.exists():
+            raise FileNotFoundError(
+                f"目录不存在: {candidate}（由 {matched_unc} 映射而来；请确认 Docker 已挂载局域网共享目录）"
+            )
+        if not candidate.is_dir():
+            raise ValueError(f"路径不是目录: {candidate}（由 {matched_unc} 映射而来）")
+        allowed_root = _match_allowed_root_for_mapped_unc(raw_text, candidate)
+        if allowed_root is None:
+            allowed_text = "；".join(settings.WORD_COUNT_ALLOWED_ROOTS)
+            raise PermissionError(f"目录不在允许扫描范围内。允许根目录: {allowed_text}")
+        return candidate, allowed_root
+
+    if _is_unc_text(raw_text) and os.name != "nt":
+        raise FileNotFoundError(
+            "Docker/Linux 容器不能直接读取 Windows UNC 路径，请配置 "
+            "WORD_COUNT_UNC_MOUNT_MAP_JSON 将共享目录映射到容器内挂载路径。"
+        )
+
+    candidate = Path(raw_text).expanduser().resolve(strict=False)
     if not candidate.exists():
         raise FileNotFoundError(f"目录不存在: {candidate}")
     if not candidate.is_dir():
@@ -306,6 +343,41 @@ def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
             return candidate, allowed_root
     allowed_text = "；".join(settings.WORD_COUNT_ALLOWED_ROOTS)
     raise PermissionError(f"目录不在允许扫描范围内。允许根目录: {allowed_text}")
+
+
+def _map_unc_path_to_local(raw_path: str) -> Optional[tuple[Path, Path, str]]:
+    raw_unc = _normalize_unc_text(raw_path)
+    if not raw_unc:
+        return None
+    mappings = []
+    for unc_path, mount_path in settings.WORD_COUNT_UNC_MOUNT_MAP.items():
+        normalized = _normalize_unc_text(unc_path)
+        if normalized:
+            mappings.append((normalized, str(mount_path)))
+    mappings.sort(key=lambda item: len(_unc_parts_from_text(item[0])), reverse=True)
+    for unc_prefix, mount_path in mappings:
+        remainder = _unc_relative_parts(raw_unc, unc_prefix)
+        if remainder is None:
+            continue
+        mount_root = Path(mount_path)
+        return mount_root.joinpath(*remainder), mount_root, unc_prefix
+    return None
+
+
+def _match_allowed_root_for_mapped_unc(raw_unc_path: str, candidate: Path) -> Optional[Path]:
+    raw_unc = _normalize_unc_text(raw_unc_path)
+    for raw_root in settings.WORD_COUNT_ALLOWED_ROOTS:
+        root_unc = _normalize_unc_text(raw_root)
+        if root_unc and raw_unc and _unc_relative_parts(raw_unc, root_unc) is not None:
+            mapped_root = _map_unc_path_to_local(root_unc)
+            if mapped_root is not None:
+                return mapped_root[0].expanduser().resolve(strict=False)
+            return Path(raw_root)
+        if not root_unc:
+            allowed_root = Path(raw_root).expanduser().resolve(strict=False)
+            if _is_relative_to_path(candidate, allowed_root):
+                return allowed_root
+    return None
 
 
 def _is_relative_to_path(candidate: Path, root: Path) -> bool:
@@ -336,7 +408,7 @@ def _local_path_root(path: Path) -> Path:
 
 
 def _is_unc_path(path: Path) -> bool:
-    return str(path).replace("/", "\\").startswith("\\\\")
+    return _is_unc_text(str(path))
 
 
 def _is_unc_server_root(path: Path) -> bool:
@@ -349,10 +421,40 @@ def _unc_server_name(path: Path) -> Optional[str]:
 
 
 def _unc_parts(path: Path) -> list[str]:
-    text = str(path).replace("/", "\\")
+    return _unc_parts_from_text(str(path))
+
+
+def _is_unc_text(value: str) -> bool:
+    return str(value or "").strip().replace("/", "\\").startswith("\\\\")
+
+
+def _normalize_unc_text(value: str) -> str:
+    text = str(value or "").strip().replace("/", "\\")
+    if not text.startswith("\\\\"):
+        return ""
+    parts = _unc_parts_from_text(text)
+    if not parts:
+        return ""
+    return "\\\\" + "\\".join(parts) + "\\"
+
+
+def _unc_parts_from_text(value: str) -> list[str]:
+    text = str(value or "").strip().replace("/", "\\")
     if not text.startswith("\\\\"):
         return []
     return [part for part in text.strip("\\").split("\\") if part]
+
+
+def _unc_relative_parts(candidate_unc: str, root_unc: str) -> Optional[list[str]]:
+    candidate_parts = _unc_parts_from_text(candidate_unc)
+    root_parts = _unc_parts_from_text(root_unc)
+    if not candidate_parts or not root_parts or len(candidate_parts) < len(root_parts):
+        return None
+    candidate_head = [part.lower() for part in candidate_parts[: len(root_parts)]]
+    root_head = [part.lower() for part in root_parts]
+    if candidate_head != root_head:
+        return None
+    return candidate_parts[len(root_parts):]
 
 
 def _iter_candidate_files(

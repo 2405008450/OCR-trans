@@ -44,7 +44,8 @@ function renderConfig(config) {
         const scopeOnly = Boolean(item.scope_only);
         const icon = scopeOnly ? 'fa-circle-info' : (item.exists ? 'fa-circle-check' : 'fa-triangle-exclamation');
         const color = scopeOnly ? 'var(--cyan)' : (item.exists ? 'var(--green)' : 'var(--amber)');
-        const label = scopeOnly ? `${item.path}（白名单前缀）` : item.path;
+        const labelBase = scopeOnly ? `${item.path}（白名单前缀）` : item.path;
+        const label = item.mount_path ? `${labelBase} -> ${item.mount_path}` : labelBase;
         return `<div class="root-item"><i class="fas ${icon}" style="color:${color}"></i><span title="${escAttr(label)}">${escHtml(label)}</span></div>`;
       }).join('')
     : '<div class="root-item"><i class="fas fa-triangle-exclamation" style="color:var(--amber)"></i><span>未读取到允许根目录</span></div>';
