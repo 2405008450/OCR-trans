@@ -22,6 +22,7 @@ const fileStatusText = {
 function init() {
   document.getElementById('submitBtn').addEventListener('click', submitTask);
   document.getElementById('resetBtn').addEventListener('click', resetPage);
+  initTooltips();
   loadConfig();
 }
 
@@ -159,6 +160,9 @@ function renderResult(result, task) {
   document.getElementById('mainWords').textContent = formatNumber(summary.total_main_word_count);
   document.getElementById('extraWords').textContent = formatNumber(summary.total_extra_word_count);
   document.getElementById('countedFiles').textContent = formatNumber(summary.counted_files);
+  document.getElementById('cjkWords').textContent = formatNumber(cjkCandidateCount(summary));
+  document.getElementById('latinWords').textContent = formatNumber(summary.total_billable_latin_count);
+  document.getElementById('numberTokens').textContent = formatNumber(summary.total_number_token_count);
   const issueCount = Number(summary.failed_files || 0)
     + Number(summary.skipped_files || 0)
     + Number(summary.needs_ocr_files || 0)
@@ -185,7 +189,7 @@ function renderDownloads(result, task) {
 function renderFiles(files) {
   const tbody = document.getElementById('fileRows');
   if (!files.length) {
-    tbody.innerHTML = '<tr><td colspan="5"><div class="empty">暂无文件明细</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty">暂无文件明细</div></td></tr>';
     return;
   }
   const visible = files.slice(0, 200);
@@ -197,6 +201,9 @@ function renderFiles(files) {
       <td title="${escAttr(item.file_path || '')}">${escHtml(item.relative_path || item.filename || '-')}</td>
       <td><span class="badge ${escAttr(status)}">${escHtml(statusLabel)}</span></td>
       <td>${formatNumber(item.main_word_count)}</td>
+      <td>${formatNumber(cjkCandidateCount(item))}</td>
+      <td>${formatNumber(item.billable_latin_count)}</td>
+      <td>${formatNumber(item.number_token_count)}</td>
       <td>${formatNumber(item.extra_word_count)}</td>
       <td>${escHtml(message)}</td>
     </tr>`;
@@ -216,17 +223,101 @@ function resetPage() {
   document.getElementById('hiddenInput').checked = false;
   document.getElementById('taskIdText').textContent = '';
   document.getElementById('downloadArea').style.display = 'none';
-  document.getElementById('fileRows').innerHTML = '<tr><td colspan="5"><div class="empty">暂无结果</div></td></tr>';
+  document.getElementById('fileRows').innerHTML = '<tr><td colspan="8"><div class="empty">暂无结果</div></td></tr>';
   document.getElementById('mainWords').textContent = '0';
   document.getElementById('extraWords').textContent = '0';
   document.getElementById('countedFiles').textContent = '0';
   document.getElementById('issueFiles').textContent = '0';
+  document.getElementById('cjkWords').textContent = '0';
+  document.getElementById('latinWords').textContent = '0';
+  document.getElementById('numberTokens').textContent = '0';
   document.getElementById('submitBtn').disabled = false;
   setStatus({ status: '', progress: 0, message: '等待提交' });
 }
 
+function cjkCandidateCount(source) {
+  const nested = (source && source.script_counts) || {};
+  const han = numberValue(nested.han_count ?? source?.han_count ?? source?.total_han_count);
+  const kana = numberValue(nested.kana_count ?? source?.kana_count ?? source?.total_kana_count);
+  const hangul = numberValue(nested.hangul_count ?? source?.hangul_count ?? source?.total_hangul_count);
+  const punct = numberValue(nested.cjk_punct_count ?? source?.cjk_punct_count ?? source?.total_cjk_punct_count);
+  const scriptTotal = han + kana + hangul + punct;
+  if (scriptTotal > 0) {
+    return scriptTotal;
+  }
+  return Math.max(
+    numberValue(source?.billable_chinese_count ?? source?.total_billable_chinese_count),
+    numberValue(source?.billable_japanese_count ?? source?.total_billable_japanese_count),
+    numberValue(source?.billable_korean_count ?? source?.total_billable_korean_count),
+  );
+}
+
 function formatNumber(value) {
-  return Number(value || 0).toLocaleString();
+  return numberValue(value).toLocaleString();
+}
+
+function numberValue(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function initTooltips() {
+  let activeTarget = null;
+  const tooltip = document.createElement('div');
+  tooltip.className = 'tooltip-layer';
+  document.body.appendChild(tooltip);
+
+  const show = (target) => {
+    const text = target?.getAttribute('data-tooltip') || '';
+    if (!text) return;
+    activeTarget = target;
+    tooltip.textContent = text;
+    tooltip.classList.add('visible');
+    positionTooltip(target, tooltip);
+  };
+
+  const hide = (target) => {
+    if (target && activeTarget && target !== activeTarget) return;
+    activeTarget = null;
+    tooltip.classList.remove('visible');
+  };
+
+  document.addEventListener('mouseover', (event) => {
+    const target = event.target.closest?.('.hint-popover');
+    if (target) show(target);
+  });
+  document.addEventListener('mouseout', (event) => {
+    const target = event.target.closest?.('.hint-popover');
+    if (target && !target.contains(event.relatedTarget)) hide(target);
+  });
+  document.addEventListener('focusin', (event) => {
+    const target = event.target.closest?.('.hint-popover');
+    if (target) show(target);
+  });
+  document.addEventListener('focusout', (event) => {
+    const target = event.target.closest?.('.hint-popover');
+    if (target) hide(target);
+  });
+  window.addEventListener('resize', () => {
+    if (activeTarget) positionTooltip(activeTarget, tooltip);
+  });
+  window.addEventListener('scroll', () => {
+    if (activeTarget) positionTooltip(activeTarget, tooltip);
+  }, true);
+}
+
+function positionTooltip(target, tooltip) {
+  const rect = target.getBoundingClientRect();
+  const margin = 12;
+  const maxLeft = window.innerWidth - tooltip.offsetWidth - margin;
+  const left = Math.max(margin, Math.min(rect.left + rect.width / 2 - tooltip.offsetWidth / 2, maxLeft));
+  const below = rect.bottom + 10;
+  const above = rect.top - tooltip.offsetHeight - 10;
+  const top = below + tooltip.offsetHeight + margin <= window.innerHeight
+    ? below
+    : Math.max(margin, above);
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
 }
 
 function escHtml(value) {

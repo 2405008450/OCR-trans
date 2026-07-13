@@ -41,6 +41,62 @@ STATUS_FAILED = "failed"
 
 EXTRA_SOURCE_TYPES = {"header", "footer", "footnote", "endnote", "chart", "comment"}
 
+SCRIPT_COUNT_FIELDS = (
+    "han_count",
+    "kana_count",
+    "hangul_count",
+    "latin_word_count",
+    "number_token_count",
+    "mixed_latin_number_count",
+    "cyrillic_word_count",
+    "arabic_word_count",
+    "greek_word_count",
+    "hebrew_word_count",
+    "thai_word_count",
+    "cjk_punct_count",
+    "other_count",
+)
+
+QUOTE_COUNT_FIELDS = (
+    "billable_chinese_count",
+    "billable_japanese_count",
+    "billable_korean_count",
+    "billable_latin_count",
+    "billable_cyrillic_count",
+    "billable_arabic_count",
+    "billable_greek_count",
+    "billable_hebrew_count",
+    "billable_thai_count",
+)
+
+SCRIPT_COUNT_LABELS = {
+    "han_count": "汉字",
+    "kana_count": "假名",
+    "hangul_count": "韩文",
+    "latin_word_count": "拉丁词",
+    "number_token_count": "纯数字",
+    "mixed_latin_number_count": "拉丁数字混合词",
+    "cyrillic_word_count": "西里尔词",
+    "arabic_word_count": "阿拉伯字母词",
+    "greek_word_count": "希腊字母词",
+    "hebrew_word_count": "希伯来字母词",
+    "thai_word_count": "泰文词",
+    "cjk_punct_count": "CJK 标点",
+    "other_count": "其他",
+}
+
+QUOTE_COUNT_LABELS = {
+    "billable_chinese_count": "中文候选",
+    "billable_japanese_count": "日语候选",
+    "billable_korean_count": "韩语候选",
+    "billable_latin_count": "拉丁系候选",
+    "billable_cyrillic_count": "西里尔候选",
+    "billable_arabic_count": "阿语候选",
+    "billable_greek_count": "希腊语候选",
+    "billable_hebrew_count": "希伯来语候选",
+    "billable_thai_count": "泰语候选",
+}
+
 NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -58,6 +114,65 @@ class TextMetrics:
     word_count: int
     non_space_chars: int
     raw_chars: int
+    han_count: int = 0
+    kana_count: int = 0
+    hangul_count: int = 0
+    latin_word_count: int = 0
+    number_token_count: int = 0
+    mixed_latin_number_count: int = 0
+    cyrillic_word_count: int = 0
+    arabic_word_count: int = 0
+    greek_word_count: int = 0
+    hebrew_word_count: int = 0
+    thai_word_count: int = 0
+    cjk_punct_count: int = 0
+    other_count: int = 0
+
+    @property
+    def script_count_total(self) -> int:
+        return sum(int(getattr(self, field, 0)) for field in SCRIPT_COUNT_FIELDS)
+
+    @property
+    def billable_chinese_count(self) -> int:
+        return self.han_count + self.cjk_punct_count
+
+    @property
+    def billable_japanese_count(self) -> int:
+        return self.han_count + self.kana_count + self.cjk_punct_count
+
+    @property
+    def billable_korean_count(self) -> int:
+        return self.hangul_count + self.cjk_punct_count
+
+    @property
+    def billable_latin_count(self) -> int:
+        return self.latin_word_count + self.mixed_latin_number_count
+
+    @property
+    def billable_cyrillic_count(self) -> int:
+        return self.cyrillic_word_count
+
+    @property
+    def billable_arabic_count(self) -> int:
+        return self.arabic_word_count
+
+    @property
+    def billable_greek_count(self) -> int:
+        return self.greek_word_count
+
+    @property
+    def billable_hebrew_count(self) -> int:
+        return self.hebrew_word_count
+
+    @property
+    def billable_thai_count(self) -> int:
+        return self.thai_word_count
+
+    def script_counts(self) -> dict[str, int]:
+        return {field: int(getattr(self, field, 0)) for field in SCRIPT_COUNT_FIELDS}
+
+    def quote_counts(self) -> dict[str, int]:
+        return {field: int(getattr(self, field, 0)) for field in QUOTE_COUNT_FIELDS}
 
 
 @dataclass(frozen=True)
@@ -139,7 +254,12 @@ def get_word_count_config() -> dict[str, Any]:
         "unc_auto_mount_roots": settings.WORD_COUNT_UNC_AUTO_MOUNT_ROOTS,
         "follow_symlinks": settings.WORD_COUNT_FOLLOW_SYMLINKS_ENABLED,
         "allow_local_paths": settings.WORD_COUNT_ALLOW_LOCAL_PATHS_ENABLED,
-        "count_policy": "Word 近似口径：中日韩字符逐字计数，拉丁/数字按连续词计数，标点和空白不计。",
+        "count_policy": (
+            "Word 近似口径：汉字/假名/韩文逐字计数，拉丁/数字等按连续词计数，"
+            "部分 CJK 标点计数，空白不计；新增脚本分桶为互斥口径，脚本桶合计等于总字数。"
+        ),
+        "script_count_labels": SCRIPT_COUNT_LABELS,
+        "quote_count_labels": QUOTE_COUNT_LABELS,
     }
 
 
@@ -150,10 +270,11 @@ def prepare_word_count_request(
     include_hidden: bool = False,
     extensions: Optional[Iterable[str]] = None,
 ) -> dict[str, Any]:
-    resolved_dir, matched_root = _resolve_allowed_directory(directory_path)
+    input_path, matched_root, input_kind = _resolve_allowed_input_path(directory_path)
     normalized_extensions = normalize_scan_extensions(extensions)
     params = {
-        "directory_path": str(resolved_dir),
+        "directory_path": str(input_path),
+        "input_kind": input_kind,
         "recursive": bool(recursive),
         "include_hidden": bool(include_hidden),
         "extensions": normalized_extensions,
@@ -162,10 +283,11 @@ def prepare_word_count_request(
         "follow_symlinks": settings.WORD_COUNT_FOLLOW_SYMLINKS_ENABLED,
     }
     return {
-        "filename": str(resolved_dir),
+        "filename": str(input_path),
         "params": params,
         "input_files": {
-            "directory_path": str(resolved_dir),
+            "directory_path": str(input_path),
+            "input_kind": input_kind,
             "allowed_root": str(matched_root),
         },
     }
@@ -217,15 +339,20 @@ def run_word_count_task_sync(
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict[str, Any]:
     started_at = datetime.now()
-    root, matched_root = _resolve_allowed_directory(directory_path)
+    input_path, matched_root, input_kind = _resolve_allowed_input_path(directory_path)
     scan_extensions = set(normalize_scan_extensions(extensions))
     output_dir = Path(settings.OUTPUT_DIR) / "word_count" / (display_no or task_id)
     output_dir.mkdir(parents=True, exist_ok=True)
     converted_dir = output_dir / "converted_inputs"
     converted_dir.mkdir(parents=True, exist_ok=True)
 
-    _report(progress_callback, 5, "正在扫描目录...")
-    candidates = list(_iter_candidate_files(root, recursive, include_hidden, scan_extensions))
+    _report(progress_callback, 5, "正在扫描文件..." if input_kind == "file" else "正在扫描目录...")
+    if input_kind == "file":
+        candidates = [input_path] if input_path.suffix.lower() in scan_extensions else []
+        relative_root = input_path.parent
+    else:
+        candidates = list(_iter_candidate_files(input_path, recursive, include_hidden, scan_extensions))
+        relative_root = input_path
     max_files = max(1, int(settings.WORD_COUNT_MAX_FILES or 5000))
     truncated = len(candidates) > max_files
     if truncated:
@@ -244,7 +371,7 @@ def run_word_count_task_sync(
         _report(progress_callback, min(progress, 80), f"正在统计 {index}/{total}: {file_path.name}")
         result, rows = _count_single_file(
             file_path=file_path,
-            root=root,
+            root=relative_root,
             converted_dir=converted_dir,
             max_bytes=max_bytes,
         )
@@ -254,7 +381,9 @@ def run_word_count_task_sync(
     summary = _build_summary(file_results, truncated=truncated, started_at=started_at)
     report_payload = {
         "task_id": task_id,
-        "directory_path": str(root),
+        "directory_path": str(input_path),
+        "input_path": str(input_path),
+        "input_kind": input_kind,
         "allowed_root": str(matched_root),
         "recursive": bool(recursive),
         "include_hidden": bool(include_hidden),
@@ -265,6 +394,9 @@ def run_word_count_task_sync(
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "rules": [
             "主统计采用 Word 近似口径，不保证与 Word COM 组件 100% 一致。",
+            "脚本分桶采用互斥口径：汉字、假名、韩文、拉丁词、纯数字等分桶合计等于主字数。",
+            "报价候选字段用于按源语取列；中文候选与日语候选都可能包含同一批汉字，不能把所有候选列相加。",
+            "纯数字 token 默认单独列出，不并入拉丁系候选；如报价规则要求数字计费，可与源语候选相加。",
             "Word 主数计入正文、正文表格和正文文本框；页眉页脚、脚注尾注、图表文字、批注列为额外内容。",
             "页数和行数采用快速近似口径：Word 优先读取文档属性，PDF/PPT 使用实际页数或幻灯片数，Excel 页数按工作表数近似。",
             "图片数量统计嵌入图片出现次数，用于后续 OCR 流程线索；含图片的可编辑 Office 文件仍保持已统计。",
@@ -287,7 +419,9 @@ def run_word_count_task_sync(
     report_payload["report_excel"] = _output_web_path(excel_path)
     report_payload["summary_text"] = (
         f"已统计 {summary['counted_files']} 个文件，主字数 {summary['total_main_word_count']}，"
-        f"额外内容字数 {summary['total_extra_word_count']}。"
+        f"额外内容字数 {summary['total_extra_word_count']}；"
+        f"中文候选 {summary.get('total_billable_chinese_count', 0)}，"
+        f"拉丁系候选 {summary.get('total_billable_latin_count', 0)}。"
     )
     return report_payload
 
@@ -302,9 +436,16 @@ def _report(callback: Optional[Callable[[int, str], None]], progress: int, messa
 
 
 def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
+    candidate, allowed_root, input_kind = _resolve_allowed_input_path(raw_path)
+    if input_kind != "directory":
+        raise ValueError(f"路径不是目录: {candidate}")
+    return candidate, allowed_root
+
+
+def _resolve_allowed_input_path(raw_path: str) -> tuple[Path, Path, str]:
     raw_text = str(raw_path or "").strip()
     if not raw_text:
-        raise ValueError("目录路径不能为空")
+        raise ValueError("路径不能为空")
 
     mapped = _map_unc_path_to_local(raw_text)
     if mapped is not None:
@@ -313,13 +454,14 @@ def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
         matched_root = matched_root.expanduser().resolve(strict=False)
         if not candidate.exists():
             raise FileNotFoundError(_build_mapped_path_missing_message(candidate, matched_root, matched_unc))
-        if not candidate.is_dir():
-            raise ValueError(f"路径不是目录: {candidate}（由 {matched_unc} 映射而来）")
+        input_kind = _input_kind(candidate)
+        if not input_kind:
+            raise ValueError(f"路径不是文件或目录: {candidate}（由 {matched_unc} 映射而来）")
         allowed_root = _match_allowed_root_for_mapped_unc(raw_text, candidate, matched_root)
         if allowed_root is None:
             allowed_text = "；".join(settings.WORD_COUNT_ALLOWED_ROOTS)
-            raise PermissionError(f"目录不在允许扫描范围内。允许根目录: {allowed_text}")
-        return candidate, allowed_root
+            raise PermissionError(f"路径不在允许扫描范围内。允许根目录: {allowed_text}")
+        return candidate, allowed_root, input_kind
 
     if _is_unc_text(raw_text) and os.name != "nt":
         candidates = _format_unc_auto_candidates(raw_text)
@@ -333,19 +475,28 @@ def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
 
     candidate = Path(raw_text).expanduser().resolve(strict=False)
     if not candidate.exists():
-        raise FileNotFoundError(f"目录不存在: {candidate}")
-    if not candidate.is_dir():
-        raise ValueError(f"路径不是目录: {candidate}")
+        raise FileNotFoundError(f"路径不存在: {candidate}")
+    input_kind = _input_kind(candidate)
+    if not input_kind:
+        raise ValueError(f"路径不是文件或目录: {candidate}")
 
     if settings.WORD_COUNT_ALLOW_LOCAL_PATHS_ENABLED and _is_local_absolute_path(candidate):
-        return candidate, _local_path_root(candidate)
+        return candidate, _local_path_root(candidate), input_kind
 
     for raw_root in settings.WORD_COUNT_ALLOWED_ROOTS:
         allowed_root = Path(raw_root).expanduser().resolve(strict=False)
         if _is_relative_to_path(candidate, allowed_root):
-            return candidate, allowed_root
+            return candidate, allowed_root, input_kind
     allowed_text = "；".join(settings.WORD_COUNT_ALLOWED_ROOTS)
-    raise PermissionError(f"目录不在允许扫描范围内。允许根目录: {allowed_text}")
+    raise PermissionError(f"路径不在允许扫描范围内。允许根目录: {allowed_text}")
+
+
+def _input_kind(path: Path) -> str:
+    if path.is_dir():
+        return "directory"
+    if path.is_file():
+        return "file"
+    return ""
 
 
 def _map_unc_path_to_local(raw_path: str) -> Optional[tuple[Path, Path, str]]:
@@ -673,6 +824,9 @@ def _count_single_file(
         "extra_non_space_chars": 0,
         "extra_raw_chars": 0,
     }
+    for field in SCRIPT_COUNT_FIELDS:
+        totals[f"main_{field}"] = 0
+        totals[f"extra_{field}"] = 0
     source_counter: Counter[str] = Counter()
     for item in items:
         metrics = _count_text(item.text)
@@ -680,11 +834,17 @@ def _count_single_file(
             totals["extra_word_count"] += metrics.word_count
             totals["extra_non_space_chars"] += metrics.non_space_chars
             totals["extra_raw_chars"] += metrics.raw_chars
+            for field in SCRIPT_COUNT_FIELDS:
+                totals[f"extra_{field}"] += int(getattr(metrics, field, 0))
         else:
             totals["main_word_count"] += metrics.word_count
             totals["main_non_space_chars"] += metrics.non_space_chars
             totals["main_raw_chars"] += metrics.raw_chars
+            for field in SCRIPT_COUNT_FIELDS:
+                totals[f"main_{field}"] += int(getattr(metrics, field, 0))
         source_counter[item.source_type] += 1
+        item_script_counts = metrics.script_counts()
+        item_quote_counts = metrics.quote_counts()
         source_rows.append(
             {
                 "file_path": str(file_path),
@@ -698,15 +858,25 @@ def _count_single_file(
                 "raw_chars": metrics.raw_chars,
                 "char_count_no_spaces": metrics.non_space_chars,
                 "char_count_with_spaces": metrics.raw_chars,
+                "script_counts": item_script_counts,
+                "quote_counts": item_quote_counts,
+                "script_count_total": metrics.script_count_total,
                 "paragraph_count": item.paragraph_count,
                 "line_count": item.line_count,
                 "image_count": item.image_count,
                 "text_preview": _preview_text(item.text),
+                **item_script_counts,
+                **item_quote_counts,
             }
         )
 
     if not items:
         warning = "未提取到文本"
+
+    main_script_counts = {field: int(totals.get(f"main_{field}") or 0) for field in SCRIPT_COUNT_FIELDS}
+    extra_script_counts = {field: int(totals.get(f"extra_{field}") or 0) for field in SCRIPT_COUNT_FIELDS}
+    main_quote_counts = _quote_counts_from_script_counts(main_script_counts)
+    extra_quote_counts = _quote_counts_from_script_counts(extra_script_counts)
 
     base.update(
         status=STATUS_COUNTED,
@@ -719,6 +889,12 @@ def _count_single_file(
         raw_chars=totals["main_raw_chars"],
         extra_non_space_chars=totals["extra_non_space_chars"],
         extra_raw_chars=totals["extra_raw_chars"],
+        script_counts=main_script_counts,
+        quote_counts=main_quote_counts,
+        extra_script_counts=extra_script_counts,
+        extra_quote_counts=extra_quote_counts,
+        script_count_total=sum(main_script_counts.values()),
+        extra_script_count_total=sum(extra_script_counts.values()),
         page_count=extracted.page_count,
         paragraph_count=extracted.paragraph_count,
         line_count=extracted.line_count,
@@ -729,6 +905,10 @@ def _count_single_file(
         warning=warning,
         message="统计完成",
         counted_at=_now_iso(),
+        **main_script_counts,
+        **main_quote_counts,
+        **{f"extra_{field}": value for field, value in extra_script_counts.items()},
+        **{f"extra_{field}": value for field, value in extra_quote_counts.items()},
     )
     return base, source_rows
 
@@ -743,6 +923,8 @@ def _base_file_result(
     modified_at: str = "",
     error: str = "",
 ) -> dict[str, Any]:
+    script_counts = {field: 0 for field in SCRIPT_COUNT_FIELDS}
+    quote_counts = _quote_counts_from_script_counts(script_counts)
     return {
         "file_path": str(file_path),
         "relative_path": relative_path,
@@ -760,6 +942,12 @@ def _base_file_result(
         "raw_chars": 0,
         "extra_non_space_chars": 0,
         "extra_raw_chars": 0,
+        "script_counts": script_counts,
+        "quote_counts": quote_counts,
+        "extra_script_counts": dict(script_counts),
+        "extra_quote_counts": dict(quote_counts),
+        "script_count_total": 0,
+        "extra_script_count_total": 0,
         "page_count": 0,
         "paragraph_count": 0,
         "line_count": 0,
@@ -771,6 +959,10 @@ def _base_file_result(
         "source_counts": {},
         "warning": "",
         "error": error,
+        **script_counts,
+        **quote_counts,
+        **{f"extra_{field}": 0 for field in SCRIPT_COUNT_FIELDS},
+        **{f"extra_{field}": 0 for field in QUOTE_COUNT_FIELDS},
     }
 
 
@@ -1216,10 +1408,10 @@ def _append_docx_paragraph_items(items: list[TextItem], paragraph, source_type: 
 
 
 def _append_docx_table_items(items: list[TextItem], table) -> None:
-    for row in table.iter(_qn("w:tr")):
+    for row in table.findall("w:tr", NS):
         row_texts: list[str] = []
         textbox_texts: list[str] = []
-        for cell in row.iter(_qn("w:tc")):
+        for cell in row.findall("w:tc", NS):
             text = _extract_text_from_element(cell, skip_textboxes=True)
             if text.strip():
                 row_texts.append(text)
@@ -1467,36 +1659,80 @@ def _stat_method_for_extension(extension: str) -> str:
 
 
 def _count_text(text: str) -> TextMetrics:
-    word_count = 0
-    in_token = False
     content = text or ""
-    for index, char in enumerate(content):
-        if _is_cjk(char):
-            word_count += 1
-            in_token = False
+    counts = {field: 0 for field in SCRIPT_COUNT_FIELDS}
+    index = 0
+    while index < len(content):
+        char = content[index]
+        cjk_field = _cjk_script_field(char)
+        if cjk_field:
+            counts[cjk_field] += 1
+            index += 1
             continue
         if _is_token_char(char):
-            if not in_token:
-                word_count += 1
-                in_token = True
-            continue
-        if char in {"'", "’", "-", "_", ".", "/"} and in_token:
+            token, index = _consume_word_like_token(content, index)
+            counts[_token_count_field(token)] += 1
             continue
         previous_char = content[index - 1] if index > 0 else ""
         next_char = content[index + 1] if index + 1 < len(content) else ""
         if _is_word_count_cjk_punctuation(char, previous_char, next_char):
-            word_count += 1
-            in_token = False
+            counts["cjk_punct_count"] += 1
+            index += 1
             continue
-        in_token = False
+        index += 1
+    word_count = sum(counts.values())
     return TextMetrics(
         word_count=word_count,
         non_space_chars=sum(1 for char in text or "" if not char.isspace()),
         raw_chars=len(text or ""),
+        **counts,
     )
 
 
+def _quote_counts_from_script_counts(script_counts: dict[str, int]) -> dict[str, int]:
+    counts = {field: int(script_counts.get(field) or 0) for field in SCRIPT_COUNT_FIELDS}
+    return {
+        "billable_chinese_count": counts["han_count"] + counts["cjk_punct_count"],
+        "billable_japanese_count": counts["han_count"] + counts["kana_count"] + counts["cjk_punct_count"],
+        "billable_korean_count": counts["hangul_count"] + counts["cjk_punct_count"],
+        "billable_latin_count": counts["latin_word_count"] + counts["mixed_latin_number_count"],
+        "billable_cyrillic_count": counts["cyrillic_word_count"],
+        "billable_arabic_count": counts["arabic_word_count"],
+        "billable_greek_count": counts["greek_word_count"],
+        "billable_hebrew_count": counts["hebrew_word_count"],
+        "billable_thai_count": counts["thai_word_count"],
+    }
+
+
+def _consume_word_like_token(text: str, start: int) -> tuple[str, int]:
+    index = start
+    while index < len(text):
+        char = text[index]
+        if _is_token_char(char):
+            index += 1
+            continue
+        if char in {"'", "’", "-", "_", ".", "/"}:
+            index += 1
+            continue
+        break
+    return text[start:index], index
+
+
+def _cjk_script_field(char: str) -> str:
+    if _is_han(char):
+        return "han_count"
+    if _is_kana(char):
+        return "kana_count"
+    if _is_hangul(char):
+        return "hangul_count"
+    return ""
+
+
 def _is_cjk(char: str) -> bool:
+    return bool(_cjk_script_field(char))
+
+
+def _is_han(char: str) -> bool:
     if not char or len(char) != 1:
         return False
     code = ord(char)
@@ -1504,8 +1740,37 @@ def _is_cjk(char: str) -> bool:
         0x3400 <= code <= 0x4DBF
         or 0x4E00 <= code <= 0x9FFF
         or 0xF900 <= code <= 0xFAFF
-        or 0x3040 <= code <= 0x30FF
+        or 0x20000 <= code <= 0x2A6DF
+        or 0x2A700 <= code <= 0x2B73F
+        or 0x2B740 <= code <= 0x2B81F
+        or 0x2B820 <= code <= 0x2CEAF
+        or 0x2CEB0 <= code <= 0x2EBEF
+        or 0x2F800 <= code <= 0x2FA1F
+        or 0x30000 <= code <= 0x3134F
+    )
+
+
+def _is_kana(char: str) -> bool:
+    if not char or len(char) != 1:
+        return False
+    code = ord(char)
+    return (
+        0x3040 <= code <= 0x30FF
+        or 0x31F0 <= code <= 0x31FF
+        or 0xFF66 <= code <= 0xFF9D
+    )
+
+
+def _is_hangul(char: str) -> bool:
+    if not char or len(char) != 1:
+        return False
+    code = ord(char)
+    return (
+        0x1100 <= code <= 0x11FF
+        or 0x3130 <= code <= 0x318F
+        or 0xA960 <= code <= 0xA97F
         or 0xAC00 <= code <= 0xD7AF
+        or 0xD7B0 <= code <= 0xD7FF
     )
 
 
@@ -1514,6 +1779,54 @@ def _is_token_char(char: str) -> bool:
         return False
     category = unicodedata.category(char)
     return category[0] in {"L", "N"}
+
+
+def _token_count_field(token: str) -> str:
+    letter_scripts: set[str] = set()
+    has_number = False
+    for char in token:
+        if not _is_token_char(char):
+            continue
+        category = unicodedata.category(char)
+        if category[0] == "N":
+            has_number = True
+            continue
+        letter_scripts.add(_letter_script(char))
+
+    if not letter_scripts and has_number:
+        return "number_token_count"
+    if len(letter_scripts) == 1:
+        script = next(iter(letter_scripts))
+        if script == "latin":
+            return "mixed_latin_number_count" if has_number else "latin_word_count"
+        script_field = {
+            "cyrillic": "cyrillic_word_count",
+            "arabic": "arabic_word_count",
+            "greek": "greek_word_count",
+            "hebrew": "hebrew_word_count",
+            "thai": "thai_word_count",
+        }.get(script)
+        if script_field:
+            return script_field
+    return "other_count"
+
+
+def _letter_script(char: str) -> str:
+    code = ord(char)
+    name = unicodedata.name(char, "")
+    if "LATIN" in name:
+        return "latin"
+    if "CYRILLIC" in name:
+        return "cyrillic"
+    if "ARABIC" in name or 0x0600 <= code <= 0x06FF or 0x0750 <= code <= 0x077F or 0x08A0 <= code <= 0x08FF:
+        return "arabic"
+    if "GREEK" in name:
+        return "greek"
+    if "HEBREW" in name:
+        return "hebrew"
+    if 0x0E00 <= code <= 0x0E7F:
+        return "thai"
+    return "other"
 
 
 def _is_word_count_cjk_punctuation(char: str, previous_char: str = "", next_char: str = "") -> bool:
@@ -1542,7 +1855,7 @@ def _is_word_count_cjk_punctuation(char: str, previous_char: str = "", next_char
 
 def _build_summary(file_results: list[dict[str, Any]], *, truncated: bool, started_at: datetime) -> dict[str, Any]:
     status_counts = Counter(item.get("status") for item in file_results)
-    return {
+    summary = {
         "total_files": len(file_results),
         "counted_files": status_counts.get(STATUS_COUNTED, 0),
         "failed_files": status_counts.get(STATUS_FAILED, 0),
@@ -1564,6 +1877,29 @@ def _build_summary(file_results: list[dict[str, Any]], *, truncated: bool, start
         "started_at": started_at.isoformat(timespec="seconds"),
         "finished_at": datetime.now().isoformat(timespec="seconds"),
     }
+    main_script_counts = {
+        field: sum(int(item.get(field) or 0) for item in file_results)
+        for field in SCRIPT_COUNT_FIELDS
+    }
+    extra_script_counts = {
+        field: sum(int(item.get(f"extra_{field}") or 0) for item in file_results)
+        for field in SCRIPT_COUNT_FIELDS
+    }
+    main_quote_counts = _quote_counts_from_script_counts(main_script_counts)
+    extra_quote_counts = _quote_counts_from_script_counts(extra_script_counts)
+    summary.update(
+        script_counts=main_script_counts,
+        quote_counts=main_quote_counts,
+        extra_script_counts=extra_script_counts,
+        extra_quote_counts=extra_quote_counts,
+        script_count_total=sum(main_script_counts.values()),
+        extra_script_count_total=sum(extra_script_counts.values()),
+    )
+    summary.update({f"total_{field}": value for field, value in main_script_counts.items()})
+    summary.update({f"total_{field}": value for field, value in main_quote_counts.items()})
+    summary.update({f"total_extra_{field}": value for field, value in extra_script_counts.items()})
+    summary.update({f"total_extra_{field}": value for field, value in extra_quote_counts.items()})
+    return summary
 
 
 def _write_excel_report(path: Path, payload: dict[str, Any]) -> None:
@@ -1599,11 +1935,19 @@ def _autosize(sheet) -> None:
 
 def _write_summary_sheet(sheet, payload: dict[str, Any]) -> None:
     summary = payload.get("summary") or {}
+    input_kind = "单文件" if payload.get("input_kind") == "file" else "目录"
     rows = [
-        ("统计目录", payload.get("directory_path", "")),
+        ("统计类型", input_kind),
+        ("统计路径", payload.get("input_path") or payload.get("directory_path", "")),
         ("允许根目录", payload.get("allowed_root", "")),
         ("主字数合计", summary.get("total_main_word_count", 0)),
         ("额外内容字数合计", summary.get("total_extra_word_count", 0)),
+        ("中文候选字数", summary.get("total_billable_chinese_count", 0)),
+        ("日语候选字数", summary.get("total_billable_japanese_count", 0)),
+        ("韩语候选字数", summary.get("total_billable_korean_count", 0)),
+        ("拉丁系候选词数", summary.get("total_billable_latin_count", 0)),
+        ("纯数字 token", summary.get("total_number_token_count", 0)),
+        ("脚本桶合计", summary.get("script_count_total", 0)),
         ("字符数(不计空格)合计", summary.get("total_char_count_no_spaces", summary.get("total_non_space_chars", 0))),
         ("字符数(计空格)合计", summary.get("total_char_count_with_spaces", summary.get("total_raw_chars", 0))),
         ("页数合计", summary.get("total_page_count", 0)),
@@ -1619,6 +1963,10 @@ def _write_summary_sheet(sheet, payload: dict[str, Any]) -> None:
         ("是否截断", "是" if summary.get("truncated") else "否"),
         ("生成时间", payload.get("generated_at", "")),
     ]
+    rows.extend(
+        (f"脚本明细：{SCRIPT_COUNT_LABELS.get(field, field)}", summary.get(f"total_{field}", 0))
+        for field in SCRIPT_COUNT_FIELDS
+    )
     sheet.append(["项目", "值"])
     for row in rows:
         sheet.append(list(row))
@@ -1632,6 +1980,12 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
         "页数",
         "字数",
         "额外字数",
+        "中文候选",
+        "日语候选",
+        "韩语候选",
+        "拉丁系候选",
+        "纯数字",
+        "脚本桶合计",
         "字符数(不计空格)",
         "字符数(计空格)",
         "段落数",
@@ -1649,6 +2003,7 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
         "警告",
         "错误",
     ]
+    headers.extend(SCRIPT_COUNT_LABELS[field] for field in SCRIPT_COUNT_FIELDS)
     sheet.append(headers)
     for item in files:
         sheet.append(
@@ -1657,6 +2012,12 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
                 item.get("page_count", 0),
                 item.get("word_count", item.get("main_word_count", 0)),
                 item.get("extra_word_count", 0),
+                item.get("billable_chinese_count", 0),
+                item.get("billable_japanese_count", 0),
+                item.get("billable_korean_count", 0),
+                item.get("billable_latin_count", 0),
+                item.get("number_token_count", 0),
+                item.get("script_count_total", 0),
                 item.get("char_count_no_spaces", item.get("non_space_chars", 0)),
                 item.get("char_count_with_spaces", item.get("raw_chars", 0)),
                 item.get("paragraph_count", 0),
@@ -1674,6 +2035,7 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
                 item.get("warning", ""),
                 item.get("error", ""),
             ]
+            + [item.get(field, 0) for field in SCRIPT_COUNT_FIELDS]
         )
     _style_header(sheet)
     _autosize(sheet)
@@ -1687,6 +2049,12 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
         "来源标签",
         "是否额外内容",
         "字数",
+        "中文候选",
+        "日语候选",
+        "韩语候选",
+        "拉丁系候选",
+        "纯数字",
+        "脚本桶合计",
         "字符数(不计空格)",
         "字符数(计空格)",
         "段落数",
@@ -1694,6 +2062,7 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
         "图片数量",
         "文本预览",
     ]
+    headers.extend(SCRIPT_COUNT_LABELS[field] for field in SCRIPT_COUNT_FIELDS)
     sheet.append(headers)
     for row in rows:
         sheet.append(
@@ -1704,6 +2073,12 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
                 row.get("source_label", ""),
                 "是" if row.get("is_extra") else "否",
                 row.get("word_count", 0),
+                row.get("billable_chinese_count", 0),
+                row.get("billable_japanese_count", 0),
+                row.get("billable_korean_count", 0),
+                row.get("billable_latin_count", 0),
+                row.get("number_token_count", 0),
+                row.get("script_count_total", 0),
                 row.get("char_count_no_spaces", row.get("non_space_chars", 0)),
                 row.get("char_count_with_spaces", row.get("raw_chars", 0)),
                 row.get("paragraph_count", 0),
@@ -1711,6 +2086,7 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
                 row.get("image_count", 0),
                 row.get("text_preview", ""),
             ]
+            + [row.get(field, 0) for field in SCRIPT_COUNT_FIELDS]
         )
     _style_header(sheet)
     _autosize(sheet)

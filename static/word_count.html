@@ -239,8 +239,18 @@
             min-width: 0;
         }
 
+        .metric.primary {
+            grid-column: span 2;
+            padding: 18px;
+            border-color: rgba(56, 189, 248, 0.52);
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(34, 197, 94, 0.1));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 34px rgba(0, 0, 0, 0.18);
+        }
+
         .metric small {
-            display: block;
+            display: flex;
+            align-items: center;
+            gap: 6px;
             margin-bottom: 8px;
             color: var(--muted);
             font-size: 12px;
@@ -252,8 +262,13 @@
             font-size: 24px;
         }
 
+        .metric.primary strong {
+            font-size: 38px;
+            line-height: 1;
+        }
+
         .table-wrap {
-            overflow-x: auto;
+            overflow: hidden;
             border: 1px solid var(--line);
             border-radius: 8px;
         }
@@ -261,15 +276,17 @@
         table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 760px;
-            font-size: 13px;
+            table-layout: fixed;
+            font-size: 12px;
         }
 
         th, td {
-            padding: 11px 12px;
+            padding: 11px 10px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             text-align: left;
             vertical-align: top;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         th {
@@ -278,15 +295,24 @@
             font-size: 12px;
         }
 
+        .file-col { width: 35%; }
+        .status-col { width: 8%; }
+        .count-col { width: 7%; }
+        .wide-count-col { width: 12%; }
+        .extra-col { width: 9%; }
+        .info-col { width: 10%; }
+
         .column-head {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            white-space: nowrap;
+            flex-wrap: wrap;
+            white-space: normal;
         }
 
         .hint-popover {
             position: relative;
+            flex: 0 0 auto;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -304,31 +330,10 @@
             font-size: 11px;
         }
 
-        .hint-popover::before,
-        .hint-popover::after {
-            position: absolute;
-            left: 50%;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.16s ease, transform 0.16s ease;
-            z-index: 20;
-        }
-
-        .hint-popover::before {
-            content: "";
-            top: calc(100% + 3px);
-            width: 9px;
-            height: 9px;
-            border-left: 1px solid rgba(148, 163, 184, 0.28);
-            border-top: 1px solid rgba(148, 163, 184, 0.28);
-            background: #0f172a;
-            transform: translateX(-50%) translateY(-3px) rotate(45deg);
-        }
-
-        .hint-popover::after {
-            content: attr(data-tooltip);
-            top: calc(100% + 8px);
-            width: min(320px, calc(100vw - 40px));
+        .tooltip-layer {
+            position: fixed;
+            z-index: 60;
+            max-width: min(320px, calc(100vw - 40px));
             padding: 10px 12px;
             border: 1px solid rgba(148, 163, 184, 0.28);
             border-radius: 8px;
@@ -338,21 +343,15 @@
             font-size: 12px;
             font-weight: 500;
             line-height: 1.6;
-            white-space: normal;
-            transform: translateX(-50%) translateY(-3px);
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(-4px);
+            transition: opacity 0.16s ease, transform 0.16s ease;
         }
 
-        .hint-popover:hover::before,
-        .hint-popover:hover::after,
-        .hint-popover:focus::before,
-        .hint-popover:focus::after {
+        .tooltip-layer.visible {
             opacity: 1;
-            transform: translateX(-50%) translateY(0) rotate(45deg);
-        }
-
-        .hint-popover:hover::after,
-        .hint-popover:focus::after {
-            transform: translateX(-50%) translateY(0);
+            transform: translateY(0);
         }
 
         td {
@@ -403,6 +402,10 @@
             .metric-grid {
                 grid-template-columns: 1fr;
             }
+
+            .metric.primary {
+                grid-column: span 1;
+            }
         }
     </style>
 </head>
@@ -411,7 +414,7 @@
         <div class="title-row">
             <div>
                 <h1>字数统计</h1>
-                <p class="subtitle">递归扫描服务器可访问目录，生成可下载的 Excel 与 JSON 统计报告。</p>
+                <p class="subtitle">统计服务器可访问目录或单个文件，生成可下载的 Excel 与 JSON 统计报告。</p>
             </div>
             <a class="download-link secondary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
         </div>
@@ -423,8 +426,8 @@
                 </div>
                 <div class="panel-body">
                     <div class="field">
-                        <label for="directoryPath">目录路径</label>
-                        <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\ 或 \\win-server\" />
+                        <label for="directoryPath">目录或文件路径</label>
+                        <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\ 或 \\win-server\服务器资料7\客户\文件.docx" />
                     </div>
 
                     <div class="field">
@@ -461,21 +464,45 @@
                     </div>
 
                     <div class="metric-grid">
-                        <div class="metric"><small>主字数</small><strong id="mainWords">0</strong></div>
-                        <div class="metric"><small>额外内容字数</small><strong id="extraWords">0</strong></div>
+                        <div class="metric primary"><small>主字数</small><strong id="mainWords">0</strong></div>
+                        <div class="metric">
+                            <small>
+                                <span>额外内容字数</span>
+                                <span class="hint-popover" tabindex="0" aria-label="额外字数说明" data-tooltip="额外字数来自 Word 文档中可提取但不并入主字数的区域，例如页眉、页脚、脚注、尾注、批注、图表或图形文字等；正文表格和正文普通文本框仍计入主字数。">
+                                    <i class="fas fa-circle-info" aria-hidden="true"></i>
+                                </span>
+                            </small>
+                            <strong id="extraWords">0</strong>
+                        </div>
                         <div class="metric"><small>已统计文件</small><strong id="countedFiles">0</strong></div>
                         <div class="metric"><small>需处理/失败</small><strong id="issueFiles">0</strong></div>
+                        <div class="metric"><small>中日韩语系候选</small><strong id="cjkWords">0</strong></div>
+                        <div class="metric"><small>拉丁系候选</small><strong id="latinWords">0</strong></div>
+                        <div class="metric"><small>纯数字 token</small><strong id="numberTokens">0</strong></div>
                     </div>
 
                     <div id="downloadArea" class="button-row" style="display:none"></div>
 
                     <div class="table-wrap" style="margin-top:18px">
                         <table>
+                            <colgroup>
+                                <col class="file-col">
+                                <col class="status-col">
+                                <col class="count-col">
+                                <col class="wide-count-col">
+                                <col class="wide-count-col">
+                                <col class="count-col">
+                                <col class="extra-col">
+                                <col class="info-col">
+                            </colgroup>
                             <thead>
                                 <tr>
                                     <th>文件</th>
                                     <th>状态</th>
                                     <th>主字数</th>
+                                    <th>中日韩语系候选</th>
+                                    <th>拉丁系候选</th>
+                                    <th>纯数字</th>
                                     <th>
                                         <span class="column-head">
                                             额外字数
@@ -488,7 +515,7 @@
                                 </tr>
                             </thead>
                             <tbody id="fileRows">
-                                <tr><td colspan="5"><div class="empty">暂无结果</div></td></tr>
+                                <tr><td colspan="8"><div class="empty">暂无结果</div></td></tr>
                             </tbody>
                         </table>
                     </div>

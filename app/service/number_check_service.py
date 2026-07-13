@@ -31,7 +31,7 @@ _task_progress: Dict[str, Dict[str, Any]] = {}
 _specialist_import_lock = threading.Lock()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NUMBER_CHECK_LATEST_ROOT = REPO_ROOT / "专检" / "数检_程序-AI"
+NUMBER_CHECK_LATEST_ROOT = REPO_ROOT / "专检" / "数检_程序-AIV2"
 NUMBER_CHECK_MAIN_FILE = NUMBER_CHECK_LATEST_ROOT / "main.py"
 
 NUMBER_CHECK_MODE_ALIGNMENT = "alignment"
@@ -301,6 +301,7 @@ def _set_llm_env(model_name: str) -> str:
 
 
 def _clear_specialist_module_cache() -> None:
+    specialist_parent = (REPO_ROOT / "专检").resolve()
     names = {
         "_number_check_ai_main",
         "main",
@@ -327,7 +328,16 @@ def _clear_specialist_module_cache() -> None:
         "num_checker",
     }
     for key in list(sys.modules.keys()):
-        if key in names or any(key.startswith(f"{name}.") for name in names):
+        module = sys.modules.get(key)
+        module_file = getattr(module, "__file__", None)
+        is_specialist_module = False
+        if module_file:
+            try:
+                Path(module_file).resolve().relative_to(specialist_parent)
+                is_specialist_module = True
+            except (OSError, ValueError):
+                pass
+        if is_specialist_module or key in names or any(key.startswith(f"{name}.") for name in names):
             del sys.modules[key]
 
 

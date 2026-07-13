@@ -32,15 +32,23 @@ RELEASE_NOTES = [
     "4月28日_增加通用证件翻译70+语种，记忆增加dsv4p模型",
     "5月22日_去掉弃用模块，优化跳转动画，添加异常标记入口"
 ]
-GLOBAL_NAV_ITEMS = [
+PRIMARY_NAV_ITEMS = [
     ("/", "fa-home", "首页"),
     ("/dashboard", "fa-gauge-high", "工作台"),
-    ("/certificate-translation", "fa-id-card", "证件翻译聚合"),
-    ("/pdf2docx", "fa-file-word", "不可编辑预处理"),
-    ("/number-check", "fa-check-double", "数字专检"),
-    ("/alignment", "fa-object-group", "多语对照"),
-    ("/zhongfanyi", "fa-spell-check", "中翻专检"),
-    ("/word-count", "fa-calculator", "字数统计"),
+]
+TOOL_NAV_GROUPS = [
+    ("翻译与识别", "fa-language", [
+        ("/certificate-translation", "fa-id-card", "证件翻译", "驾驶证、营业执照及通用证件"),
+        ("/alignment", "fa-object-group", "多语对照", "原译文对齐与语料沉淀"),
+    ]),
+    ("转换与处理", "fa-shuffle", [
+        ("/pdf2docx", "fa-file-word", "文档预处理", "PDF / 图片转可编辑 Word"),
+        ("/word-count", "fa-calculator", "字数统计", "批量扫描并生成统计报告"),
+    ]),
+    ("检查与校对", "fa-shield-halved", [
+        ("/number-check", "fa-check-double", "数字专检", "双语文档数字一致性检查"),
+        ("/zhongfanyi", "fa-spell-check", "中翻专检", "规则与 AI 联合审校"),
+    ]),
 ]
 NAV_ACTIVE_ALIASES = {
     "/certificate-translation": (
@@ -109,11 +117,12 @@ APP_SHELL_BOOTSTRAP = f"""
         display: flex !important;
         justify-content: space-between !important;
         align-items: center !important;
-        flex-wrap: wrap !important;
+        flex-wrap: nowrap !important;
         gap: 16px !important;
         margin-bottom: 18px !important;
         padding-bottom: 18px !important;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+        position: relative;
     }}
     .unified-global-topbar .brand {{
         display: inline-flex;
@@ -122,8 +131,8 @@ APP_SHELL_BOOTSTRAP = f"""
     }}
     .unified-top-nav {{
         display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
+        align-items: center;
+        gap: 10px;
     }}
     .unified-top-nav a {{
         display: inline-flex;
@@ -147,6 +156,112 @@ APP_SHELL_BOOTSTRAP = f"""
         background: rgba(56, 189, 248, 0.16);
         border-color: rgba(56, 189, 248, 0.4);
         color: #fff;
+    }}
+    .tool-menu {{
+        position: relative;
+    }}
+    .tool-menu summary {{
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 42px;
+        padding: 0 16px;
+        border-radius: 999px;
+        border: 1px solid rgba(56, 189, 248, 0.28);
+        background: rgba(56, 189, 248, 0.1);
+        color: #e0f2fe;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        list-style: none;
+        user-select: none;
+        white-space: nowrap;
+    }}
+    .tool-menu summary::-webkit-details-marker {{
+        display: none;
+    }}
+    .tool-menu summary::after {{
+        content: '\\f078';
+        font-family: "Font Awesome 6 Free";
+        font-size: 11px;
+        font-weight: 900;
+        transition: transform 0.18s ease;
+    }}
+    .tool-menu[open] summary,
+    .tool-menu.is-active summary {{
+        border-color: rgba(56, 189, 248, 0.58);
+        background: rgba(56, 189, 248, 0.18);
+        color: #fff;
+    }}
+    .tool-menu[open] summary::after {{
+        transform: rotate(180deg);
+    }}
+    .tool-menu-panel {{
+        position: absolute;
+        top: calc(100% + 12px);
+        right: 0;
+        z-index: 80;
+        width: min(760px, calc(100vw - 32px));
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        padding: 14px;
+        border: 1px solid rgba(125, 211, 252, 0.2);
+        border-radius: 22px;
+        background: rgba(7, 19, 34, 0.98);
+        box-shadow: 0 28px 80px rgba(2, 8, 23, 0.56);
+        backdrop-filter: blur(22px);
+    }}
+    .tool-menu-group {{
+        min-width: 0;
+        padding: 8px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.025);
+    }}
+    .tool-menu-title {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px 10px;
+        color: #7dd3fc;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+    }}
+    .unified-top-nav .tool-menu-link {{
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        min-height: 64px;
+        padding: 10px;
+        border: 0;
+        border-radius: 13px;
+        background: transparent;
+    }}
+    .tool-menu-link > i {{
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        background: rgba(56, 189, 248, 0.1);
+        color: #7dd3fc;
+    }}
+    .tool-menu-link strong,
+    .tool-menu-link small {{
+        display: block;
+    }}
+    .tool-menu-link strong {{
+        margin-bottom: 4px;
+        color: #f8fafc;
+        font-size: 14px;
+    }}
+    .tool-menu-link small {{
+        overflow: hidden;
+        color: rgba(226, 232, 240, 0.62);
+        font-size: 11px;
+        line-height: 1.4;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }}
     .page-hero-header {{
         color: #fff;
@@ -370,6 +485,41 @@ APP_SHELL_BOOTSTRAP = f"""
             width: min(calc(100% - 20px), 1280px);
             margin: 18px auto 16px;
         }}
+        .unified-global-topbar {{
+            align-items: flex-start !important;
+            flex-wrap: wrap !important;
+        }}
+        .unified-global-topbar .brand {{
+            flex: 1 1 100%;
+        }}
+        .unified-top-nav {{
+            display: grid;
+            grid-template-columns: 1fr 1fr 1.35fr;
+            width: 100%;
+        }}
+        .unified-top-nav > a {{
+            justify-content: center;
+            min-width: 0;
+            padding: 0 10px;
+        }}
+        .tool-menu {{
+            width: 100%;
+        }}
+        .tool-menu summary {{
+            justify-content: center;
+            width: 100%;
+            padding: 0 10px;
+        }}
+        .tool-menu-panel {{
+            position: fixed;
+            top: 132px;
+            right: 10px;
+            left: 10px;
+            width: auto;
+            grid-template-columns: 1fr;
+            max-height: min(66vh, 520px);
+            overflow-y: auto;
+        }}
         .shell-refresh-notice {{
             border-radius: 16px;
             padding: 14px 14px 14px 16px;
@@ -499,15 +649,36 @@ def _inject_app_shell_bootstrap(html: str) -> str:
 
 
 def _build_app_shell_markup(current_path: str) -> str:
-    nav_html = []
-    for href, icon, text in GLOBAL_NAV_ITEMS:
+    primary_nav_html = []
+    for href, icon, text in PRIMARY_NAV_ITEMS:
         active_prefixes = NAV_ACTIVE_ALIASES.get(href, (href,))
         is_active = any(
             current_path == prefix or (prefix != "/" and current_path.startswith(f"{prefix}/"))
             for prefix in active_prefixes
         )
         active_class = " active" if is_active else ""
-        nav_html.append(f'<a href="{href}" class="{active_class.strip()}"><i class="fas {icon}"></i> {text}</a>')
+        primary_nav_html.append(f'<a href="{href}" class="{active_class.strip()}"><i class="fas {icon}"></i> {text}</a>')
+
+    tool_groups_html = []
+    tool_menu_active = False
+    for group_name, group_icon, items in TOOL_NAV_GROUPS:
+        item_html = []
+        for href, icon, text, description in items:
+            active_prefixes = NAV_ACTIVE_ALIASES.get(href, (href,))
+            is_active = any(
+                current_path == prefix or (prefix != "/" and current_path.startswith(f"{prefix}/"))
+                for prefix in active_prefixes
+            )
+            tool_menu_active = tool_menu_active or is_active
+            active_class = " active" if is_active else ""
+            item_html.append(
+                f'<a href="{href}" class="tool-menu-link{active_class}">'
+                f'<i class="fas {icon}"></i><span><strong>{text}</strong><small>{description}</small></span></a>'
+            )
+        tool_groups_html.append(
+            f'<section class="tool-menu-group"><div class="tool-menu-title">'
+            f'<i class="fas {group_icon}"></i>{group_name}</div>{"".join(item_html)}</section>'
+        )
 
     release_note_items = "".join(f"<li>{item}</li>" for item in RELEASE_NOTES)
 
@@ -522,7 +693,11 @@ def _build_app_shell_markup(current_path: str) -> str:
                 <div style="font-weight: 700; font-size: 17px; color: #fff;">文档处理工作台</div>
             </div>
             <nav class="unified-top-nav">
-                {"".join(nav_html)}
+                {"".join(primary_nav_html)}
+                <details class="tool-menu{' is-active' if tool_menu_active else ''}">
+                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>6</span></summary>
+                    <div class="tool-menu-panel">{"".join(tool_groups_html)}</div>
+                </details>
             </nav>
         </header>
         <section class="shell-refresh-notice">

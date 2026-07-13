@@ -68,8 +68,8 @@
 
         .hero {
             border: 1px solid var(--line);
-            border-radius: 28px;
-            padding: 34px;
+            border-radius: 24px;
+            padding: 30px;
             background: linear-gradient(145deg, rgba(9, 22, 38, 0.94), rgba(15, 35, 58, 0.88));
             box-shadow: var(--shadow);
             margin-bottom: 24px;
@@ -77,9 +77,9 @@
 
         .hero-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.9fr);
-            gap: 22px;
-            align-items: end;
+            grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+            gap: 28px;
+            align-items: center;
         }
 
         .eyebrow {
@@ -97,8 +97,9 @@
 
         h1 {
             margin: 0;
-            font-size: clamp(36px, 7vw, 62px);
-            line-height: 1.04;
+            max-width: 720px;
+            font-size: clamp(34px, 5vw, 52px);
+            line-height: 1.08;
             letter-spacing: -0.04em;
         }
 
@@ -142,7 +143,7 @@
         .hero-panel {
             border: 1px solid var(--line);
             border-radius: 22px;
-            padding: 22px;
+            padding: 18px;
             background: rgba(255, 255, 255, 0.05);
         }
 
@@ -158,11 +159,24 @@
 
         .signal-item {
             display: flex;
+            align-items: center;
             justify-content: space-between;
             gap: 12px;
             padding: 12px 14px;
             border-radius: 16px;
             background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            text-decoration: none;
+            transition: background-color 0.18s ease, transform 0.18s ease;
+        }
+
+        .signal-item:hover {
+            background: rgba(56, 189, 248, 0.12);
+            transform: translateX(3px);
+        }
+
+        .signal-item > i {
+            color: #7dd3fc;
         }
 
         .signal-item strong {
@@ -203,16 +217,12 @@
 
         .module-card {
             grid-column: span 4;
-            min-height: 260px;
+            min-height: 250px;
             border: 1px solid var(--line);
             border-radius: 24px;
             padding: 24px;
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
             box-shadow: 0 18px 44px rgba(0, 0, 0, 0.2);
-        }
-
-        .module-card.featured {
-            grid-column: span 6;
         }
 
         .module-top {
@@ -283,14 +293,25 @@
             font-weight: 600;
         }
 
+        .catalog-count {
+            display: inline-flex;
+            align-items: center;
+            min-height: 34px;
+            padding: 0 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(56, 189, 248, 0.18);
+            background: rgba(56, 189, 248, 0.08);
+            color: #bae6fd;
+            font-size: 13px;
+        }
+
         @media (max-width: 980px) {
             .hero-grid {
                 grid-template-columns: 1fr;
             }
 
-            .module-card,
-            .module-card.featured {
-                grid-column: span 12;
+            .module-card {
+                grid-column: span 6;
             }
         }
 
@@ -309,6 +330,19 @@
             .module-card {
                 border-radius: 20px;
             }
+
+            .hero {
+                padding: 22px;
+            }
+
+            .module-card {
+                grid-column: span 12;
+            }
+
+            .section-head {
+                align-items: flex-start;
+                gap: 12px;
+            }
         }
     </style>
 </head>
@@ -325,21 +359,20 @@
         <section class="hero">
             <div class="hero-grid">
                 <div class="hero-copy">
-                    <div class="eyebrow"><i class="fas fa-sparkles"></i> AI 文档处理引擎</div>
-                    <h1>一个入口，覆盖核心文档处理流程</h1>
-                    <p>系统已统一聚合各类证件识别模块至专属处理管线，并提供包含数字检查与多语对照在内的高级文本组件矩阵。主页提供直接锚定至各项重构界面的快速通道。</p>
+                    <div class="eyebrow"><i class="fas fa-layer-group"></i> 文档工具中心</div>
+                    <h1>需要处理什么文件？<br>从这里直接开始</h1>
+                    <p>翻译、格式转换、内容检查和批量统计统一收进工具中心。顶部导航只保留常用入口，后续增加新工具时按任务分类扩展，不再横向堆叠。</p>
                     <div class="hero-actions">
                         <a class="action-btn primary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
                         <a class="action-btn secondary" href="/certificate-translation"><i class="fas fa-id-card"></i> 证件翻译</a>
                     </div>
                 </div>
                 <aside class="hero-panel">
-                    <h2>当前可用模块</h2>
+                    <h2>按任务快速选择</h2>
                     <div class="signal-list">
-                        <div class="signal-item"><div><strong>证件翻译总管线</strong><small>驾驶证、营业执照、通用证件统一入口</small></div><span>聚合</span></div>
-                        <div class="signal-item"><div><strong>细分场景聚合</strong><small>通过多级页签分类呈现各商业证件处理入口</small></div><span>页签</span></div>
-                        <div class="signal-item"><div><strong>数字专检</strong><small>执行双语原文件间严密一致性核实与数据修复</small></div><span>双向对比</span></div>
-                        <div class="signal-item"><div><strong>文档处理组件</strong><small>集成高精视觉提取并转换为标准可交互文档</small></div><span>超强引擎</span></div>
+                        <a class="signal-item" href="/certificate-translation"><div><strong>翻译与识别</strong><small>证件翻译、多语对照与语料整理</small></div><i class="fas fa-arrow-right"></i></a>
+                        <a class="signal-item" href="/pdf2docx"><div><strong>转换与处理</strong><small>PDF / 图片转换与批量文件处理</small></div><i class="fas fa-arrow-right"></i></a>
+                        <a class="signal-item" href="/number-check"><div><strong>检查与校对</strong><small>数字一致性、规则及 AI 审校</small></div><i class="fas fa-arrow-right"></i></a>
                     </div>
                 </aside>
             </div>
@@ -348,9 +381,10 @@
         <section>
             <div class="section-head">
                 <div>
-                    <h2>处理模块</h2>
-                    <p>请根据当前业务需求选择相应的核心处理模块。</p>
+                    <h2>全部工具</h2>
+                    <p>按业务任务分类，新增工具可持续加入目录。</p>
                 </div>
+                <div class="catalog-count"><i class="fas fa-border-all"></i>&nbsp; 6 个可用工具</div>
             </div>
             <div class="module-grid">
                 <article class="module-card featured">

@@ -63,6 +63,50 @@ def test_word_like_counter_counts_mixed_languages():
     assert word_count_service.count_words_word_like(text) == 11
 
 
+def test_word_like_counter_exposes_script_buckets_for_quote():
+    text = (
+        "广药白云山 爱心满人间\n"
+        "GUANGZHOU PHAR.'S BAIYUNSHAN\n"
+        "GIVES FULL HEARTINESS TO THE WORLD\t广药集团 世界500强\n"
+        "\t广州医药集团有限公司\n"
+        "GUANGZHOU PHARMACEUTICAL HOLDINGS LIMITED\n"
+    )
+
+    metrics = word_count_service._count_text(text)
+
+    assert metrics.word_count == 41
+    assert metrics.script_count_total == metrics.word_count
+    assert metrics.han_count == 27
+    assert metrics.latin_word_count == 13
+    assert metrics.number_token_count == 1
+    assert metrics.billable_chinese_count == 27
+    assert metrics.billable_latin_count == 13
+
+
+def test_word_like_counter_splits_common_language_pairs():
+    japanese = word_count_service._count_text("日本語テスト English 42")
+    korean = word_count_service._count_text("한국어 테스트 English")
+    russian_arabic = word_count_service._count_text("Привет world مرحبا 123")
+
+    assert japanese.word_count == 8
+    assert japanese.han_count == 3
+    assert japanese.kana_count == 3
+    assert japanese.billable_japanese_count == 6
+    assert japanese.latin_word_count == 1
+    assert japanese.number_token_count == 1
+
+    assert korean.word_count == 7
+    assert korean.hangul_count == 6
+    assert korean.billable_korean_count == 6
+    assert korean.latin_word_count == 1
+
+    assert russian_arabic.word_count == 4
+    assert russian_arabic.cyrillic_word_count == 1
+    assert russian_arabic.latin_word_count == 1
+    assert russian_arabic.arabic_word_count == 1
+    assert russian_arabic.number_token_count == 1
+
+
 def test_word_like_counter_matches_word_stats_sample():
     sample = Path("data/word/2. Blog Post 42 - ENG - Red Notice removal from INTERPOL, and when NOT to apply - word_translated.docx")
     if not sample.exists():
@@ -79,6 +123,23 @@ def test_word_like_counter_matches_word_stats_sample():
 def test_word_like_counter_handles_edge_punctuation():
     assert word_count_service.count_words_word_like("“中文”") == 4
     assert word_count_service.count_words_word_like("中文…") == 3
+
+
+def test_docx_nested_table_text_is_not_counted_twice(tmp_path):
+    doc = Document()
+    outer = doc.add_table(rows=1, cols=1)
+    outer.cell(0, 0).text = "外层"
+    nested = outer.cell(0, 0).add_table(rows=1, cols=1)
+    nested.cell(0, 0).text = "内层"
+    path = tmp_path / "nested.docx"
+    doc.save(path)
+
+    items = word_count_service._extract_docx_text_items(path)
+    text = "\n".join(item.text for item in items if not item.is_extra)
+    metrics = word_count_service._count_text(text)
+
+    assert metrics.word_count == 4
+    assert metrics.han_count == 4
 
 
 def test_docx_main_and_extra_counts_are_separated(tmp_path, monkeypatch):
@@ -110,11 +171,25 @@ def test_docx_main_and_extra_counts_are_separated(tmp_path, monkeypatch):
     assert summary["counted_files"] == 1
     assert summary["total_main_word_count"] == 6
     assert summary["total_extra_word_count"] == 3
+    assert summary["script_count_total"] == 6
+    assert summary["total_han_count"] == 4
+    assert summary["total_latin_word_count"] == 1
+    assert summary["total_number_token_count"] == 1
+    assert summary["total_billable_chinese_count"] == 4
+    assert summary["total_billable_latin_count"] == 1
+    assert summary["total_extra_han_count"] == 2
     assert summary["total_page_count"] == 2
     assert summary["total_line_count"] == 9
     assert summary["total_image_count"] == 1
     file_result = result["files"][0]
     assert file_result["word_count"] == 6
+    assert file_result["script_count_total"] == 6
+    assert file_result["script_counts"]["han_count"] == 4
+    assert file_result["quote_counts"]["billable_chinese_count"] == 4
+    assert file_result["han_count"] == 4
+    assert file_result["latin_word_count"] == 1
+    assert file_result["number_token_count"] == 1
+    assert file_result["extra_han_count"] == 2
     assert file_result["char_count_no_spaces"] > 0
     assert file_result["char_count_with_spaces"] >= file_result["char_count_no_spaces"]
     assert file_result["paragraph_count"] >= 3
@@ -132,8 +207,38 @@ def test_docx_main_and_extra_counts_are_separated(tmp_path, monkeypatch):
         assert "字符数(不计空格)" in headers
         assert "图片数量" in headers
         assert "统计方法" in headers
+        assert "中文候选" in headers
+        assert "汉字" in headers
     finally:
         report.close()
+
+
+def test_word_count_accepts_single_file_path(tmp_path, monkeypatch):
+    _allow_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(word_count_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+
+    doc = Document()
+    doc.add_paragraph("单文件 world 123")
+    file_path = tmp_path / "single.docx"
+    doc.save(file_path)
+
+    prepared = word_count_service.prepare_word_count_request(directory_path=str(file_path))
+    assert prepared["params"]["input_kind"] == "file"
+    assert Path(prepared["params"]["directory_path"]) == file_path.resolve(strict=False)
+
+    result = word_count_service.run_word_count_task_sync(
+        task_id="task-single",
+        display_no="000001-single",
+        directory_path=str(file_path),
+        recursive=True,
+        include_hidden=False,
+        extensions=[".docx"],
+    )
+
+    assert result["input_kind"] == "file"
+    assert result["summary"]["counted_files"] == 1
+    assert result["summary"]["total_main_word_count"] == 5
+    assert result["files"][0]["relative_path"] == "single.docx"
 
 
 def test_office_pdf_txt_and_blank_pdf_statuses(tmp_path, monkeypatch):
@@ -258,6 +363,32 @@ def test_unc_path_maps_to_container_mount_before_resolving(tmp_path, monkeypatch
     )
 
     assert Path(result["params"]["directory_path"]) == target_dir.resolve(strict=False)
+    assert Path(result["input_files"]["allowed_root"]) == mount_root.resolve(strict=False)
+
+
+def test_unc_file_path_maps_to_single_file(tmp_path, monkeypatch):
+    mount_root = tmp_path / "mnt" / "win-server" / "服务器资料7"
+    target_dir = mount_root / "客户" / "其他客户翻译任务" / "2026年" / "7月" / "方舟移民" / "0701"
+    target_dir.mkdir(parents=True)
+    target_file = target_dir / "1.2.3.4.1 获奖通知-2020中国电子学会科技进步一等奖.docx"
+    target_file.write_bytes(b"placeholder")
+    monkeypatch.setattr(word_count_service.settings, "WORD_COUNT_ALLOWED_ROOTS_JSON", json.dumps(["\\\\win-server\\服务器资料7\\"]))
+    monkeypatch.setattr(
+        word_count_service.settings,
+        "WORD_COUNT_UNC_MOUNT_MAP_JSON",
+        json.dumps({"\\\\win-server\\服务器资料7\\": str(mount_root)}, ensure_ascii=False),
+    )
+    monkeypatch.setattr(word_count_service.settings, "WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
+
+    result = word_count_service.prepare_word_count_request(
+        directory_path=(
+            "\\\\win-server\\服务器资料7\\客户\\其他客户翻译任务\\2026年\\7月\\方舟移民\\0701\\"
+            "1.2.3.4.1 获奖通知-2020中国电子学会科技进步一等奖.docx"
+        )
+    )
+
+    assert result["params"]["input_kind"] == "file"
+    assert Path(result["params"]["directory_path"]) == target_file.resolve(strict=False)
     assert Path(result["input_files"]["allowed_root"]) == mount_root.resolve(strict=False)
 
 
