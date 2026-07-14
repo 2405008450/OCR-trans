@@ -6,11 +6,11 @@
     const REFRESH_HINT = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。';
     const REFRESH_HINT_HTML = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。';
     const RELEASE_NOTES = [
-        '\u652f\u6301\u5bfc\u5165 .doc \u6587\u6863',
-        '\u652f\u6301\u6279\u91cf\u4e0b\u8f7d\u5904\u7406\u5b8c\u6210\u6587\u4ef6',
-        '4月20日_解除pdf2docx页数限制，文件大小限制为95M以下',
-        '4月28日_增加通用证件翻译70+语种，记忆增加dsv4p模型'
-
+        '6月16日_数字专检新增 PDF 支持',
+        '6月30日_新增重复任务校验，批量导出任务支持持久化保留',
+        '7月6日_文档预处理优化聊天软件截图与复杂图片 OCR',
+        '7月8日_上线字数统计，支持共享路径批量扫描并导出 Excel / JSON',
+        '7月14日_上线 MSG 转 Word / PDF，字数统计新增 CAD 与 LLM OCR 支持',
     ];
     const originalFetch = window.fetch.bind(window);
     const navItems = [
@@ -761,7 +761,12 @@
     }
 
     function injectReleaseNotice(topContainer) {
-        if (topContainer.querySelector('.shell-release-note')) {
+        const existingNote = topContainer.querySelector('.shell-release-note');
+        if (existingNote) {
+            const releaseList = existingNote.querySelector('.release-list');
+            if (releaseList) {
+                releaseList.innerHTML = RELEASE_NOTES.map((item) => `<li>${item}</li>`).join('');
+            }
             return;
         }
 

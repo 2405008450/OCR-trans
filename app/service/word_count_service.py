@@ -247,6 +247,14 @@ def _ocr_enabled_for_input(ocr_mode: str, input_kind: str) -> bool:
     return ocr_mode == OCR_MODE_ON or (ocr_mode == OCR_MODE_AUTO and input_kind == "file")
 
 
+def _safe_path_exists(path: Path) -> bool:
+    """检查路径是否存在；网络路径无权限或暂时不可达时返回 False。"""
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 def get_word_count_config() -> dict[str, Any]:
     cad_support = get_cad_support_info(settings.ODA_FILE_CONVERTER_PATH)
     runtime_countable_extensions = COUNTABLE_EXTENSIONS | set(cad_support["supported_extensions"])
@@ -255,8 +263,9 @@ def get_word_count_config() -> dict[str, Any]:
         root = Path(raw_root).expanduser()
         mapped_root = _map_unc_path_to_local(str(raw_root))
         mapped_path = mapped_root[0] if mapped_root is not None else None
-        scope_only = _is_unc_server_root(root) and not root.exists()
-        exists = mapped_path.exists() if mapped_path is not None else root.exists() or scope_only
+        root_exists = _safe_path_exists(root)
+        scope_only = _is_unc_server_root(root) and not root_exists
+        exists = _safe_path_exists(mapped_path) if mapped_path is not None else root_exists or scope_only
         allowed_roots.append(
             {
                 "path": str(root),

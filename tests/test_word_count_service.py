@@ -729,6 +729,35 @@ def test_word_count_config_and_submit_endpoint(monkeypatch, tmp_path):
     assert captured["ocr_model"] == "google/gemini-3.1-flash-lite"
 
 
+def test_word_count_config_handles_inaccessible_unc_root(monkeypatch):
+    unc_root = "\\\\win-server\\服务器资料7\\"
+    expected_path = str(Path(unc_root).expanduser())
+    original_exists = Path.exists
+
+    def fake_exists(path):
+        if str(path) == expected_path:
+            raise OSError(1326, "用户名或密码不正确")
+        return original_exists(path)
+
+    monkeypatch.setattr(
+        word_count_service.settings, "WORD_COUNT_ALLOWED_ROOTS_JSON", json.dumps([unc_root], ensure_ascii=False)
+    )
+    monkeypatch.setattr(word_count_service.settings, "WORD_COUNT_UNC_MOUNT_MAP_JSON", "")
+    monkeypatch.setattr(word_count_service.settings, "WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
+    monkeypatch.setattr(Path, "exists", fake_exists)
+
+    config = word_count_service.get_word_count_config()
+
+    assert config["allowed_roots"] == [
+        {
+            "path": expected_path,
+            "exists": False,
+            "scope_only": False,
+            "mount_path": "",
+        }
+    ]
+
+
 def test_word_count_page_keeps_ocr_model_fallback_options():
     project_root = Path(__file__).resolve().parents[1]
     html = (project_root / "static" / "word_count.html").read_text(encoding="utf-8")
@@ -737,6 +766,17 @@ def test_word_count_page_keeps_ocr_model_fallback_options():
     assert '<option value="google/gemini-3-flash-preview" selected>' in html
     assert "FALLBACK_OCR_MODELS" in javascript
     assert "Object.keys(configuredModels).length ? configuredModels : FALLBACK_OCR_MODELS" in javascript
+
+
+def test_word_count_page_explains_each_ocr_mode_on_hover():
+    project_root = Path(__file__).resolve().parents[1]
+    html = (project_root / "static" / "word_count.html").read_text(encoding="utf-8")
+    javascript = (project_root / "static" / "word_count.js").read_text(encoding="utf-8")
+
+    assert 'for="ocrModeAuto" tabindex="0" data-tooltip=' in html
+    assert 'for="ocrModeOn" tabindex="0" data-tooltip=' in html
+    assert 'for="ocrModeOff" tabindex="0" data-tooltip=' in html
+    assert "event.target.closest?.('[data-tooltip]')" in javascript
 
 
 def test_word_count_task_submission_uses_queue_dedupe(tmp_path, monkeypatch):

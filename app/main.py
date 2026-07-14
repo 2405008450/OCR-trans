@@ -28,10 +28,11 @@ LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']
 REFRESH_HINT = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。"
 REFRESH_HINT_HTML = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。"
 RELEASE_NOTES = [
-    "支持批量下载处理完成文件",
-    "4月20日_解除pdf2docx页数限制，文件大小限制为95M以下",
-    "4月28日_增加通用证件翻译70+语种，记忆增加dsv4p模型",
-    "5月22日_去掉弃用模块，优化跳转动画，添加异常标记入口"
+    "6月16日_数字专检新增 PDF 支持",
+    "6月30日_新增重复任务校验，批量导出任务支持持久化保留",
+    "7月6日_文档预处理优化聊天软件截图与复杂图片 OCR",
+    "7月8日_上线字数统计，支持共享路径批量扫描并导出 Excel / JSON",
+    "7月14日_上线 MSG 转 Word / PDF，字数统计新增 CAD 与 LLM OCR 支持",
 ]
 PRIMARY_NAV_ITEMS = [
     ("/", "fa-home", "首页"),

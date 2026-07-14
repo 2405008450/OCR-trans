@@ -477,19 +477,19 @@ function initTooltips() {
   };
 
   document.addEventListener('mouseover', (event) => {
-    const target = event.target.closest?.('.hint-popover');
+    const target = event.target.closest?.('[data-tooltip]');
     if (target) show(target);
   });
   document.addEventListener('mouseout', (event) => {
-    const target = event.target.closest?.('.hint-popover');
+    const target = event.target.closest?.('[data-tooltip]');
     if (target && !target.contains(event.relatedTarget)) hide(target);
   });
   document.addEventListener('focusin', (event) => {
-    const target = event.target.closest?.('.hint-popover');
+    const target = event.target.closest?.('[data-tooltip]');
     if (target) show(target);
   });
   document.addEventListener('focusout', (event) => {
-    const target = event.target.closest?.('.hint-popover');
+    const target = event.target.closest?.('[data-tooltip]');
     if (target) hide(target);
   });
   window.addEventListener('resize', () => {

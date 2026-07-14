@@ -627,11 +627,11 @@
                         <label>PDF / 图片 OCR</label>
                         <div class="segmented-control" role="radiogroup" aria-label="OCR 识别模式">
                             <input id="ocrModeAuto" type="radio" name="ocrMode" value="auto" checked />
-                            <label class="segment-option" for="ocrModeAuto">智能</label>
+                            <label class="segment-option" for="ocrModeAuto" tabindex="0" data-tooltip="单文件上传或单文件路径会自动判断并 OCR 扫描页；共享目录默认不调用 OCR，只标记需要 OCR 的文件。">智能</label>
                             <input id="ocrModeOn" type="radio" name="ocrMode" value="on" />
-                            <label class="segment-option" for="ocrModeOn">开启</label>
+                            <label class="segment-option" for="ocrModeOn" tabindex="0" data-tooltip="单文件和共享目录都允许调用 OCR；仍按页判断，只识别扫描页，不会强制整份 PDF 重新识别。">开启</label>
                             <input id="ocrModeOff" type="radio" name="ocrMode" value="off" />
-                            <label class="segment-option" for="ocrModeOff">关闭</label>
+                            <label class="segment-option" for="ocrModeOff" tabindex="0" data-tooltip="完全不调用 LLM OCR，只统计可编辑文本；扫描 PDF 和独立图片会标记为需要 OCR。">关闭</label>
                         </div>
                         <div id="ocrModeHint" class="field-hint">单文件自动识别；目录任务需切换为“开启”。</div>
                     </div>
