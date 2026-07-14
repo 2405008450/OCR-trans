@@ -113,6 +113,7 @@ def _task_to_dict(task) -> dict:
         "task_type": task.task_type,
         "task_label": task.task_label or task.task_type,
         "filename": task.filename,
+        "client_ip": task.client_ip,
         "status": task.status,
         "progress": task.progress,
         "message": task.message or "",

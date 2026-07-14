@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.file_naming import build_storage_filename, build_user_visible_filename
+from app.core.request_context import get_client_ip
 from app.db.session import SessionLocal
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
@@ -231,6 +232,7 @@ class TaskQueueService:
                     task_id=task_id,
                     task_type=task_type,
                     filename=filename,
+                    client_ip=get_client_ip(),
                     status='queued',
                     progress=0,
                     message='Queued',
@@ -634,7 +636,7 @@ class TaskQueueService:
         task_id = str(uuid.uuid4())
         self._set_task_log(task_id, f'[queue] queued: {filename}')
         with SessionLocal() as db:
-            return task_repo.create_task(db, task_id=task_id, task_type=task_type, filename=filename, status='queued', progress=0, message='Queued', params_json=json.dumps(params, ensure_ascii=False), input_files_json=json.dumps(input_files, ensure_ascii=False))
+            return task_repo.create_task(db, task_id=task_id, task_type=task_type, filename=filename, client_ip=get_client_ip(), status='queued', progress=0, message='Queued', params_json=json.dumps(params, ensure_ascii=False), input_files_json=json.dumps(input_files, ensure_ascii=False))
 
     def _update_task_input_files(self, task_id: str, input_files: Dict[str, Any]) -> None:
         with SessionLocal() as db:

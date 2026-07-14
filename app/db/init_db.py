@@ -50,6 +50,7 @@ def _ensure_task_table_columns():
         'finished_at': 'ALTER TABLE task ADD COLUMN finished_at DATETIME',
         'updated_at': 'ALTER TABLE task ADD COLUMN updated_at DATETIME',
         'task_label': 'ALTER TABLE task ADD COLUMN task_label VARCHAR',
+        'client_ip': 'ALTER TABLE task ADD COLUMN client_ip VARCHAR(64)',
     }
     with engine.begin() as connection:
         for column_name, ddl in missing_columns.items():

@@ -26,9 +26,9 @@ def _now() -> datetime:
 ACTIVE_DEDUPE_STATUSES = ('queued', 'running')
 
 
-def create_task(db: Session, *, task_id: str, task_type: str, filename: str, status: str = 'queued', progress: int = 0, message: Optional[str] = None, params_json: Optional[str] = None, input_files_json: Optional[str] = None, request_fingerprint: Optional[str] = None, file_fingerprints_json: Optional[str] = None, batch_id: Optional[str] = None, batch_name: Optional[str] = None, batch_index: Optional[int] = None, batch_total: Optional[int] = None) -> Task:
+def create_task(db: Session, *, task_id: str, task_type: str, filename: str, client_ip: Optional[str] = None, status: str = 'queued', progress: int = 0, message: Optional[str] = None, params_json: Optional[str] = None, input_files_json: Optional[str] = None, request_fingerprint: Optional[str] = None, file_fingerprints_json: Optional[str] = None, batch_id: Optional[str] = None, batch_name: Optional[str] = None, batch_index: Optional[int] = None, batch_total: Optional[int] = None) -> Task:
     now = _now()
-    task = Task(task_id=task_id, task_type=task_type, task_label=TASK_TYPE_LABELS.get(task_type, task_type), filename=filename, status=status, progress=progress, message=message, params_json=params_json, input_files_json=input_files_json, request_fingerprint=request_fingerprint, file_fingerprints_json=file_fingerprints_json, batch_id=batch_id, batch_name=batch_name, batch_index=batch_index, batch_total=batch_total, created_at=now, updated_at=now)
+    task = Task(task_id=task_id, task_type=task_type, task_label=TASK_TYPE_LABELS.get(task_type, task_type), filename=filename, client_ip=client_ip, status=status, progress=progress, message=message, params_json=params_json, input_files_json=input_files_json, request_fingerprint=request_fingerprint, file_fingerprints_json=file_fingerprints_json, batch_id=batch_id, batch_name=batch_name, batch_index=batch_index, batch_total=batch_total, created_at=now, updated_at=now)
     db.add(task)
     db.commit()
     db.refresh(task)

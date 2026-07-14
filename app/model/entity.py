@@ -14,6 +14,7 @@ class Task(Base):
     task_type = Column(String, index=True, nullable=False, default="doc_translate")
     task_label = Column(String, nullable=True)
     filename = Column(String, nullable=False)
+    client_ip = Column(String(64), nullable=True)
     status = Column(String, index=True, default="queued")
     progress = Column(Integer, nullable=False, default=0)
     message = Column(String, nullable=True)

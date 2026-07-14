@@ -164,6 +164,7 @@ function renderTable(items) {
       <td>${escHtml(task.display_no || '-')}</td>
       <td>${escHtml(task.task_label || task.task_type)}</td>
       <td class="cell-filename" title="${fileName}">${shortName}</td>
+      <td class="cell-ip">${escHtml(task.client_ip || '-')}</td>
       <td><span class="badge ${badge.cls}"><i class="fas ${badge.icon}"></i> ${badge.text}</span></td>
       <td>${feedbackCell}</td>
       <td><div class="mini-progress"><div class="mini-progress-fill" style="width:${progress}%"></div></div> <span style="font-size:12px;color:var(--muted)">${progress}%</span></td>
@@ -368,7 +369,7 @@ function renderBatchRow(group) {
     : `<button class="btn-batch" onclick="event.stopPropagation();downloadBatchGroup('${batchId}')"><i class="fas fa-box-archive"></i> 批量下载</button>
           ${activeCount ? `<button class="btn-batch btn-batch-warn" onclick="event.stopPropagation();cancelBatchGroup('${batchId}')"><i class="fas fa-pause"></i> 暂停本批</button>` : ''}`;
   return `<tr class="batch-row" data-batch-id="${escAttr(batch.id)}">
-    <td colspan="8">
+    <td colspan="9">
       <div class="batch-header">
         <div class="batch-main">
           <div class="batch-title"><i class="fas fa-layer-group"></i> ${escHtml(batchName)}</div>
@@ -404,6 +405,7 @@ function renderTaskRow(task, isBatchChild = false) {
     <td>${escHtml(displayNo)}</td>
     <td>${escHtml(task.task_label || task.task_type)}</td>
     <td class="cell-filename" title="${fileName}">${shortName}</td>
+    <td class="cell-ip">${escHtml(task.client_ip || '-')}</td>
     <td><span class="badge ${badge.cls}"><i class="fas ${badge.icon}"></i> ${badge.text}</span></td>
     <td>${feedbackCell}</td>
     <td><div class="mini-progress"><div class="mini-progress-fill" style="width:${progress}%"></div></div> <span style="font-size:12px;color:var(--muted)">${progress}%</span></td>
@@ -547,6 +549,7 @@ function renderDetail(task) {
       <h3><i class="fas fa-info-circle"></i> 基本信息</h3>
       <div class="detail-grid">
         <div class="detail-item"><div class="dl">文件名</div><div class="dv">${escHtml(task.filename || '-')}</div></div>
+        <div class="detail-item"><div class="dl">用户 IP</div><div class="dv">${escHtml(task.client_ip || '-')}</div></div>
         ${modelItemHtml}
         <div class="detail-item"><div class="dl">耗时</div><div class="dv">${duration}</div></div>
         <div class="detail-item"><div class="dl">提交时间</div><div class="dv">${createdAt}</div></div>

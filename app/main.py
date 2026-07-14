@@ -3,13 +3,14 @@ from pathlib import Path
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.controller import task
 from app.core.config import settings
+from app.core.request_context import reset_client_ip, set_client_ip
 from app.db.init_db import init_db
 from app.service.task_queue_service import task_queue_service
 
@@ -566,6 +567,15 @@ app = FastAPI(
     description="AI 驱动的文档识别、翻译与处理平台",
     version="1.0.0",
 )
+
+
+@app.middleware("http")
+async def capture_client_ip(request: Request, call_next):
+    token = set_client_ip(request.client.host if request.client else None)
+    try:
+        return await call_next(request)
+    finally:
+        reset_client_ip(token)
 
 allowed_origins = settings.ALLOWED_ORIGINS.split(",") if settings.ALLOWED_ORIGINS != "*" else ["*"]
 

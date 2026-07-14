@@ -64,3 +64,5 @@ businesslicence/outputs/*
 *.tar
 
 tmp/
+.codex-docx-qa/
+tests/
