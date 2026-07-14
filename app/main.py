@@ -44,6 +44,7 @@ TOOL_NAV_GROUPS = [
     ]),
     ("转换与处理", "fa-shuffle", [
         ("/pdf2docx", "fa-file-word", "文档预处理", "PDF / 图片转可编辑 Word"),
+        ("/msg-convert", "fa-envelope-open-text", "MSG 转文档", "邮件转 Word / PDF，保留正文与内嵌图片"),
         ("/word-count", "fa-calculator", "字数统计", "批量扫描并生成统计报告"),
     ]),
     ("检查与校对", "fa-shield-halved", [
@@ -705,7 +706,7 @@ def _build_app_shell_markup(current_path: str) -> str:
             <nav class="unified-top-nav">
                 {"".join(primary_nav_html)}
                 <details class="tool-menu{' is-active' if tool_menu_active else ''}">
-                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>6</span></summary>
+                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>7</span></summary>
                     <div class="tool-menu-panel">{"".join(tool_groups_html)}</div>
                 </details>
             </nav>
@@ -801,6 +802,11 @@ async def zhongfanyi_page():
 @app.get("/pdf2docx", response_class=HTMLResponse)
 async def pdf2docx_page():
     return _render_page("pdf2docx.html", "/pdf2docx")
+
+
+@app.get("/msg-convert", response_class=HTMLResponse)
+async def msg_convert_page():
+    return _render_page("msg_convert.html", "/msg-convert")
 
 
 @app.get("/word-count", response_class=HTMLResponse)

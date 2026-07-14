@@ -2,7 +2,7 @@ annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.1
 astor==0.8.1
-beautifulsoup4==4.14.3
+beautifulsoup4==4.13.5
 cachetools==7.0.2
 certifi==2026.2.25
 cffi==2.0.0
@@ -15,7 +15,9 @@ cryptography==46.0.5
 decorator==5.2.1
 distro==1.9.0
 et_xmlfile==2.0.0
+ezdxf==1.4.4
 fastapi==0.135.1
+fonttools==4.59.2
 future==1.0.0
 greenlet==3.3.2
 google-genai>=1.0.0
@@ -86,6 +88,7 @@ uvicorn==0.41.0
 wcwidth==0.6.0
 websockets==15.0.1
 xlsxwriter==3.2.9
+extract-msg==0.55.0
 
 mtcnn==0.1.1
 tensorflow==2.15.0

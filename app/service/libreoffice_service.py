@@ -237,3 +237,20 @@ def convert_presentation_to_pptx_via_libreoffice(
         convert_to="pptx:Impress MS PowerPoint 2007 XML",
         libreoffice_path=libreoffice_path,
     )
+
+
+def convert_docx_to_pdf_via_libreoffice(
+    input_path: str | Path,
+    output_path: str | Path | None = None,
+    *,
+    libreoffice_path: str | None = None,
+) -> str:
+    """使用 LibreOffice Writer 将 DOCX 导出为 PDF。"""
+    return _convert_office_file_via_libreoffice(
+        input_path=input_path,
+        output_path=output_path,
+        expected_input_exts={".docx"},
+        output_ext=".pdf",
+        convert_to="pdf:writer_pdf_Export",
+        libreoffice_path=libreoffice_path,
+    )

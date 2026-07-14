@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Optional
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from lxml import etree
 from openpyxl import Workbook, load_workbook
@@ -18,10 +18,22 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from app.core.config import settings
+from app.service.cad_text_service import (
+    CadConverterUnavailableError,
+    extract_cad_text,
+    get_cad_support_info,
+)
 from app.service.libreoffice_service import (
     convert_doc_to_docx_via_libreoffice,
     convert_presentation_to_pptx_via_libreoffice,
     convert_spreadsheet_to_xlsx_via_libreoffice,
+)
+from app.service.ocr_text_service import extract_ocr_plain_text
+from app.service.pdf2docx_service import (
+    PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    PDF2DOCX_DEFAULT_MODEL,
+    get_pdf2docx_models,
+    normalize_pdf2docx_model,
 )
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
@@ -38,6 +50,17 @@ STATUS_NEEDS_OCR = "needs_ocr"
 STATUS_NEEDS_CAD_PARSER = "needs_cad_parser"
 STATUS_SKIPPED = "skipped"
 STATUS_FAILED = "failed"
+
+OCR_MODE_AUTO = "auto"
+OCR_MODE_ON = "on"
+OCR_MODE_OFF = "off"
+OCR_MODES = {
+    OCR_MODE_AUTO: {"label": "智能", "description": "单文件自动识别，目录任务不自动识别"},
+    OCR_MODE_ON: {"label": "开启", "description": "识别扫描 PDF 和独立图片"},
+    OCR_MODE_OFF: {"label": "关闭", "description": "仅标记需要 OCR 的文件"},
+}
+PDF_OCR_SPARSE_WORD_THRESHOLD = 20
+PDF_OCR_IMAGE_COVERAGE_THRESHOLD = 0.5
 
 EXTRA_SOURCE_TYPES = {"header", "footer", "footnote", "endnote", "chart", "comment"}
 
@@ -195,6 +218,7 @@ class ExtractedContent:
     image_count: int = 0
     stat_method: str = ""
     file_type: str = ""
+    warning: str = ""
 
 
 def normalize_scan_extensions(extensions: Optional[Iterable[str]]) -> list[str]:
@@ -212,7 +236,20 @@ def normalize_scan_extensions(extensions: Optional[Iterable[str]]) -> list[str]:
     return sorted(normalized or CANDIDATE_EXTENSIONS)
 
 
+def _normalize_ocr_mode(value: Optional[str]) -> str:
+    mode = str(value or OCR_MODE_AUTO).strip().lower()
+    if mode not in OCR_MODES:
+        raise ValueError(f"不支持的 OCR 模式: {mode}")
+    return mode
+
+
+def _ocr_enabled_for_input(ocr_mode: str, input_kind: str) -> bool:
+    return ocr_mode == OCR_MODE_ON or (ocr_mode == OCR_MODE_AUTO and input_kind == "file")
+
+
 def get_word_count_config() -> dict[str, Any]:
+    cad_support = get_cad_support_info(settings.ODA_FILE_CONVERTER_PATH)
+    runtime_countable_extensions = COUNTABLE_EXTENSIONS | set(cad_support["supported_extensions"])
     allowed_roots = []
     for raw_root in settings.WORD_COUNT_ALLOWED_ROOTS:
         root = Path(raw_root).expanduser()
@@ -244,12 +281,15 @@ def get_word_count_config() -> dict[str, Any]:
         )
     return {
         "allowed_roots": allowed_roots,
-        "countable_extensions": sorted(COUNTABLE_EXTENSIONS),
+        "countable_extensions": sorted(runtime_countable_extensions),
         "image_extensions": sorted(IMAGE_EXTENSIONS),
         "cad_extensions": sorted(CAD_EXTENSIONS),
+        "cad_support": cad_support,
         "default_extensions": DEFAULT_SCAN_EXTENSIONS,
         "max_files": settings.WORD_COUNT_MAX_FILES,
         "max_file_mb": settings.WORD_COUNT_MAX_FILE_MB,
+        "upload_max_file_mb": settings.WORD_COUNT_UPLOAD_MAX_MB,
+        "upload_extensions": sorted(CANDIDATE_EXTENSIONS),
         "unc_mount_mappings": unc_mount_mappings,
         "unc_auto_mount_roots": settings.WORD_COUNT_UNC_AUTO_MOUNT_ROOTS,
         "follow_symlinks": settings.WORD_COUNT_FOLLOW_SYMLINKS_ENABLED,
@@ -260,6 +300,10 @@ def get_word_count_config() -> dict[str, Any]:
         ),
         "script_count_labels": SCRIPT_COUNT_LABELS,
         "quote_count_labels": QUOTE_COUNT_LABELS,
+        "ocr_modes": OCR_MODES,
+        "default_ocr_mode": OCR_MODE_AUTO,
+        "ocr_models": get_pdf2docx_models(),
+        "default_ocr_model": PDF2DOCX_DEFAULT_MODEL,
     }
 
 
@@ -269,11 +313,19 @@ def prepare_word_count_request(
     recursive: bool = True,
     include_hidden: bool = False,
     extensions: Optional[Iterable[str]] = None,
+    ocr_mode: str = OCR_MODE_AUTO,
+    ocr_model: Optional[str] = None,
 ) -> dict[str, Any]:
     input_path, matched_root, input_kind = _resolve_allowed_input_path(directory_path)
     normalized_extensions = normalize_scan_extensions(extensions)
+    normalized_ocr_mode = _normalize_ocr_mode(ocr_mode)
+    normalized_ocr_model = normalize_pdf2docx_model(ocr_model)
+    if normalized_ocr_model not in get_pdf2docx_models():
+        raise ValueError(f"不支持的 OCR 模型: {normalized_ocr_model}")
+    ocr_enabled = _ocr_enabled_for_input(normalized_ocr_mode, input_kind)
     params = {
         "directory_path": str(input_path),
+        "input_source": "path",
         "input_kind": input_kind,
         "recursive": bool(recursive),
         "include_hidden": bool(include_hidden),
@@ -281,6 +333,10 @@ def prepare_word_count_request(
         "max_files": settings.WORD_COUNT_MAX_FILES,
         "max_file_mb": settings.WORD_COUNT_MAX_FILE_MB,
         "follow_symlinks": settings.WORD_COUNT_FOLLOW_SYMLINKS_ENABLED,
+        "ocr_mode": normalized_ocr_mode,
+        "ocr_enabled": ocr_enabled,
+        "ocr_model": normalized_ocr_model,
+        "ocr_route": PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     }
     return {
         "filename": str(input_path),
@@ -293,6 +349,46 @@ def prepare_word_count_request(
     }
 
 
+def prepare_word_count_upload_request(
+    *,
+    filename: str,
+    ocr_mode: str = OCR_MODE_AUTO,
+    ocr_model: Optional[str] = None,
+) -> dict[str, Any]:
+    original_filename = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not original_filename:
+        raise ValueError("请选择需要统计的文件")
+    extension = Path(original_filename).suffix.lower()
+    if extension not in CANDIDATE_EXTENSIONS:
+        supported = "、".join(sorted(CANDIDATE_EXTENSIONS))
+        raise ValueError(f"不支持的文件格式: {extension or '无扩展名'}。支持: {supported}")
+
+    normalized_ocr_mode = _normalize_ocr_mode(ocr_mode)
+    normalized_ocr_model = normalize_pdf2docx_model(ocr_model)
+    if normalized_ocr_model not in get_pdf2docx_models():
+        raise ValueError(f"不支持的 OCR 模型: {normalized_ocr_model}")
+
+    return {
+        "filename": original_filename,
+        "extension": extension,
+        "params": {
+            "input_source": "upload",
+            "input_kind": "file",
+            "recursive": False,
+            "include_hidden": False,
+            "extensions": [extension],
+            "max_files": 1,
+            "max_file_mb": settings.WORD_COUNT_MAX_FILE_MB,
+            "upload_max_file_mb": settings.WORD_COUNT_UPLOAD_MAX_MB,
+            "follow_symlinks": False,
+            "ocr_mode": normalized_ocr_mode,
+            "ocr_enabled": _ocr_enabled_for_input(normalized_ocr_mode, "file"),
+            "ocr_model": normalized_ocr_model,
+            "ocr_route": PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+        },
+    }
+
+
 async def execute_word_count_task(
     *,
     task_id: str,
@@ -301,6 +397,11 @@ async def execute_word_count_task(
     recursive: bool,
     include_hidden: bool,
     extensions: Iterable[str],
+    ocr_mode: str = OCR_MODE_AUTO,
+    ocr_model: str = PDF2DOCX_DEFAULT_MODEL,
+    ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    input_source: str = "path",
+    original_filename: Optional[str] = None,
     progress_callback: Optional[ProgressCallback] = None,
     executor=None,
 ) -> dict[str, Any]:
@@ -323,6 +424,11 @@ async def execute_word_count_task(
             recursive=recursive,
             include_hidden=include_hidden,
             extensions=extensions,
+            ocr_mode=ocr_mode,
+            ocr_model=ocr_model,
+            ocr_route=ocr_route,
+            input_source=input_source,
+            original_filename=original_filename,
             progress_callback=sync_report,
         ),
     )
@@ -336,15 +442,32 @@ def run_word_count_task_sync(
     recursive: bool,
     include_hidden: bool,
     extensions: Iterable[str],
+    ocr_mode: str = OCR_MODE_AUTO,
+    ocr_model: str = PDF2DOCX_DEFAULT_MODEL,
+    ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    input_source: str = "path",
+    original_filename: Optional[str] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict[str, Any]:
     started_at = datetime.now()
-    input_path, matched_root, input_kind = _resolve_allowed_input_path(directory_path)
+    normalized_input_source = str(input_source or "path").strip().lower()
+    if normalized_input_source == "upload":
+        input_path, matched_root, input_kind = _resolve_uploaded_word_count_path(directory_path)
+    elif normalized_input_source == "path":
+        input_path, matched_root, input_kind = _resolve_allowed_input_path(directory_path)
+    else:
+        raise ValueError(f"不支持的字数统计输入方式: {normalized_input_source}")
+    normalized_ocr_mode = _normalize_ocr_mode(ocr_mode)
+    normalized_ocr_model = normalize_pdf2docx_model(ocr_model)
+    if normalized_ocr_model not in get_pdf2docx_models():
+        raise ValueError(f"不支持的 OCR 模型: {normalized_ocr_model}")
+    ocr_enabled = _ocr_enabled_for_input(normalized_ocr_mode, input_kind)
     scan_extensions = set(normalize_scan_extensions(extensions))
     output_dir = Path(settings.OUTPUT_DIR) / "word_count" / (display_no or task_id)
     output_dir.mkdir(parents=True, exist_ok=True)
     converted_dir = output_dir / "converted_inputs"
     converted_dir.mkdir(parents=True, exist_ok=True)
+    ocr_text_dir = output_dir / "OCR识别文本"
 
     _report(progress_callback, 5, "正在扫描文件..." if input_kind == "file" else "正在扫描目录...")
     if input_kind == "file":
@@ -360,6 +483,7 @@ def run_word_count_task_sync(
 
     file_results: list[dict[str, Any]] = []
     source_rows: list[dict[str, Any]] = []
+    ocr_text_files: list[Path] = []
     total = len(candidates)
     max_bytes = max(1, int(settings.WORD_COUNT_MAX_FILE_MB or 200)) * 1024 * 1024
 
@@ -369,14 +493,30 @@ def run_word_count_task_sync(
     for index, file_path in enumerate(candidates, start=1):
         progress = 8 + int(index / max(total, 1) * 72)
         _report(progress_callback, min(progress, 80), f"正在统计 {index}/{total}: {file_path.name}")
-        result, rows = _count_single_file(
+        result, rows, ocr_text_path = _count_single_file(
             file_path=file_path,
             root=relative_root,
             converted_dir=converted_dir,
             max_bytes=max_bytes,
+            ocr_enabled=ocr_enabled,
+            ocr_model=normalized_ocr_model,
+            ocr_route=ocr_route,
+            ocr_text_dir=ocr_text_dir,
+            ocr_status_callback=lambda message, name=file_path.name, pct=min(progress, 80): _report(
+                progress_callback, pct, f"{name}: {message}"
+            ),
+            display_relative_path=(
+                str(original_filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+                if normalized_input_source == "upload" and input_kind == "file"
+                else None
+            ),
         )
         file_results.append(result)
         source_rows.extend(rows)
+        if ocr_text_path is not None:
+            ocr_text_files.append(ocr_text_path)
+
+    ocr_archive_path = _write_ocr_text_archive(output_dir, ocr_text_dir, ocr_text_files)
 
     summary = _build_summary(file_results, truncated=truncated, started_at=started_at)
     report_payload = {
@@ -384,10 +524,17 @@ def run_word_count_task_sync(
         "directory_path": str(input_path),
         "input_path": str(input_path),
         "input_kind": input_kind,
+        "input_source": normalized_input_source,
+        "original_filename": original_filename or "",
         "allowed_root": str(matched_root),
         "recursive": bool(recursive),
         "include_hidden": bool(include_hidden),
         "extensions": sorted(scan_extensions),
+        "ocr_mode": normalized_ocr_mode,
+        "ocr_enabled": ocr_enabled,
+        "ocr_model": normalized_ocr_model,
+        "ocr_route": ocr_route,
+        "ocr_text_archive": _output_web_path(ocr_archive_path) if ocr_archive_path else "",
         "summary": summary,
         "files": file_results,
         "source_details": source_rows,
@@ -401,8 +548,11 @@ def run_word_count_task_sync(
             "页数和行数采用快速近似口径：Word 优先读取文档属性，PDF/PPT 使用实际页数或幻灯片数，Excel 页数按工作表数近似。",
             "图片数量统计嵌入图片出现次数，用于后续 OCR 流程线索；含图片的可编辑 Office 文件仍保持已统计。",
             "PPT 主数统计幻灯片可见文本框、表格、组合形状和可提取图表文字；备注文本列为额外内容。",
-            "PDF 首版只统计可提取文本；无可提取文本的 PDF 标记为需要 OCR。",
-            "图片和 CAD 首版仅标记为扩展处理入口，不计入主数。",
+            "启用 OCR 时，扫描 PDF、混合 PDF 的扫描页和独立图片使用现有 PDF2DOCX 视觉识别能力；Office 内嵌图片不识别。",
+            "PDF 页面无可统计文字，或字数少于 20 且最大图片覆盖率达到 50% 时，以 OCR 结果替换该页文本层，避免重复统计。",
+            "OCR 任一必要页面失败时，整个文件不计入总字数；已识别文本仍保留用于复核。",
+            "CAD 按模型空间、图纸空间和实际插入块中的可提取文字实例统计；外部参照不自动追踪。",
+            "DWG/DWS/DWT 依赖 ODA File Converter 转为 DXF；工具缺失时标记为需要 CAD 解析。",
         ],
     }
 
@@ -489,6 +639,22 @@ def _resolve_allowed_input_path(raw_path: str) -> tuple[Path, Path, str]:
             return candidate, allowed_root, input_kind
     allowed_text = "；".join(settings.WORD_COUNT_ALLOWED_ROOTS)
     raise PermissionError(f"路径不在允许扫描范围内。允许根目录: {allowed_text}")
+
+
+def _resolve_uploaded_word_count_path(raw_path: str) -> tuple[Path, Path, str]:
+    raw_text = str(raw_path or "").strip()
+    if not raw_text:
+        raise ValueError("上传文件路径不能为空")
+
+    upload_root = (Path(settings.UPLOAD_DIR) / "word_count").expanduser().resolve(strict=False)
+    candidate = Path(raw_text).expanduser().resolve(strict=False)
+    if not _is_relative_to_path(candidate, upload_root):
+        raise PermissionError("上传文件不在字数统计任务目录内")
+    if not candidate.exists():
+        raise FileNotFoundError(f"上传文件不存在: {candidate}")
+    if not candidate.is_file():
+        raise ValueError(f"上传目标不是文件: {candidate}")
+    return candidate, upload_root, "file"
 
 
 def _input_kind(path: Path) -> str:
@@ -746,10 +912,16 @@ def _count_single_file(
     root: Path,
     converted_dir: Path,
     max_bytes: int,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ocr_enabled: bool = False,
+    ocr_model: str = PDF2DOCX_DEFAULT_MODEL,
+    ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+    ocr_text_dir: Optional[Path] = None,
+    ocr_status_callback: Optional[Callable[[str], None]] = None,
+    display_relative_path: Optional[str] = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]], Optional[Path]]:
     now_status = STATUS_COUNTED
     ext = file_path.suffix.lower()
-    relative_path = _relative_path(file_path, root)
+    relative_path = str(display_relative_path or _relative_path(file_path, root))
     error = ""
     warning = ""
     source_rows: list[dict[str, Any]] = []
@@ -762,6 +934,7 @@ def _count_single_file(
         return (
             _base_file_result(file_path, relative_path, ext, STATUS_FAILED, error=f"无法读取文件信息: {exc}"),
             [],
+            None,
         )
 
     base = _base_file_result(
@@ -773,7 +946,15 @@ def _count_single_file(
         modified_at=modified_at,
     )
 
-    if ext in IMAGE_EXTENSIONS:
+    if size_bytes > max_bytes:
+        base.update(
+            status=STATUS_SKIPPED,
+            message=f"文件超过大小限制 {settings.WORD_COUNT_MAX_FILE_MB} MB",
+            counted_at=_now_iso(),
+        )
+        return base, [], None
+
+    if ext in IMAGE_EXTENSIONS and not ocr_enabled:
         base.update(
             status=STATUS_NEEDS_OCR,
             image_count=1,
@@ -781,31 +962,59 @@ def _count_single_file(
             stat_method=_stat_method_for_extension(ext),
             counted_at=_now_iso(),
         )
-        return base, []
-    if ext in CAD_EXTENSIONS:
+        return base, [], None
+    ocr_info = {
+        "ocr_used": False,
+        "ocr_page_count": 0,
+        "ocr_model": "",
+        "ocr_failed_pages": [],
+    }
+    try:
+        if ext in IMAGE_EXTENSIONS:
+            extracted, ocr_info = _extract_image_ocr_content(
+                file_path,
+                model=ocr_model,
+                gemini_route=ocr_route,
+                status_callback=ocr_status_callback,
+            )
+        elif ext == ".pdf" and ocr_enabled:
+            extracted, ocr_info = _extract_pdf_content_with_ocr(
+                file_path,
+                model=ocr_model,
+                gemini_route=ocr_route,
+                status_callback=ocr_status_callback,
+            )
+        else:
+            extracted = _extract_content(file_path, converted_dir)
+    except CadConverterUnavailableError as exc:
         base.update(
             status=STATUS_NEEDS_CAD_PARSER,
-            message="CAD 文件需要专用解析器后再统计",
+            message="CAD 解析工具未就绪",
+            error=str(exc),
             stat_method=_stat_method_for_extension(ext),
             counted_at=_now_iso(),
         )
-        return base, []
-    if size_bytes > max_bytes:
+        return base, [], None
+    except Exception as exc:
+        if ext in IMAGE_EXTENSIONS or (ext == ".pdf" and ocr_enabled):
+            failed_message = "OCR 失败"
+        elif ext in CAD_EXTENSIONS:
+            failed_message = "CAD 解析失败"
+        else:
+            failed_message = "解析失败"
         base.update(
-            status=STATUS_SKIPPED,
-            message=f"文件超过大小限制 {settings.WORD_COUNT_MAX_FILE_MB} MB",
+            status=STATUS_FAILED,
+            error=str(exc),
+            message=failed_message,
+            ocr_used=bool(ext in IMAGE_EXTENSIONS or (ext == ".pdf" and ocr_enabled)),
+            ocr_model=ocr_model if ext in IMAGE_EXTENSIONS or ext == ".pdf" else "",
             counted_at=_now_iso(),
         )
-        return base, []
-
-    try:
-        extracted = _extract_content(file_path, converted_dir)
-    except Exception as exc:
-        base.update(status=STATUS_FAILED, error=str(exc), message="解析失败", counted_at=_now_iso())
-        return base, []
+        return base, [], None
 
     items = extracted.items
-    if ext == ".pdf" and not any(item.text.strip() for item in items):
+    warning = extracted.warning
+    if ext == ".pdf" and not ocr_info.get("ocr_used") and not any(item.text.strip() for item in items):
         base.update(
             status=STATUS_NEEDS_OCR,
             page_count=extracted.page_count,
@@ -814,7 +1023,33 @@ def _count_single_file(
             message="PDF 未提取到可编辑文本，可能是扫描件",
             counted_at=_now_iso(),
         )
-        return base, []
+        return base, [], None
+
+    ocr_text_path: Optional[Path] = None
+    if ocr_info.get("ocr_used") and ocr_text_dir is not None:
+        ocr_text_path = _write_ocr_plain_text(
+            ocr_text_dir=ocr_text_dir,
+            relative_path=relative_path,
+            items=items,
+        )
+        base["ocr_text_path"] = _output_web_path(ocr_text_path)
+
+    failed_pages = [int(page) for page in ocr_info.get("ocr_failed_pages") or []]
+    if failed_pages:
+        base.update(
+            status=STATUS_FAILED,
+            page_count=extracted.page_count,
+            paragraph_count=extracted.paragraph_count,
+            line_count=extracted.line_count,
+            image_count=extracted.image_count,
+            stat_method=extracted.stat_method,
+            file_type=extracted.file_type or base.get("file_type", ""),
+            message="OCR 页面识别不完整，文件未计入总字数",
+            error=f"OCR 失败页: {', '.join(str(page) for page in failed_pages)}",
+            counted_at=_now_iso(),
+            **ocr_info,
+        )
+        return base, [], ocr_text_path
 
     totals = {
         "main_word_count": 0,
@@ -871,7 +1106,7 @@ def _count_single_file(
         )
 
     if not items:
-        warning = "未提取到文本"
+        warning = "；".join(part for part in (warning, "未提取到文本") if part)
 
     main_script_counts = {field: int(totals.get(f"main_{field}") or 0) for field in SCRIPT_COUNT_FIELDS}
     extra_script_counts = {field: int(totals.get(f"extra_{field}") or 0) for field in SCRIPT_COUNT_FIELDS}
@@ -905,12 +1140,15 @@ def _count_single_file(
         warning=warning,
         message="统计完成",
         counted_at=_now_iso(),
+        **ocr_info,
         **main_script_counts,
         **main_quote_counts,
         **{f"extra_{field}": value for field, value in extra_script_counts.items()},
         **{f"extra_{field}": value for field, value in extra_quote_counts.items()},
     )
-    return base, source_rows
+    if ocr_info.get("ocr_used"):
+        base["message"] = f"OCR 统计完成（{int(ocr_info.get('ocr_page_count') or 0)} 页）"
+    return base, source_rows, ocr_text_path
 
 
 def _base_file_result(
@@ -928,7 +1166,7 @@ def _base_file_result(
     return {
         "file_path": str(file_path),
         "relative_path": relative_path,
-        "filename": file_path.name,
+        "filename": Path(relative_path).name or file_path.name,
         "extension": extension,
         "file_type": _file_type_for_extension(extension),
         "status": status,
@@ -957,6 +1195,11 @@ def _base_file_result(
         "size_bytes": size_bytes,
         "modified_at": modified_at,
         "source_counts": {},
+        "ocr_used": False,
+        "ocr_page_count": 0,
+        "ocr_model": "",
+        "ocr_failed_pages": [],
+        "ocr_text_path": "",
         "warning": "",
         "error": error,
         **script_counts,
@@ -973,6 +1216,31 @@ def _extract_text_items(file_path: Path, converted_dir: Path) -> list[TextItem]:
 def _extract_content(file_path: Path, converted_dir: Path) -> ExtractedContent:
     ext = file_path.suffix.lower()
     converted_from = ""
+    if ext in CAD_EXTENSIONS:
+        cad_content = extract_cad_text(
+            file_path,
+            workspace_dir=converted_dir,
+            oda_path=settings.ODA_FILE_CONVERTER_PATH,
+            timeout_seconds=settings.WORD_COUNT_CAD_CONVERT_TIMEOUT_SECONDS,
+        )
+        return ExtractedContent(
+            items=[
+                TextItem(
+                    source_type=item.source_type,
+                    source_label=item.source_label,
+                    text=item.text,
+                    paragraph_count=item.paragraph_count,
+                    line_count=item.line_count,
+                )
+                for item in cad_content.items
+            ],
+            page_count=cad_content.page_count,
+            paragraph_count=cad_content.paragraph_count,
+            line_count=cad_content.line_count,
+            stat_method=cad_content.stat_method,
+            file_type="CAD",
+            warning=cad_content.warning,
+        )
     if ext == ".doc":
         target = converted_dir / f"{_safe_stem(file_path)}.docx"
         file_path = Path(convert_doc_to_docx_via_libreoffice(file_path, target))
@@ -1010,6 +1278,7 @@ def _extract_content(file_path: Path, converted_dir: Path) -> ExtractedContent:
             image_count=content.image_count,
             stat_method=f"{converted_from}+{content.stat_method}",
             file_type=content.file_type,
+            warning=content.warning,
         )
     return content
 
@@ -1089,6 +1358,208 @@ def _extract_pdf_content(path: Path) -> ExtractedContent:
         stat_method="PDF文本层解析+Word近似计数",
         file_type="PDF",
     )
+
+
+def _extract_image_ocr_content(
+    path: Path,
+    *,
+    model: str,
+    gemini_route: str,
+    status_callback: Optional[Callable[[str], None]] = None,
+) -> tuple[ExtractedContent, dict[str, Any]]:
+    payload = extract_ocr_plain_text(
+        file_path=str(path),
+        model=model,
+        gemini_route=gemini_route,
+        page_progress_callback=(
+            (lambda current, total: status_callback(f"正在 OCR 第 {current}/{total} 页"))
+            if status_callback
+            else None
+        ),
+        status_callback=status_callback,
+        continue_on_error=True,
+    )
+    page_results = payload.get("page_results") or []
+    items = _ocr_page_items(page_results, source_type="image_ocr_page")
+    total_pages = max(int(payload.get("total_pages") or 0), 1)
+    content = ExtractedContent(
+        items=items,
+        page_count=total_pages,
+        paragraph_count=sum(item.paragraph_count for item in items),
+        line_count=sum(item.line_count for item in items),
+        image_count=total_pages,
+        stat_method=f"图片视觉OCR（{model}）+Word近似计数",
+        file_type="图片",
+    )
+    return content, _ocr_info_from_payload(payload, model)
+
+
+def _extract_pdf_content_with_ocr(
+    path: Path,
+    *,
+    model: str,
+    gemini_route: str,
+    status_callback: Optional[Callable[[str], None]] = None,
+) -> tuple[ExtractedContent, dict[str, Any]]:
+    import fitz
+
+    page_data: list[dict[str, Any]] = []
+    image_count = 0
+    with fitz.open(str(path)) as doc:
+        page_count = doc.page_count
+        for page_index, page in enumerate(doc, start=1):
+            text = page.get_text("text").strip()
+            word_count = _count_text(text).word_count
+            image_count += len(page.get_images(full=True))
+            image_coverage = _max_pdf_page_image_coverage(page)
+            needs_ocr = word_count == 0 or (
+                word_count < PDF_OCR_SPARSE_WORD_THRESHOLD
+                and image_coverage >= PDF_OCR_IMAGE_COVERAGE_THRESHOLD
+            )
+            page_data.append(
+                {
+                    "page_number": page_index,
+                    "text": text,
+                    "needs_ocr": needs_ocr,
+                }
+            )
+
+    ocr_pages = [int(item["page_number"]) for item in page_data if item["needs_ocr"]]
+    if not ocr_pages:
+        items = _pdf_text_layer_items(page_data)
+        return (
+            ExtractedContent(
+                items=items,
+                page_count=page_count,
+                paragraph_count=sum(item.paragraph_count for item in items),
+                line_count=sum(item.line_count for item in items),
+                image_count=image_count,
+                stat_method="PDF文本层解析+Word近似计数",
+                file_type="PDF",
+            ),
+            {"ocr_used": False, "ocr_page_count": 0, "ocr_model": "", "ocr_failed_pages": []},
+        )
+
+    payload = extract_ocr_plain_text(
+        file_path=str(path),
+        model=model,
+        gemini_route=gemini_route,
+        page_numbers=ocr_pages,
+        page_progress_callback=(
+            (lambda current, total: status_callback(f"正在 OCR 第 {current}/{total} 页"))
+            if status_callback
+            else None
+        ),
+        status_callback=status_callback,
+        continue_on_error=True,
+    )
+    ocr_results = {
+        int(item.get("page_number") or 0): item
+        for item in (payload.get("page_results") or [])
+        if int(item.get("page_number") or 0) > 0
+    }
+    items: list[TextItem] = []
+    for page in page_data:
+        page_number = int(page["page_number"])
+        if page["needs_ocr"]:
+            ocr_result = ocr_results.get(page_number) or {}
+            text = "" if ocr_result.get("error") else str(ocr_result.get("text") or "")
+            source_type = "pdf_ocr_page"
+        else:
+            text = str(page.get("text") or "")
+            source_type = "pdf_page"
+        if text.strip():
+            items.append(
+                TextItem(
+                    source_type,
+                    f"第 {page_number} 页",
+                    text,
+                    is_extra=False,
+                    paragraph_count=_count_text_paragraphs(text),
+                    line_count=_count_text_lines(text),
+                )
+            )
+
+    method = "PDF视觉OCR+Word近似计数" if len(ocr_pages) == page_count else "PDF文本层+按页视觉OCR+Word近似计数"
+    content = ExtractedContent(
+        items=items,
+        page_count=page_count,
+        paragraph_count=sum(item.paragraph_count for item in items),
+        line_count=sum(item.line_count for item in items),
+        image_count=image_count,
+        stat_method=f"{method}（{model}）",
+        file_type="PDF",
+    )
+    return content, _ocr_info_from_payload(payload, model)
+
+
+def _max_pdf_page_image_coverage(page: Any) -> float:
+    page_area = max(float(page.rect.width) * float(page.rect.height), 1.0)
+    max_area = 0.0
+    try:
+        blocks = page.get_text("blocks") or []
+    except Exception:
+        return 0.0
+    for block in blocks:
+        if len(block) < 7 or int(block[6]) != 1:
+            continue
+        width = max(float(block[2]) - float(block[0]), 0.0)
+        height = max(float(block[3]) - float(block[1]), 0.0)
+        max_area = max(max_area, width * height)
+    return min(max_area / page_area, 1.0)
+
+
+def _pdf_text_layer_items(page_data: list[dict[str, Any]]) -> list[TextItem]:
+    items: list[TextItem] = []
+    for page in page_data:
+        text = str(page.get("text") or "")
+        if not text.strip():
+            continue
+        page_number = int(page.get("page_number") or 0)
+        items.append(
+            TextItem(
+                "pdf_page",
+                f"第 {page_number} 页",
+                text,
+                is_extra=False,
+                paragraph_count=_count_text_paragraphs(text),
+                line_count=_count_text_lines(text),
+            )
+        )
+    return items
+
+
+def _ocr_page_items(page_results: list[dict[str, Any]], *, source_type: str) -> list[TextItem]:
+    items: list[TextItem] = []
+    for page in page_results:
+        if page.get("error"):
+            continue
+        text = str(page.get("text") or "")
+        if not text.strip():
+            continue
+        page_number = int(page.get("page_number") or 0)
+        items.append(
+            TextItem(
+                source_type,
+                f"第 {page_number} 页",
+                text,
+                is_extra=False,
+                paragraph_count=_count_text_paragraphs(text),
+                line_count=_count_text_lines(text),
+            )
+        )
+    return items
+
+
+def _ocr_info_from_payload(payload: dict[str, Any], model: str) -> dict[str, Any]:
+    processed_pages = [int(page) for page in payload.get("processed_pages") or []]
+    failed_pages = [int(page) for page in payload.get("failed_pages") or []]
+    return {
+        "ocr_used": True,
+        "ocr_page_count": len(processed_pages),
+        "ocr_model": model,
+        "ocr_failed_pages": failed_pages,
+    }
 
 
 def _extract_pdf_text_items(path: Path) -> list[TextItem]:
@@ -1654,7 +2125,9 @@ def _stat_method_for_extension(extension: str) -> str:
     if ext in IMAGE_EXTENSIONS:
         return "图片候选文件，需OCR后统计"
     if ext in CAD_EXTENSIONS:
-        return "CAD候选文件，需专用解析器后统计"
+        if ext == ".dxf":
+            return "DXF实体解析+Word近似计数"
+        return "ODA File Converter转DXF+ezdxf实体解析+Word近似计数"
     return ""
 
 
@@ -1873,6 +2346,11 @@ def _build_summary(file_results: list[dict[str, Any]], *, truncated: bool, start
         "total_paragraph_count": sum(int(item.get("paragraph_count") or 0) for item in file_results),
         "total_line_count": sum(int(item.get("line_count") or 0) for item in file_results),
         "total_image_count": sum(int(item.get("image_count") or 0) for item in file_results),
+        "ocr_files": sum(1 for item in file_results if item.get("ocr_used")),
+        "ocr_pages": sum(int(item.get("ocr_page_count") or 0) for item in file_results),
+        "ocr_failed_files": sum(
+            1 for item in file_results if item.get("ocr_used") and item.get("status") == STATUS_FAILED
+        ),
         "truncated": truncated,
         "started_at": started_at.isoformat(timespec="seconds"),
         "finished_at": datetime.now().isoformat(timespec="seconds"),
@@ -1936,8 +2414,11 @@ def _autosize(sheet) -> None:
 def _write_summary_sheet(sheet, payload: dict[str, Any]) -> None:
     summary = payload.get("summary") or {}
     input_kind = "单文件" if payload.get("input_kind") == "file" else "目录"
+    input_source = "直接上传" if payload.get("input_source") == "upload" else "共享路径"
     rows = [
         ("统计类型", input_kind),
+        ("输入方式", input_source),
+        ("原始文件名", payload.get("original_filename", "")),
         ("统计路径", payload.get("input_path") or payload.get("directory_path", "")),
         ("允许根目录", payload.get("allowed_root", "")),
         ("主字数合计", summary.get("total_main_word_count", 0)),
@@ -1954,6 +2435,11 @@ def _write_summary_sheet(sheet, payload: dict[str, Any]) -> None:
         ("段落数合计", summary.get("total_paragraph_count", 0)),
         ("行数合计", summary.get("total_line_count", 0)),
         ("图片数量合计", summary.get("total_image_count", 0)),
+        ("OCR 文件数", summary.get("ocr_files", 0)),
+        ("OCR 页数", summary.get("ocr_pages", 0)),
+        ("OCR 失败文件数", summary.get("ocr_failed_files", 0)),
+        ("OCR 模式", payload.get("ocr_mode", OCR_MODE_AUTO)),
+        ("OCR 模型", payload.get("ocr_model", "")),
         ("文件总数", summary.get("total_files", 0)),
         ("已统计文件数", summary.get("counted_files", 0)),
         ("失败文件数", summary.get("failed_files", 0)),
@@ -1991,6 +2477,11 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
         "段落数",
         "行数",
         "图片数量",
+        "是否使用 OCR",
+        "OCR 页数",
+        "OCR 模型",
+        "OCR 失败页",
+        "OCR 文本路径",
         "统计方法",
         "文件类型",
         "状态",
@@ -2023,6 +2514,11 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
                 item.get("paragraph_count", 0),
                 item.get("line_count", 0),
                 item.get("image_count", 0),
+                "是" if item.get("ocr_used") else "否",
+                item.get("ocr_page_count", 0),
+                item.get("ocr_model", ""),
+                ", ".join(str(page) for page in (item.get("ocr_failed_pages") or [])),
+                item.get("ocr_text_path", ""),
                 item.get("stat_method", ""),
                 item.get("file_type", ""),
                 item.get("status", ""),
@@ -2093,7 +2589,7 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
 
 
 def _write_fail_sheet(sheet, files: list[dict[str, Any]]) -> None:
-    sheet.append(["相对路径", "扩展名", "文件类型", "状态", "统计方法", "图片数量", "消息", "警告", "错误", "统计时间"])
+    sheet.append(["相对路径", "扩展名", "文件类型", "状态", "统计方法", "图片数量", "OCR 页数", "OCR 失败页", "消息", "警告", "错误", "统计时间"])
     for item in files:
         if item.get("status") == STATUS_COUNTED:
             continue
@@ -2105,6 +2601,8 @@ def _write_fail_sheet(sheet, files: list[dict[str, Any]]) -> None:
                 item.get("status", ""),
                 item.get("stat_method", ""),
                 item.get("image_count", 0),
+                item.get("ocr_page_count", 0),
+                ", ".join(str(page) for page in (item.get("ocr_failed_pages") or [])),
                 item.get("message", ""),
                 item.get("warning", ""),
                 item.get("error", ""),
@@ -2133,6 +2631,34 @@ def _relative_path(path: Path, root: Path) -> str:
 def _preview_text(text: str, limit: int = 120) -> str:
     normalized = re.sub(r"\s+", " ", text or "").strip()
     return normalized[:limit]
+
+
+def _write_ocr_plain_text(*, ocr_text_dir: Path, relative_path: str, items: list[TextItem]) -> Path:
+    relative = Path(relative_path)
+    safe_parts = [part for part in relative.parts if part not in {"", ".", "..", relative.anchor}]
+    safe_relative = Path(*safe_parts) if safe_parts else Path("ocr_result")
+    target = ocr_text_dir / safe_relative.parent / f"{safe_relative.name}.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "\n\n".join(item.text.strip() for item in items if item.text.strip()),
+        encoding="utf-8",
+    )
+    return target
+
+
+def _write_ocr_text_archive(output_dir: Path, ocr_text_dir: Path, files: list[Path]) -> Optional[Path]:
+    existing_files = [path for path in files if path.exists() and path.is_file()]
+    if not existing_files:
+        return None
+    archive_path = output_dir / "OCR识别文本.zip"
+    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+        for file_path in existing_files:
+            try:
+                archive_name = file_path.relative_to(ocr_text_dir).as_posix()
+            except ValueError:
+                archive_name = file_path.name
+            archive.write(file_path, arcname=archive_name)
+    return archive_path
 
 
 def _output_web_path(path: Path) -> str:

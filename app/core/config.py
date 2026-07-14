@@ -98,7 +98,13 @@ class Settings(BaseSettings):
     WORD_COUNT_ALLOW_LOCAL_PATHS: str = os.getenv("WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
     WORD_COUNT_MAX_FILES: int = int(os.getenv("WORD_COUNT_MAX_FILES", "5000"))
     WORD_COUNT_MAX_FILE_MB: int = int(os.getenv("WORD_COUNT_MAX_FILE_MB", "200"))
+    WORD_COUNT_UPLOAD_MAX_MB: int = int(os.getenv("WORD_COUNT_UPLOAD_MAX_MB", "50"))
+    MSG_CONVERT_UPLOAD_MAX_MB: int = int(os.getenv("MSG_CONVERT_UPLOAD_MAX_MB", "95"))
     WORD_COUNT_FOLLOW_SYMLINKS: str = os.getenv("WORD_COUNT_FOLLOW_SYMLINKS", "False")
+    ODA_FILE_CONVERTER_PATH: str = os.getenv("ODA_FILE_CONVERTER_PATH", "")
+    WORD_COUNT_CAD_CONVERT_TIMEOUT_SECONDS: int = int(
+        os.getenv("WORD_COUNT_CAD_CONVERT_TIMEOUT_SECONDS", "300")
+    )
 
     if _USE_SETTINGS_CONFIG_DICT:
         model_config = SettingsConfigDict(

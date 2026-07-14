@@ -25,6 +25,12 @@ from app.service.business_licence_service import (
 )
 from app.service.doc_translate_service import DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE, execute_doc_translate_task
 from app.service.drivers_license_service import execute_drivers_license_task
+from app.service.msg_convert_service import (
+    MSG_CONVERT_DEFAULT_OUTPUT_FORMAT,
+    execute_msg_convert_task,
+    normalize_msg_output_format,
+    validate_msg_file,
+)
 from app.service.number_check_service import (
     NUMBER_CHECK_MODE_ALIGNMENT,
     _get_task_progress as get_number_check_progress,
@@ -36,10 +42,18 @@ from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_MODEL,
     execute_pdf2docx_task_from_path,
 )
-from app.service.word_count_service import execute_word_count_task, prepare_word_count_request
+from app.service.word_count_service import (
+    execute_word_count_task,
+    prepare_word_count_request,
+    prepare_word_count_upload_request,
+)
 
 
 class TaskCancelledError(Exception):
+    pass
+
+
+class UploadSizeLimitError(ValueError):
     pass
 
 
@@ -72,6 +86,7 @@ class TaskQueueService:
         'number_check': 2,
         'zhongfanyi': 2,
         'word_count': 1,
+        'msg_convert': 1,
     }
     SHARED_TASK_GROUPS: Dict[str, str] = {
         'number_check': 'specialist_text',
@@ -142,7 +157,14 @@ class TaskQueueService:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
         return hashlib.sha256(encoded).hexdigest()
 
-    async def _stage_upload(self, task_type: str, role: str, upload: UploadFile, fallback_name: str) -> StagedUpload:
+    async def _stage_upload(
+        self,
+        task_type: str,
+        role: str,
+        upload: UploadFile,
+        fallback_name: str,
+        max_bytes: Optional[int] = None,
+    ) -> StagedUpload:
         original_filename = upload.filename or fallback_name
         ext = Path(original_filename).suffix or Path(fallback_name).suffix or '.bin'
         temp_dir = Path(settings.UPLOAD_DIR) / '_tmp_uploads' / task_type
@@ -156,9 +178,12 @@ class TaskQueueService:
                     chunk = await upload.read(self.UPLOAD_CHUNK_SIZE)
                     if not chunk:
                         break
+                    size += len(chunk)
+                    if max_bytes is not None and size > max_bytes:
+                        limit_mb = max_bytes / (1024 * 1024)
+                        raise UploadSizeLimitError(f"文件超过上传限制 {limit_mb:g} MB，请改用共享路径统计")
                     target.write(chunk)
                     digest.update(chunk)
-                    size += len(chunk)
         except Exception:
             temp_path.unlink(missing_ok=True)
             raise
@@ -172,13 +197,20 @@ class TaskQueueService:
             ext=ext,
         )
 
-    async def _stage_uploads(self, task_type: str, uploads: list[tuple[str, Optional[UploadFile], str]]) -> list[StagedUpload]:
+    async def _stage_uploads(
+        self,
+        task_type: str,
+        uploads: list[tuple[str, Optional[UploadFile], str]],
+        max_bytes: Optional[int] = None,
+    ) -> list[StagedUpload]:
         staged_uploads: list[StagedUpload] = []
         try:
             for role, upload, fallback_name in uploads:
                 if upload is None:
                     continue
-                staged_uploads.append(await self._stage_upload(task_type, role, upload, fallback_name))
+                staged_uploads.append(
+                    await self._stage_upload(task_type, role, upload, fallback_name, max_bytes=max_bytes)
+                )
         except Exception:
             self._cleanup_staged_uploads(staged_uploads)
             raise
@@ -554,6 +586,65 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
+    async def submit_msg_convert_task(
+        self,
+        *,
+        file: UploadFile,
+        output_format: str = MSG_CONVERT_DEFAULT_OUTPUT_FORMAT,
+        batch_id: Optional[str] = None,
+        batch_name: Optional[str] = None,
+        batch_index: Optional[int] = None,
+        batch_total: Optional[int] = None,
+    ) -> TaskSubmitResult:
+        normalized_format = normalize_msg_output_format(output_format)
+        max_bytes = max(1, int(settings.MSG_CONVERT_UPLOAD_MAX_MB or 95)) * 1024 * 1024
+        try:
+            staged_uploads = await self._stage_uploads(
+                'msg_convert',
+                [('input', file, 'input.msg')],
+                max_bytes=max_bytes,
+            )
+        except UploadSizeLimitError as exc:
+            raise UploadSizeLimitError(
+                f"MSG 文件超过 {settings.MSG_CONVERT_UPLOAD_MAX_MB:g} MB 上传限制"
+            ) from exc
+
+        reserved_task = None
+        try:
+            item = staged_uploads[0]
+            validate_msg_file(item.temp_path, item.original_filename, max_bytes=max_bytes)
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='msg_convert',
+                filename=item.original_filename,
+                params={'output_format': normalized_format},
+                staged_uploads=staged_uploads,
+                batch_id=batch_id,
+                batch_name=batch_name,
+                batch_index=batch_index,
+                batch_total=batch_total,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            input_path = self._move_staged_upload(
+                item,
+                Path(settings.UPLOAD_DIR) / 'msg_convert' / reserved_task.display_no,
+                reserved_task.display_no,
+                reserved_task.task_id,
+            )
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {'input_path': input_path, 'original_filename': item.original_filename},
+            )
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
     async def submit_word_count_task(
         self,
         *,
@@ -561,12 +652,16 @@ class TaskQueueService:
         recursive: bool = True,
         include_hidden: bool = False,
         extensions: Optional[list[str]] = None,
+        ocr_mode: str = 'auto',
+        ocr_model: Optional[str] = None,
     ) -> TaskSubmitResult:
         prepared = prepare_word_count_request(
             directory_path=directory_path,
             recursive=recursive,
             include_hidden=include_hidden,
             extensions=extensions,
+            ocr_mode=ocr_mode,
+            ocr_model=ocr_model,
         )
         params = prepared['params']
         input_files = prepared['input_files']
@@ -584,6 +679,60 @@ class TaskQueueService:
             self._notify_dispatcher()
             return submit_result
         except Exception as exc:
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
+    async def submit_word_count_upload_task(
+        self,
+        *,
+        file: UploadFile,
+        ocr_mode: str = 'auto',
+        ocr_model: Optional[str] = None,
+    ) -> TaskSubmitResult:
+        prepared = prepare_word_count_upload_request(
+            filename=file.filename or '',
+            ocr_mode=ocr_mode,
+            ocr_model=ocr_model,
+        )
+        max_bytes = max(1, int(settings.WORD_COUNT_UPLOAD_MAX_MB or 50)) * 1024 * 1024
+        staged_uploads = await self._stage_uploads(
+            'word_count',
+            [('input', file, f"input{prepared['extension']}")],
+            max_bytes=max_bytes,
+        )
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='word_count',
+                filename=prepared['filename'],
+                params=prepared['params'],
+                staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            item = staged_uploads[0]
+            input_path = self._move_staged_upload(
+                item,
+                Path(settings.UPLOAD_DIR) / 'word_count' / reserved_task.display_no,
+                reserved_task.display_no,
+                reserved_task.task_id,
+            )
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {
+                    'directory_path': input_path,
+                    'input_kind': 'file',
+                    'input_source': 'upload',
+                    'original_filename': item.original_filename,
+                },
+            )
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            self._cleanup_staged_uploads(staged_uploads)
             if reserved_task is not None:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
@@ -686,7 +835,7 @@ class TaskQueueService:
         return None
 
     def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
-        if task_type in {'doc_translate', 'business_licence', 'pdf2docx'}:
+        if task_type in {'doc_translate', 'business_licence', 'pdf2docx', 'msg_convert'}:
             return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
 
         if task_type == 'word_count':
@@ -902,6 +1051,9 @@ class TaskQueueService:
             elif task_type == 'word_count':
                 result = await self._execute_word_count(task_id, display_no, input_files, params, update)
                 output_path = result.get('report_excel') if result else None
+            elif task_type == 'msg_convert':
+                result = await self._execute_msg_convert(task_id, display_no, input_files, params, update)
+                output_path = (result.get('output_docx') or result.get('output_pdf')) if result else None
             else:
                 raise ValueError(f'unsupported task type: {task_type}')
             output_files = self._extract_output_files(task_type, result, output_path, filename)
@@ -1056,6 +1208,22 @@ class TaskQueueService:
             recursive=bool(params.get('recursive', True)),
             include_hidden=bool(params.get('include_hidden', False)),
             extensions=params.get('extensions') or None,
+            ocr_mode=params.get('ocr_mode', 'auto'),
+            ocr_model=params.get('ocr_model') or PDF2DOCX_DEFAULT_MODEL,
+            ocr_route=params.get('ocr_route') or PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+            input_source=params.get('input_source', 'path'),
+            original_filename=input_files.get('original_filename'),
+            progress_callback=update,
+            executor=self._task_executor,
+        )
+
+    async def _execute_msg_convert(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        return await execute_msg_convert_task(
+            task_id=task_id,
+            display_no=display_no,
+            input_path=input_files['input_path'],
+            original_filename=input_files.get('original_filename') or 'input.msg',
+            output_format=params.get('output_format', MSG_CONVERT_DEFAULT_OUTPUT_FORMAT),
             progress_callback=update,
             executor=self._task_executor,
         )
@@ -1129,6 +1297,10 @@ class TaskQueueService:
         elif task_type == 'word_count':
             add_result('report_excel', ftype='report')
             add_result('report_json', ftype='report')
+            add_result('ocr_text_archive', ftype='report')
+        elif task_type == 'msg_convert':
+            add_result('output_docx')
+            add_result('output_pdf')
         if not files and output_path:
             files.append({'name': friendly(output_path, original_filename, 'output'), 'path': output_path, 'type': 'output'})
 

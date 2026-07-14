@@ -15,6 +15,7 @@ TASK_TYPE_LABELS = {
     'doc_translate': 'Doc Translate',
     'business_licence': '证件翻译（营业执照）',
     'pdf2docx': 'PDF2DOCX',
+    'msg_convert': 'MSG 转文档',
     'word_count': '字数统计',
 }
 

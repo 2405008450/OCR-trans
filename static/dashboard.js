@@ -1,7 +1,7 @@
 const POLL_INTERVAL = 2000;
 const DETAIL_POLL_INTERVAL = 1500;
 const DASHBOARD_TIME_ZONE = 'Asia/Shanghai';
-const INFERRED_BATCH_TYPES = new Set(['pdf2docx', 'doc_translate']);
+const INFERRED_BATCH_TYPES = new Set(['pdf2docx', 'doc_translate', 'msg_convert']);
 const INFERRED_BATCH_WINDOW_MS = 2000;
 
 let currentPage = 1;

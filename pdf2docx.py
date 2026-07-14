@@ -9,7 +9,7 @@ import sys
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from app.core.config import settings
 from app.service.gemini_service import (
@@ -375,7 +375,7 @@ def _ocr_single_image(
                 print(response_text, end="", flush=True)
                 if stage_index > 0:
                     _emit_ocr_status(
-                        f"✅ OCR 已恢复：{_route_display_name(route)} / {candidate_model}",
+                        f"OCR 已恢复：{_route_display_name(route)} / {candidate_model}",
                         status_callback,
                     )
                 return response_text
@@ -387,7 +387,7 @@ def _ocr_single_image(
                 if retry_same_stage:
                     wait = 3 * (attempt + 1)
                     _emit_ocr_status(
-                        f"⚠️ {_ocr_exception_message(exc)}，{wait} 秒后重试 "
+                        f"{_ocr_exception_message(exc)}，{wait} 秒后重试 "
                         f"[{attempt + 1}/{stage_retries}]...",
                         status_callback,
                     )
@@ -397,7 +397,7 @@ def _ocr_single_image(
                 if stage_index < len(attempt_plan) - 1:
                     next_stage = attempt_plan[stage_index + 1]
                     _emit_ocr_status(
-                        f"⚠️ {_ocr_exception_message(exc)}，准备切换到 "
+                        f"{_ocr_exception_message(exc)}，准备切换到 "
                         f"{_route_display_name(next_stage['route'])} / {next_stage['model']}",
                         status_callback,
                     )
@@ -408,6 +408,69 @@ def _ocr_single_image(
                 ) from exc
 
 
+def _normalized_page_numbers(page_numbers: Iterable[int] | None, total_pages: int) -> list[int]:
+    if page_numbers is None:
+        return list(range(1, total_pages + 1))
+
+    normalized: set[int] = set()
+    for value in page_numbers:
+        try:
+            page_no = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= page_no <= total_pages:
+            normalized.add(page_no)
+    return sorted(normalized)
+
+
+def _image_frames_for_ocr(file_path: str) -> list[tuple[bytes, str]]:
+    ext = Path(file_path).suffix.lower()
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }
+    if ext in mime_map:
+        return [(Path(file_path).read_bytes(), mime_map[ext])]
+
+    if ext not in {".gif", ".tif", ".tiff"}:
+        return [(Path(file_path).read_bytes(), "image/png")]
+
+    from PIL import Image, ImageSequence
+
+    frames: list[tuple[bytes, str]] = []
+    with Image.open(file_path) as image:
+        source_frames = ImageSequence.Iterator(image) if ext in {".tif", ".tiff"} else [image]
+        for source_frame in source_frames:
+            frame = source_frame.convert("RGBA") if "A" in source_frame.getbands() else source_frame.convert("RGB")
+            output = io.BytesIO()
+            frame.save(output, format="PNG")
+            frames.append((output.getvalue(), "image/png"))
+    return frames
+
+
+def _build_ocr_metadata(
+    *,
+    page_results: list[dict[str, Any]],
+    total_pages: int,
+    requested_pages: list[int],
+) -> dict[str, Any]:
+    successful = [item for item in page_results if not item.get("error")]
+    blank_pages = [int(item["page_number"]) for item in successful if item.get("blank")]
+    failed_pages = [int(item["page_number"]) for item in page_results if item.get("error")]
+    return {
+        "text": "\n\n<page_break/>\n\n".join(str(item.get("text") or "") for item in successful),
+        "total_pages": total_pages,
+        "processed_pages": requested_pages,
+        "blank_page_count": len(blank_pages),
+        "blank_pages": blank_pages,
+        "failed_pages": failed_pages,
+        "page_results": page_results,
+    }
+
+
 def ocr_file(
     file_path: str,
     api_key: str = "",
@@ -416,29 +479,31 @@ def ocr_file(
     page_progress_callback=None,
     return_metadata: bool = False,
     ocr_status_callback=None,
+    page_numbers: Iterable[int] | None = None,
+    continue_on_error: bool = False,
 ) -> str | dict[str, Any]:
-    """调用 LLM 对图片或 PDF 进行 OCR，返回混合 HTML/Markdown 文本。
-    PDF 会逐页渲染为图片后分页发送，避免大文件直传超限。
-    page_progress_callback(current_page, total_pages) 可选，用于报告逐页进度。
+    """调用 LLM 对图片或 PDF 进行 OCR，并可返回逐页结果。
+
+    PDF 支持通过 ``page_numbers`` 仅识别指定页。默认遇到任一页面失败即抛错，
+    保持原有 PDF2DOCX 行为；字数统计可启用 ``continue_on_error`` 保留诊断信息。
     """
     ext = Path(file_path).suffix.lower()
 
     if ext == ".pdf":
         try:
             import fitz  # PyMuPDF
-        except ImportError:
-            print("请先安装 PyMuPDF: pip install pymupdf")
-            sys.exit(1)
+        except ImportError as exc:
+            raise RuntimeError("请先安装 PyMuPDF: pip install pymupdf") from exc
 
         doc = fitz.open(file_path)
         try:
             total = len(doc)
-            all_results = []
-            blank_pages: list[int] = []
+            selected_pages = _normalized_page_numbers(page_numbers, total)
+            page_results: list[dict[str, Any]] = []
 
-            for i, page in enumerate(doc):
-                page_no = i + 1
-                print(f"\n🔄 正在处理第 {page_no}/{total} 页...")
+            for selected_index, page_no in enumerate(selected_pages, start=1):
+                page = doc[page_no - 1]
+                print(f"\n正在处理第 {page_no}/{total} 页...")
                 if page_progress_callback:
                     page_progress_callback(page_no, total)
 
@@ -446,73 +511,92 @@ def ocr_file(
                     if ocr_status_callback:
                         ocr_status_callback(f"第 {current_page}/{total_pages} 页：{message}")
 
-                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-                img_b64 = base64.standard_b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode("utf-8")
-                text = _ocr_single_image(
-                    img_b64,
-                    "image/jpeg",
-                    model,
-                    gemini_route=gemini_route,
-                    status_callback=page_status,
-                )
-                if _is_blank_ocr_result(text):
-                    blank_pages.append(page_no)
-                    _emit_ocr_status(
-                        f"ℹ️ 第 {page_no}/{total} 页 OCR 输出为空，已计为空白页",
-                        ocr_status_callback,
+                try:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                    img_b64 = base64.standard_b64encode(pix.tobytes("jpeg", jpg_quality=85)).decode("utf-8")
+                    text = _ocr_single_image(
+                        img_b64,
+                        "image/jpeg",
+                        model,
+                        gemini_route=gemini_route,
+                        status_callback=page_status,
                     )
-                all_results.append(text)
-                if i < total - 1:
+                    is_blank = _is_blank_ocr_result(text)
+                    page_results.append(
+                        {"page_number": page_no, "text": text, "blank": is_blank, "error": ""}
+                    )
+                    if is_blank:
+                        _emit_ocr_status(
+                            f"第 {page_no}/{total} 页 OCR 输出为空，已计为空白页",
+                            ocr_status_callback,
+                        )
+                except Exception as exc:
+                    if not continue_on_error:
+                        raise
+                    error = _ocr_exception_message(exc)
+                    page_results.append(
+                        {"page_number": page_no, "text": "", "blank": False, "error": error}
+                    )
+                    _emit_ocr_status(f"第 {page_no}/{total} 页 OCR 失败：{error}", ocr_status_callback)
+
+                if selected_index < len(selected_pages):
                     time.sleep(1)
         finally:
             close = getattr(doc, "close", None)
             if callable(close):
                 close()
 
-        print("\n✅ PDF OCR 完成")
-        joined_text = "\n\n<page_break/>\n\n".join(all_results)
-        if return_metadata:
-            return {
-                "text": joined_text,
-                "total_pages": total,
-                "blank_page_count": len(blank_pages),
-                "blank_pages": blank_pages,
-            }
-        return joined_text
-
-    else:
-        mime_map = {
-            ".png":  "image/png",
-            ".jpg":  "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".gif":  "image/gif",
-            ".webp": "image/webp",
-            ".bmp":  "image/bmp",
-        }
-        mime_type = mime_map.get(ext, "image/png")
-
-        with open(file_path, "rb") as f:
-            img_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
-
-        print("🔄 正在调用 LLM 进行 OCR...")
-        result = _ocr_single_image(
-            img_b64,
-            mime_type,
-            model,
-            gemini_route=gemini_route,
-            status_callback=ocr_status_callback,
+        print("\nPDF OCR 完成")
+        metadata = _build_ocr_metadata(
+            page_results=page_results,
+            total_pages=total,
+            requested_pages=selected_pages,
         )
-        print("\n✅ OCR 完成")
-        if return_metadata:
-            is_blank = _is_blank_ocr_result(result)
-            blank_pages = [1] if is_blank else []
-            return {
-                "text": result,
-                "total_pages": 1,
-                "blank_page_count": len(blank_pages),
-                "blank_pages": blank_pages,
-            }
-        return result
+        return metadata if return_metadata else metadata["text"]
+
+    frames = _image_frames_for_ocr(file_path)
+    total = len(frames)
+    selected_pages = _normalized_page_numbers(page_numbers, total)
+    page_results: list[dict[str, Any]] = []
+    for selected_index, page_no in enumerate(selected_pages, start=1):
+        image_bytes, mime_type = frames[page_no - 1]
+        if page_progress_callback:
+            page_progress_callback(page_no, total)
+        print(f"正在调用 LLM 进行 OCR{f'（第 {page_no}/{total} 页）' if total > 1 else ''}...")
+        try:
+            result = _ocr_single_image(
+                base64.standard_b64encode(image_bytes).decode("utf-8"),
+                mime_type,
+                model,
+                gemini_route=gemini_route,
+                status_callback=ocr_status_callback,
+            )
+            page_results.append(
+                {
+                    "page_number": page_no,
+                    "text": result,
+                    "blank": _is_blank_ocr_result(result),
+                    "error": "",
+                }
+            )
+        except Exception as exc:
+            if not continue_on_error:
+                raise
+            error = _ocr_exception_message(exc)
+            page_results.append(
+                {"page_number": page_no, "text": "", "blank": False, "error": error}
+            )
+            _emit_ocr_status(f"第 {page_no}/{total} 页 OCR 失败：{error}", ocr_status_callback)
+        if selected_index < len(selected_pages):
+            time.sleep(1)
+
+    print("\nOCR 完成")
+    metadata = _build_ocr_metadata(
+        page_results=page_results,
+        total_pages=total,
+        requested_pages=selected_pages,
+    )
+    return metadata if return_metadata else metadata["text"]
 
 
 # ============================================================
@@ -936,7 +1020,7 @@ class HybridToDocxConverter:
 
         # Step 3: 保存
         self.doc.save(output_path)
-        print(f"✅ Word 文档已保存: {output_path}")
+        print(f"Word 文档已保存: {output_path}")
 
     # ----------------------------------------------------------
     # 预处理
@@ -1483,7 +1567,7 @@ def main():
         sys.exit(1)
 
     if not os.path.exists(FILE_PATH):
-        print(f"❌ 文件不存在: {FILE_PATH}")
+        print(f"文件不存在: {FILE_PATH}")
         sys.exit(1)
 
     # Step 1: OCR

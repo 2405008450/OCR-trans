@@ -65,4 +65,6 @@ businesslicence/outputs/*
 
 tmp/
 .codex-docx-qa/
+tests/*
+!tests/test_msg_convert_service.py
 tests/

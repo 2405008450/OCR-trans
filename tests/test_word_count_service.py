@@ -12,6 +12,7 @@ from openpyxl import Workbook, load_workbook
 from pptx import Presentation
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from starlette.datastructures import UploadFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -20,6 +21,8 @@ from app.db.database import Base
 from app.model.entity import Task
 from app.service import task_queue_service as queue_module
 from app.service import word_count_service
+from app.service.ocr_text_service import ocr_markup_to_plain_text
+import pdf2docx as pdf2docx_module
 
 
 def _make_png(path: Path) -> None:
@@ -123,6 +126,24 @@ def test_word_like_counter_matches_word_stats_sample():
 def test_word_like_counter_handles_edge_punctuation():
     assert word_count_service.count_words_word_like("“中文”") == 4
     assert word_count_service.count_words_word_like("中文…") == 3
+
+
+def test_ocr_markup_to_plain_text_removes_html_and_markdown():
+    raw = """# 标题
+
+**Hello** world
+<table><tr><td>表格</td><td>123</td></tr></table>
+"""
+
+    plain = ocr_markup_to_plain_text(raw)
+    metrics = word_count_service._count_text(plain)
+
+    assert "<table>" not in plain
+    assert "**" not in plain
+    assert "标题" in plain
+    assert "Hello" in plain
+    assert metrics.word_count == 7
+    assert metrics.script_count_total == metrics.word_count
 
 
 def test_docx_nested_table_text_is_not_counted_twice(tmp_path):
@@ -315,6 +336,222 @@ def test_office_pdf_txt_and_blank_pdf_statuses(tmp_path, monkeypatch):
     assert result["summary"]["total_image_count"] >= 2
 
 
+def test_ocr_auto_mode_depends_on_input_kind(tmp_path, monkeypatch):
+    _allow_root(monkeypatch, tmp_path)
+    image_path = tmp_path / "scan.png"
+    _make_png(image_path)
+
+    single = word_count_service.prepare_word_count_request(directory_path=str(image_path))
+    directory = word_count_service.prepare_word_count_request(directory_path=str(tmp_path))
+    directory_on = word_count_service.prepare_word_count_request(
+        directory_path=str(tmp_path),
+        ocr_mode="on",
+    )
+
+    assert single["params"]["ocr_enabled"] is True
+    assert directory["params"]["ocr_enabled"] is False
+    assert directory_on["params"]["ocr_enabled"] is True
+
+
+def test_single_image_ocr_is_counted_and_archived(tmp_path, monkeypatch):
+    _allow_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(word_count_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+    image_path = tmp_path / "scan.png"
+    _make_png(image_path)
+
+    def fake_extract_ocr_plain_text(**_kwargs):
+        return {
+            "text": "中文 Hello 123",
+            "total_pages": 1,
+            "processed_pages": [1],
+            "failed_pages": [],
+            "page_results": [
+                {"page_number": 1, "text": "中文 Hello 123", "raw_text": "", "blank": False, "error": ""}
+            ],
+        }
+
+    monkeypatch.setattr(word_count_service, "extract_ocr_plain_text", fake_extract_ocr_plain_text)
+    result = word_count_service.run_word_count_task_sync(
+        task_id="task-image-ocr",
+        display_no="000-image-ocr",
+        directory_path=str(image_path),
+        recursive=True,
+        include_hidden=False,
+        extensions=[".png"],
+    )
+
+    file_result = result["files"][0]
+    assert file_result["status"] == "counted"
+    assert file_result["ocr_used"] is True
+    assert file_result["ocr_page_count"] == 1
+    assert file_result["main_word_count"] == 4
+    assert result["summary"]["ocr_files"] == 1
+    assert result["summary"]["ocr_pages"] == 1
+    assert result["summary"]["total_main_word_count"] == 4
+
+    archive_path = tmp_path / result["ocr_text_archive"]
+    assert archive_path.exists()
+    with ZipFile(archive_path) as archive:
+        assert archive.namelist() == ["scan.png.txt"]
+        assert archive.read("scan.png.txt").decode("utf-8") == "中文 Hello 123"
+
+    report = load_workbook(tmp_path / result["report_excel"], read_only=True)
+    try:
+        headers = [cell.value for cell in next(report["文件明细"].iter_rows(max_row=1))]
+        assert "是否使用 OCR" in headers
+        assert "OCR 失败页" in headers
+        assert "OCR 文本路径" in headers
+    finally:
+        report.close()
+
+
+def test_directory_auto_mode_keeps_image_as_needs_ocr(tmp_path, monkeypatch):
+    _allow_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(word_count_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+    _make_png(tmp_path / "scan.png")
+
+    def unexpected_ocr(**_kwargs):
+        raise AssertionError("目录自动模式不应调用 OCR")
+
+    monkeypatch.setattr(word_count_service, "extract_ocr_plain_text", unexpected_ocr)
+    result = word_count_service.run_word_count_task_sync(
+        task_id="task-dir-auto",
+        display_no="000-dir-auto",
+        directory_path=str(tmp_path),
+        recursive=True,
+        include_hidden=False,
+        extensions=[".png"],
+        ocr_mode="auto",
+    )
+
+    assert result["files"][0]["status"] == "needs_ocr"
+    assert result["summary"]["needs_ocr_files"] == 1
+    assert result["ocr_text_archive"] == ""
+
+
+def test_mixed_pdf_only_ocrs_scanned_page(tmp_path, monkeypatch):
+    _allow_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(word_count_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+    image_path = tmp_path / "page.png"
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (900, 1200), "white")
+    ImageDraw.Draw(image).text((80, 120), "scanned page", fill="black")
+    image.save(image_path)
+
+    import fitz
+
+    pdf_path = tmp_path / "mixed.pdf"
+    pdf = fitz.open()
+    text_page = pdf.new_page()
+    text_page.insert_text((72, 72), "PDF text layer content")
+    scan_page = pdf.new_page(width=595, height=842)
+    scan_page.insert_image(scan_page.rect, filename=str(image_path))
+    pdf.save(pdf_path)
+    pdf.close()
+
+    captured = {}
+
+    def fake_extract_ocr_plain_text(**kwargs):
+        captured.update(kwargs)
+        return {
+            "text": "扫描页 Scan",
+            "total_pages": 2,
+            "processed_pages": [2],
+            "failed_pages": [],
+            "page_results": [
+                {"page_number": 2, "text": "扫描页 Scan", "raw_text": "", "blank": False, "error": ""}
+            ],
+        }
+
+    monkeypatch.setattr(word_count_service, "extract_ocr_plain_text", fake_extract_ocr_plain_text)
+    result = word_count_service.run_word_count_task_sync(
+        task_id="task-mixed-pdf",
+        display_no="000-mixed-pdf",
+        directory_path=str(pdf_path),
+        recursive=True,
+        include_hidden=False,
+        extensions=[".pdf"],
+    )
+
+    file_result = result["files"][0]
+    assert list(captured["page_numbers"]) == [2]
+    assert file_result["status"] == "counted"
+    assert file_result["ocr_page_count"] == 1
+    assert file_result["main_word_count"] == 8
+    assert file_result["source_counts"] == {"pdf_page": 1, "pdf_ocr_page": 1}
+
+
+def test_partial_ocr_failure_is_excluded_but_text_is_kept(tmp_path, monkeypatch):
+    _allow_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(word_count_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+    image_path = tmp_path / "partial.png"
+    _make_png(image_path)
+
+    def fake_extract_ocr_plain_text(**_kwargs):
+        return {
+            "text": "成功页面",
+            "total_pages": 2,
+            "processed_pages": [1, 2],
+            "failed_pages": [2],
+            "page_results": [
+                {"page_number": 1, "text": "成功页面", "raw_text": "", "blank": False, "error": ""},
+                {"page_number": 2, "text": "", "raw_text": "", "blank": False, "error": "timeout"},
+            ],
+        }
+
+    monkeypatch.setattr(word_count_service, "extract_ocr_plain_text", fake_extract_ocr_plain_text)
+    result = word_count_service.run_word_count_task_sync(
+        task_id="task-partial-ocr",
+        display_no="000-partial-ocr",
+        directory_path=str(image_path),
+        recursive=True,
+        include_hidden=False,
+        extensions=[".png"],
+    )
+
+    file_result = result["files"][0]
+    assert file_result["status"] == "failed"
+    assert file_result["main_word_count"] == 0
+    assert file_result["ocr_failed_pages"] == [2]
+    assert result["summary"]["total_main_word_count"] == 0
+    assert result["summary"]["ocr_failed_files"] == 1
+    with ZipFile(tmp_path / result["ocr_text_archive"]) as archive:
+        assert archive.read("partial.png.txt").decode("utf-8") == "成功页面"
+
+
+def test_pdf2docx_ocr_supports_selected_pages_and_image_frames(tmp_path, monkeypatch):
+    import fitz
+    from PIL import Image
+
+    pdf_path = tmp_path / "pages.pdf"
+    pdf = fitz.open()
+    for _ in range(3):
+        pdf.new_page()
+    pdf.save(pdf_path)
+    pdf.close()
+
+    monkeypatch.setattr(pdf2docx_module, "_ocr_single_image", lambda *_args, **_kwargs: "<p>Page two</p>")
+    payload = pdf2docx_module.ocr_file(
+        str(pdf_path),
+        page_numbers=[2],
+        return_metadata=True,
+    )
+    assert payload["processed_pages"] == [2]
+    assert payload["failed_pages"] == []
+    assert payload["page_results"][0]["page_number"] == 2
+
+    first = Image.new("RGB", (20, 20), "white")
+    second = Image.new("RGB", (20, 20), "black")
+    tiff_path = tmp_path / "multi.tiff"
+    first.save(tiff_path, save_all=True, append_images=[second])
+    gif_path = tmp_path / "animated.gif"
+    first.save(gif_path, save_all=True, append_images=[second], duration=100, loop=0)
+
+    assert len(pdf2docx_module._image_frames_for_ocr(str(tiff_path))) == 2
+    assert len(pdf2docx_module._image_frames_for_ocr(str(gif_path))) == 1
+
+
 def test_directory_must_be_inside_allowed_roots(tmp_path, monkeypatch):
     allowed = tmp_path / "allowed"
     outside = tmp_path / "outside"
@@ -459,6 +696,11 @@ def test_word_count_config_and_submit_endpoint(monkeypatch, tmp_path):
     config = anyio.run(task_controller.get_word_count_page_config)
     assert config["allowed_roots"][0]["path"] == str(tmp_path)
     assert ".docx" in config["countable_extensions"]
+    assert config["cad_support"]["direct_dxf"] is True
+    assert ".dxf" in config["cad_support"]["supported_extensions"]
+    assert "ODA_FILE_CONVERTER_PATH" not in json.dumps(config["cad_support"], ensure_ascii=False)
+    assert config["default_ocr_mode"] == "auto"
+    assert config["default_ocr_model"] in config["ocr_models"]
 
     captured = {}
 
@@ -468,7 +710,14 @@ def test_word_count_config_and_submit_endpoint(monkeypatch, tmp_path):
 
     monkeypatch.setattr(task_controller.task_queue_service, "submit_word_count_task", fake_submit_word_count_task)
 
-    body = task_controller.WordCountSubmitBody(directory_path=str(tmp_path), recursive=False, include_hidden=True, extensions=["docx"])
+    body = task_controller.WordCountSubmitBody(
+        directory_path=str(tmp_path),
+        recursive=False,
+        include_hidden=True,
+        extensions=["docx"],
+        ocr_mode="on",
+        ocr_model="google/gemini-3.1-flash-lite",
+    )
     result = anyio.run(task_controller.submit_word_count, body)
 
     assert result["status"] == "ACCEPTED"
@@ -476,6 +725,18 @@ def test_word_count_config_and_submit_endpoint(monkeypatch, tmp_path):
     assert captured["recursive"] is False
     assert captured["include_hidden"] is True
     assert captured["extensions"] == ["docx"]
+    assert captured["ocr_mode"] == "on"
+    assert captured["ocr_model"] == "google/gemini-3.1-flash-lite"
+
+
+def test_word_count_page_keeps_ocr_model_fallback_options():
+    project_root = Path(__file__).resolve().parents[1]
+    html = (project_root / "static" / "word_count.html").read_text(encoding="utf-8")
+    javascript = (project_root / "static" / "word_count.js").read_text(encoding="utf-8")
+
+    assert '<option value="google/gemini-3-flash-preview" selected>' in html
+    assert "FALLBACK_OCR_MODELS" in javascript
+    assert "Object.keys(configuredModels).length ? configuredModels : FALLBACK_OCR_MODELS" in javascript
 
 
 def test_word_count_task_submission_uses_queue_dedupe(tmp_path, monkeypatch):
@@ -513,3 +774,161 @@ def test_word_count_task_submission_uses_queue_dedupe(tmp_path, monkeypatch):
         task = db.query(Task).one()
         assert task.task_type == "word_count"
         assert json.loads(task.input_files_json)["directory_path"] == str(tmp_path.resolve())
+
+
+def test_prepare_word_count_upload_request_validates_file_and_config(monkeypatch):
+    monkeypatch.setattr(word_count_service.settings, "WORD_COUNT_UPLOAD_MAX_MB", 12)
+
+    prepared = word_count_service.prepare_word_count_upload_request(
+        filename="客户报价.docx",
+        ocr_mode="auto",
+    )
+
+    assert prepared["filename"] == "客户报价.docx"
+    assert prepared["extension"] == ".docx"
+    assert prepared["params"]["input_source"] == "upload"
+    assert prepared["params"]["input_kind"] == "file"
+    assert prepared["params"]["ocr_enabled"] is True
+    assert prepared["params"]["upload_max_file_mb"] == 12
+
+    with pytest.raises(ValueError, match="不支持的文件格式"):
+        word_count_service.prepare_word_count_upload_request(filename="报价.exe")
+
+
+def test_uploaded_word_count_file_uses_trusted_upload_root_and_original_name(tmp_path, monkeypatch):
+    upload_root = tmp_path / "uploads"
+    stored_file = upload_root / "word_count" / "task-1" / "000001_input_abc123.txt"
+    stored_file.parent.mkdir(parents=True)
+    stored_file.write_text("中文报价 Hello 123", encoding="utf-8")
+    monkeypatch.setattr(word_count_service.settings, "UPLOAD_DIR", str(upload_root))
+    monkeypatch.setattr(word_count_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(word_count_service.settings, "WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
+    monkeypatch.setattr(word_count_service.settings, "WORD_COUNT_ALLOWED_ROOTS_JSON", json.dumps([str(tmp_path / "other")]))
+
+    result = word_count_service.run_word_count_task_sync(
+        task_id="task-1",
+        display_no="000001",
+        directory_path=str(stored_file),
+        recursive=False,
+        include_hidden=False,
+        extensions=[".txt"],
+        ocr_mode="off",
+        input_source="upload",
+        original_filename="客户报价.txt",
+    )
+
+    assert result["input_source"] == "upload"
+    assert result["files"][0]["relative_path"] == "客户报价.txt"
+    assert result["files"][0]["filename"] == "客户报价.txt"
+    assert result["summary"]["counted_files"] == 1
+
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("不能读取", encoding="utf-8")
+    with pytest.raises(PermissionError, match="不在字数统计任务目录"):
+        word_count_service.run_word_count_task_sync(
+            task_id="task-2",
+            display_no="000002",
+            directory_path=str(outside_file),
+            recursive=False,
+            include_hidden=False,
+            extensions=[".txt"],
+            input_source="upload",
+        )
+
+
+def test_word_count_upload_submission_stages_file_and_dedupes(tmp_path, monkeypatch):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'upload-tasks.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX ux_task_active_request_fingerprint "
+                "ON task (request_fingerprint) "
+                "WHERE request_fingerprint IS NOT NULL AND status IN ('queued', 'running')"
+            )
+        )
+    testing_session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    monkeypatch.setattr(queue_module, "SessionLocal", testing_session)
+    monkeypatch.setattr(queue_module.settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(queue_module.settings, "WORD_COUNT_UPLOAD_MAX_MB", 2)
+    service = queue_module.TaskQueueService()
+
+    async def scenario():
+        first = await service.submit_word_count_upload_task(
+            file=UploadFile(filename="客户报价.txt", file=io.BytesIO(b"hello 123")),
+            ocr_mode="off",
+        )
+        second = await service.submit_word_count_upload_task(
+            file=UploadFile(filename="客户报价.txt", file=io.BytesIO(b"hello 123")),
+            ocr_mode="off",
+        )
+        return first, second
+
+    first, second = anyio.run(scenario)
+
+    assert first.task_id == second.task_id
+    assert first.deduped is False
+    assert second.deduped is True
+    with testing_session() as db:
+        task = db.query(Task).one()
+        params = json.loads(task.params_json)
+        input_files = json.loads(task.input_files_json)
+    stored_path = Path(input_files["directory_path"])
+    assert params["input_source"] == "upload"
+    assert input_files["original_filename"] == "客户报价.txt"
+    assert stored_path.is_file()
+    assert stored_path.read_bytes() == b"hello 123"
+    assert not list((tmp_path / "uploads" / "_tmp_uploads" / "word_count").glob("*"))
+
+
+def test_word_count_upload_rejects_oversize_and_cleans_temp_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(queue_module.settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr(queue_module.settings, "WORD_COUNT_UPLOAD_MAX_MB", 1)
+    service = queue_module.TaskQueueService()
+    upload = UploadFile(filename="too-large.txt", file=io.BytesIO(b"x" * (1024 * 1024 + 1)))
+
+    async def scenario():
+        return await service.submit_word_count_upload_task(file=upload, ocr_mode="off")
+
+    with pytest.raises(queue_module.UploadSizeLimitError, match="请改用共享路径统计"):
+        anyio.run(scenario)
+
+    temp_dir = tmp_path / "uploads" / "_tmp_uploads" / "word_count"
+    assert not list(temp_dir.glob("*"))
+
+
+def test_word_count_upload_endpoint_and_size_error(monkeypatch):
+    captured = {}
+
+    async def fake_submit_word_count_upload_task(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(task_id="upload-task", deduped=False)
+
+    monkeypatch.setattr(
+        task_controller.task_queue_service,
+        "submit_word_count_upload_task",
+        fake_submit_word_count_upload_task,
+    )
+    upload = UploadFile(filename="报价.docx", file=io.BytesIO(b"content"))
+    result = anyio.run(
+        task_controller.submit_word_count_upload,
+        upload,
+        "on",
+        "google/gemini-3.1-flash-lite",
+    )
+
+    assert result["status"] == "ACCEPTED"
+    assert captured["file"] is upload
+    assert captured["ocr_mode"] == "on"
+    assert captured["ocr_model"] == "google/gemini-3.1-flash-lite"
+
+    async def reject_upload(**kwargs):
+        raise queue_module.UploadSizeLimitError("文件超过上传限制 1 MB")
+
+    monkeypatch.setattr(task_controller.task_queue_service, "submit_word_count_upload_task", reject_upload)
+    with pytest.raises(task_controller.HTTPException) as exc_info:
+        anyio.run(task_controller.submit_word_count_upload, upload, "off", None)
+    assert exc_info.value.status_code == 413

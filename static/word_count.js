@@ -1,7 +1,20 @@
 const POLL_MS = 1600;
+const FALLBACK_OCR_MODEL = 'google/gemini-3-flash-preview';
+const FALLBACK_OCR_MODELS = {
+  'google/gemini-3.1-flash-lite': { label: '极速版V2' },
+  'google/gemini-3-flash-preview': { label: '快速版V2' },
+  'google/gemini-3.5-flash': { label: '新模型' },
+  'google/gemini-3.1-pro-preview': { label: '增强版V2' },
+  'anthropic/claude-sonnet-5': { label: 'Claude Sonnet 5' },
+};
 
 let currentTaskId = '';
 let pollTimer = null;
+let defaultOcrModel = FALLBACK_OCR_MODEL;
+let ocrModes = {};
+let uploadMaxFileMb = 50;
+let uploadExtensions = [];
+let selectedUploadFile = null;
 
 const statusTextMap = {
   queued: '排队中',
@@ -22,7 +35,18 @@ const fileStatusText = {
 function init() {
   document.getElementById('submitBtn').addEventListener('click', submitTask);
   document.getElementById('resetBtn').addEventListener('click', resetPage);
+  document.querySelectorAll('input[name="ocrMode"]').forEach((input) => {
+    input.addEventListener('change', updateOcrControls);
+  });
+  document.querySelectorAll('input[name="inputSource"]').forEach((input) => {
+    input.addEventListener('change', updateInputSource);
+  });
+  document.getElementById('uploadFileInput').addEventListener('change', (event) => {
+    setSelectedUploadFile(event.target.files?.[0] || null);
+  });
+  initUploadDropzone();
   initTooltips();
+  updateInputSource();
   loadConfig();
 }
 
@@ -54,38 +78,97 @@ function renderConfig(config) {
   const countable = (config.countable_extensions || []).join(' / ');
   const images = (config.image_extensions || []).join(' / ');
   const cad = (config.cad_extensions || []).join(' / ');
+  const cadSupport = config.cad_support && typeof config.cad_support === 'object'
+    ? config.cad_support
+    : {};
+  const cadSupported = Array.isArray(cadSupport.supported_extensions)
+    ? cadSupport.supported_extensions.join(' / ')
+    : '';
+  let cadHint = `CAD ${cad} 尚未配置解析工具`;
+  if (cadSupport.oda_available) {
+    const version = cadSupport.version ? ` ${cadSupport.version}` : '';
+    cadHint = `CAD 支持：${cadSupported || cad}（ODA File Converter${version} 已就绪）`;
+  } else if (cadSupport.direct_dxf) {
+    cadHint = `CAD 支持：${cadSupported || '.dxf'}；DWG / DWS / DWT 需配置 ODA File Converter`;
+  }
+  if (cadSupport.unavailable_reason && !cadSupport.oda_available) {
+    cadHint += `（${cadSupport.unavailable_reason}）`;
+  }
+  ocrModes = config.ocr_modes || {};
+  uploadMaxFileMb = Math.max(1, Number(config.upload_max_file_mb || 50));
+  uploadExtensions = Array.isArray(config.upload_extensions)
+    ? config.upload_extensions.map((item) => String(item).toLowerCase())
+    : [];
+  const fileInput = document.getElementById('uploadFileInput');
+  fileInput.accept = uploadExtensions.join(',');
+  renderUploadSelection();
+  const configuredModels = config.ocr_models && typeof config.ocr_models === 'object'
+    ? config.ocr_models
+    : {};
+  const models = Object.keys(configuredModels).length ? configuredModels : FALLBACK_OCR_MODELS;
+  defaultOcrModel = String(config.default_ocr_model || FALLBACK_OCR_MODEL);
+  const modelSelect = document.getElementById('ocrModelSelect');
+  modelSelect.innerHTML = Object.entries(models).map(([value, item]) => {
+    const label = item?.label || value;
+    return `<option value="${escAttr(value)}">${escHtml(label)}</option>`;
+  }).join('');
+  modelSelect.value = models[defaultOcrModel] ? defaultOcrModel : FALLBACK_OCR_MODEL;
   document.getElementById('formatHint').innerHTML = [
     `实际统计：${escHtml(countable)}`,
-    `扩展入口：图片 ${escHtml(images)}；CAD ${escHtml(cad)}`,
+    `OCR 支持：PDF 与独立图片 ${escHtml(images)}`,
+    escHtml(cadHint),
     `限制：最多 ${Number(config.max_files || 0).toLocaleString()} 个文件，单文件 ${Number(config.max_file_mb || 0)} MB`,
+    `直接上传：单文件不超过 ${uploadMaxFileMb} MB`,
   ].join('<br>');
+  updateOcrControls();
 }
 
 async function submitTask() {
+  const inputSource = currentInputSource();
   const directoryPath = document.getElementById('directoryPath').value.trim();
-  if (!directoryPath) {
-    alert('请填写目录路径');
+  if (inputSource === 'path' && !directoryPath) {
+    alert('请填写共享目录或文件路径');
     return;
   }
+  if (inputSource === 'upload' && !selectedUploadFile) {
+    alert('请选择需要统计的文件');
+    return;
+  }
+  if (inputSource === 'upload' && !validateUploadFile(selectedUploadFile)) return;
 
   const submitBtn = document.getElementById('submitBtn');
   submitBtn.disabled = true;
   setStatus({ status: 'queued', progress: 0, message: '正在提交任务...' });
 
-  const extensions = parseExtensions(document.getElementById('extensionsInput').value);
-  const body = {
-    directory_path: directoryPath,
-    recursive: document.getElementById('recursiveInput').checked,
-    include_hidden: document.getElementById('hiddenInput').checked,
-    extensions,
-  };
-
-  try {
-    const response = await fetch('/task/word-count', {
+  const ocrMode = document.querySelector('input[name="ocrMode"]:checked')?.value || 'auto';
+  const ocrModel = document.getElementById('ocrModelSelect').value || '';
+  let endpoint = '/task/word-count';
+  let requestOptions;
+  if (inputSource === 'upload') {
+    endpoint = '/task/word-count/upload';
+    const formData = new FormData();
+    formData.append('file', selectedUploadFile, selectedUploadFile.name);
+    formData.append('ocr_mode', ocrMode);
+    if (ocrModel) formData.append('ocr_model', ocrModel);
+    requestOptions = { method: 'POST', body: formData };
+  } else {
+    const body = {
+      directory_path: directoryPath,
+      recursive: document.getElementById('recursiveInput').checked,
+      include_hidden: document.getElementById('hiddenInput').checked,
+      extensions: parseExtensions(document.getElementById('extensionsInput').value),
+      ocr_mode: ocrMode,
+      ocr_model: ocrModel || null,
+    };
+    requestOptions = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, requestOptions);
     const payload = await response.json();
     if (!response.ok) {
       alert(payload.detail || '提交失败');
@@ -182,6 +265,9 @@ function renderDownloads(result, task) {
   if (result.report_json) {
     links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.report_json, '字数统计结果.json')}"><i class="fas fa-code"></i> 下载 JSON</a>`);
   }
+  if (result.ocr_text_archive) {
+    links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.ocr_text_archive, 'OCR识别文本.zip')}"><i class="fas fa-file-zipper"></i> 下载 OCR 文本</a>`);
+  }
   area.innerHTML = links.join('');
   area.style.display = links.length ? 'flex' : 'none';
 }
@@ -196,7 +282,17 @@ function renderFiles(files) {
   tbody.innerHTML = visible.map((item) => {
     const status = item.status || '';
     const statusLabel = fileStatusText[status] || status || '-';
-    const message = item.error || item.warning || item.message || '';
+    const details = [];
+    if (item.ocr_used) {
+      details.push(`OCR ${formatNumber(item.ocr_page_count)} 页`);
+      if (item.ocr_model) details.push(item.ocr_model);
+      if (Array.isArray(item.ocr_failed_pages) && item.ocr_failed_pages.length) {
+        details.push(`失败页 ${item.ocr_failed_pages.join(', ')}`);
+      }
+    }
+    const primaryMessage = item.error || item.warning || item.message || '';
+    if (primaryMessage) details.push(primaryMessage);
+    const message = details.join(' · ');
     return `<tr>
       <td title="${escAttr(item.file_path || '')}">${escHtml(item.relative_path || item.filename || '-')}</td>
       <td><span class="badge ${escAttr(status)}">${escHtml(statusLabel)}</span></td>
@@ -221,6 +317,13 @@ function resetPage() {
   document.getElementById('extensionsInput').value = '';
   document.getElementById('recursiveInput').checked = true;
   document.getElementById('hiddenInput').checked = false;
+  document.getElementById('inputSourcePath').checked = true;
+  selectedUploadFile = null;
+  document.getElementById('uploadFileInput').value = '';
+  document.getElementById('ocrModeAuto').checked = true;
+  document.getElementById('ocrModelSelect').value = defaultOcrModel;
+  renderUploadSelection();
+  updateInputSource();
   document.getElementById('taskIdText').textContent = '';
   document.getElementById('downloadArea').style.display = 'none';
   document.getElementById('fileRows').innerHTML = '<tr><td colspan="8"><div class="empty">暂无结果</div></td></tr>';
@@ -233,6 +336,97 @@ function resetPage() {
   document.getElementById('numberTokens').textContent = '0';
   document.getElementById('submitBtn').disabled = false;
   setStatus({ status: '', progress: 0, message: '等待提交' });
+}
+
+function updateOcrControls() {
+  const mode = document.querySelector('input[name="ocrMode"]:checked')?.value || 'auto';
+  const modelSelect = document.getElementById('ocrModelSelect');
+  if (modelSelect) modelSelect.disabled = mode === 'off';
+  const hint = document.getElementById('ocrModeHint');
+  if (!hint) return;
+  const configured = mode === 'auto' && currentInputSource() === 'upload'
+    ? '上传文件如需 OCR 将自动识别。'
+    : ocrModes[mode]?.description;
+  hint.textContent = configured || {
+    auto: '单文件自动识别；目录任务需切换为“开启”。',
+    on: '扫描 PDF 和独立图片将调用视觉模型识别。',
+    off: '扫描 PDF 和图片仅标记为“需 OCR”。',
+  }[mode];
+}
+
+function currentInputSource() {
+  return document.querySelector('input[name="inputSource"]:checked')?.value || 'path';
+}
+
+function updateInputSource() {
+  const uploadMode = currentInputSource() === 'upload';
+  document.getElementById('pathInputFields').classList.toggle('is-hidden', uploadMode);
+  document.getElementById('pathScanOptions').classList.toggle('is-hidden', uploadMode);
+  document.getElementById('pathHints').classList.toggle('is-hidden', uploadMode);
+  document.getElementById('uploadInputFields').classList.toggle('is-hidden', !uploadMode);
+  document.getElementById('submitBtnText').textContent = uploadMode ? '上传并统计' : '开始统计';
+  updateOcrControls();
+}
+
+function initUploadDropzone() {
+  const dropzone = document.getElementById('uploadDropzone');
+  ['dragenter', 'dragover'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.add('drag-active');
+    });
+  });
+  ['dragleave', 'drop'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropzone.classList.remove('drag-active');
+    });
+  });
+  dropzone.addEventListener('drop', (event) => {
+    setSelectedUploadFile(event.dataTransfer?.files?.[0] || null);
+  });
+}
+
+function setSelectedUploadFile(file) {
+  if (file && !validateUploadFile(file)) {
+    selectedUploadFile = null;
+    document.getElementById('uploadFileInput').value = '';
+  } else {
+    selectedUploadFile = file || null;
+  }
+  renderUploadSelection();
+}
+
+function validateUploadFile(file) {
+  if (!file) return false;
+  const extensionIndex = file.name.lastIndexOf('.');
+  const extension = extensionIndex >= 0 ? file.name.slice(extensionIndex).toLowerCase() : '';
+  if (uploadExtensions.length && !uploadExtensions.includes(extension)) {
+    alert(`不支持的文件格式：${extension || '无扩展名'}`);
+    return false;
+  }
+  if (file.size > uploadMaxFileMb * 1024 * 1024) {
+    alert(`文件超过 ${uploadMaxFileMb} MB，请改用共享路径统计`);
+    return false;
+  }
+  return true;
+}
+
+function renderUploadSelection() {
+  const name = document.getElementById('uploadFileName');
+  const meta = document.getElementById('uploadFileMeta');
+  if (!name || !meta) return;
+  name.textContent = selectedUploadFile?.name || '选择一个文件';
+  meta.textContent = selectedUploadFile
+    ? `${formatFileSize(selectedUploadFile.size)} · 最大 ${uploadMaxFileMb} MB`
+    : `单文件最大 ${uploadMaxFileMb} MB`;
+}
+
+function formatFileSize(bytes) {
+  const size = Math.max(0, Number(bytes || 0));
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function cjkCandidateCount(source) {

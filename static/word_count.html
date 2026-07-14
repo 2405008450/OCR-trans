@@ -97,7 +97,8 @@
             font-weight: 700;
         }
 
-        input[type="text"] {
+        input[type="text"],
+        select {
             width: 100%;
             min-height: 44px;
             padding: 0 13px;
@@ -108,13 +109,147 @@
             background: rgba(15, 23, 42, 0.72);
         }
 
-        input[type="text"]:focus {
+        input[type="text"]:focus,
+        select:focus {
             border-color: rgba(56, 189, 248, 0.68);
             box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.13);
         }
 
+        select:disabled {
+            cursor: not-allowed;
+            opacity: 0.58;
+        }
+
+        select option {
+            color: #f8fafc;
+            background: #0f172a;
+        }
+
         .field {
             margin-bottom: 16px;
+        }
+
+        .field-hint {
+            margin-top: 7px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .is-hidden {
+            display: none !important;
+        }
+
+        .segmented-control {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 4px;
+            padding: 4px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.58);
+        }
+
+        .source-control {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .segmented-control input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .segment-option {
+            min-width: 0;
+            margin: 0;
+            padding: 9px 8px;
+            border-radius: 6px;
+            color: var(--muted);
+            text-align: center;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .segmented-control input:checked + .segment-option {
+            color: #082032;
+            background: var(--cyan);
+            box-shadow: 0 4px 12px rgba(56, 189, 248, 0.2);
+        }
+
+        .segmented-control input:focus-visible + .segment-option {
+            outline: 2px solid #f8fafc;
+            outline-offset: 1px;
+        }
+
+        .upload-file-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            white-space: nowrap;
+        }
+
+        .upload-dropzone {
+            display: grid;
+            grid-template-columns: 34px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+            min-height: 82px;
+            margin: 0;
+            padding: 14px;
+            border: 1px dashed rgba(56, 189, 248, 0.48);
+            border-radius: 8px;
+            color: var(--text);
+            background: rgba(15, 23, 42, 0.48);
+            cursor: pointer;
+            transition: border-color 0.16s ease, background 0.16s ease;
+        }
+
+        .upload-dropzone:hover,
+        .upload-dropzone.drag-active {
+            border-color: var(--cyan);
+            background: rgba(56, 189, 248, 0.09);
+        }
+
+        .upload-file-input:focus-visible + .upload-dropzone {
+            outline: 2px solid #f8fafc;
+            outline-offset: 2px;
+        }
+
+        .upload-icon {
+            color: var(--cyan);
+            font-size: 25px;
+            text-align: center;
+        }
+
+        .upload-copy {
+            min-width: 0;
+        }
+
+        .upload-copy strong,
+        .upload-copy small {
+            display: block;
+            overflow-wrap: anywhere;
+        }
+
+        .upload-copy strong {
+            font-size: 13px;
+        }
+
+        .upload-copy small {
+            margin-top: 5px;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .upload-action {
+            color: var(--cyan);
+            font-size: 12px;
+            font-weight: 800;
         }
 
         .check-row {
@@ -406,6 +541,33 @@
             .metric.primary {
                 grid-column: span 1;
             }
+
+            .file-col { width: 33%; }
+            .status-col { width: 10%; }
+
+            th, td {
+                padding: 9px 4px;
+                font-size: 11px;
+            }
+
+            .badge {
+                width: 100%;
+                min-width: 0;
+                padding: 0;
+                border-radius: 6px;
+                justify-content: center;
+                font-size: 10px;
+                line-height: 1.25;
+                text-align: center;
+            }
+
+            .upload-dropzone {
+                grid-template-columns: 30px minmax(0, 1fr);
+            }
+
+            .upload-action {
+                grid-column: 2;
+            }
         }
     </style>
 </head>
@@ -414,7 +576,7 @@
         <div class="title-row">
             <div>
                 <h1>字数统计</h1>
-                <p class="subtitle">统计服务器可访问目录或单个文件，生成可下载的 Excel 与 JSON 统计报告。</p>
+                <p class="subtitle">支持单文件直接上传或扫描共享路径，生成可下载的 Excel 与 JSON 统计报告。</p>
             </div>
             <a class="download-link secondary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
         </div>
@@ -422,28 +584,80 @@
         <div class="layout">
             <section class="panel">
                 <div class="panel-head">
-                    <h2><i class="fas fa-folder-tree"></i> 扫描任务</h2>
+                    <h2><i class="fas fa-calculator"></i> 统计任务</h2>
                 </div>
                 <div class="panel-body">
                     <div class="field">
-                        <label for="directoryPath">目录或文件路径</label>
-                        <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\ 或 \\win-server\服务器资料7\客户\文件.docx" />
+                        <label>文件来源</label>
+                        <div class="segmented-control source-control" role="radiogroup" aria-label="文件来源">
+                            <input id="inputSourcePath" type="radio" name="inputSource" value="path" checked />
+                            <label class="segment-option" for="inputSourcePath"><i class="fas fa-network-wired"></i> 共享路径</label>
+                            <input id="inputSourceUpload" type="radio" name="inputSource" value="upload" />
+                            <label class="segment-option" for="inputSourceUpload"><i class="fas fa-file-arrow-up"></i> 上传单文件</label>
+                        </div>
+                    </div>
+
+                    <div id="pathInputFields">
+                        <div class="field">
+                            <label for="directoryPath">目录或文件路径</label>
+                            <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\ 或 \\win-server\服务器资料7\客户\文件.docx" />
+                        </div>
+
+                        <div class="field">
+                            <label for="extensionsInput">扩展名筛选</label>
+                            <input id="extensionsInput" type="text" placeholder="留空表示默认格式；例如 docx,pdf,xlsx" />
+                        </div>
+                    </div>
+
+                    <div id="uploadInputFields" class="field is-hidden">
+                        <label for="uploadFileInput">待统计文件</label>
+                        <input id="uploadFileInput" class="upload-file-input" type="file" />
+                        <label id="uploadDropzone" class="upload-dropzone" for="uploadFileInput">
+                            <i class="fas fa-file-arrow-up upload-icon" aria-hidden="true"></i>
+                            <span class="upload-copy">
+                                <strong id="uploadFileName">选择一个文件</strong>
+                                <small id="uploadFileMeta">单文件最大 50 MB</small>
+                            </span>
+                            <span class="upload-action">选择文件</span>
+                        </label>
+                        <div id="uploadLimitHint" class="field-hint">大文件或批量任务请使用共享路径。</div>
                     </div>
 
                     <div class="field">
-                        <label for="extensionsInput">扩展名筛选</label>
-                        <input id="extensionsInput" type="text" placeholder="留空表示默认格式；例如 docx,pdf,xlsx" />
+                        <label>PDF / 图片 OCR</label>
+                        <div class="segmented-control" role="radiogroup" aria-label="OCR 识别模式">
+                            <input id="ocrModeAuto" type="radio" name="ocrMode" value="auto" checked />
+                            <label class="segment-option" for="ocrModeAuto">智能</label>
+                            <input id="ocrModeOn" type="radio" name="ocrMode" value="on" />
+                            <label class="segment-option" for="ocrModeOn">开启</label>
+                            <input id="ocrModeOff" type="radio" name="ocrMode" value="off" />
+                            <label class="segment-option" for="ocrModeOff">关闭</label>
+                        </div>
+                        <div id="ocrModeHint" class="field-hint">单文件自动识别；目录任务需切换为“开启”。</div>
                     </div>
 
-                    <label class="check-row"><input id="recursiveInput" type="checkbox" checked /> 递归扫描子目录</label>
-                    <label class="check-row"><input id="hiddenInput" type="checkbox" /> 包含隐藏文件和临时文件</label>
+                    <div class="field">
+                        <label for="ocrModelSelect">OCR 模型</label>
+                        <select id="ocrModelSelect">
+                            <option value="google/gemini-3.1-flash-lite">极速版V2</option>
+                            <option value="google/gemini-3-flash-preview" selected>快速版V2</option>
+                            <option value="google/gemini-3.5-flash">新模型</option>
+                            <option value="google/gemini-3.1-pro-preview">增强版V2</option>
+                            <option value="anthropic/claude-sonnet-5">Claude Sonnet 5</option>
+                        </select>
+                    </div>
+
+                    <div id="pathScanOptions">
+                        <label class="check-row"><input id="recursiveInput" type="checkbox" checked /> 递归扫描子目录</label>
+                        <label class="check-row"><input id="hiddenInput" type="checkbox" /> 包含隐藏文件和临时文件</label>
+                    </div>
 
                     <div class="button-row">
-                        <button id="submitBtn"><i class="fas fa-play"></i> 开始统计</button>
+                        <button id="submitBtn"><i class="fas fa-play"></i> <span id="submitBtnText">开始统计</span></button>
                         <button id="resetBtn" class="secondary"><i class="fas fa-rotate-left"></i> 清空</button>
                     </div>
 
-                    <div class="hint-list">
+                    <div id="pathHints" class="hint-list">
                         <div><strong>允许根目录</strong></div>
                         <div id="allowedRoots" class="root-list"></div>
                         <div id="formatHint"></div>

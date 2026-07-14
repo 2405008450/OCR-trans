@@ -493,8 +493,8 @@ def _run_latest_number_check_sync(
                 ext=target_path.suffix.lower() or ".docx",
             )
         )
-        if target_path.suffix.lower() != ".docx":
-            _copy_if_needed(target_path, revised_output_path)
+        # V2 会直接打开 revised_docx_path 写入修订，因此所有格式都必须先用译文初始化输出文件。
+        _copy_if_needed(target_path, revised_output_path)
 
     run_kwargs = {
         "alignment_path": str(alignment_path) if alignment_path else None,
