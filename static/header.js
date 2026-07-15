@@ -6,6 +6,7 @@
     const REFRESH_HINT = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。';
     const REFRESH_HINT_HTML = '页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。';
     const RELEASE_NOTES = [
+        '7月15日_上线合并 PDF，支持共享目录扫描、排序选择与本地合并下载',
         '6月16日_数字专检新增 PDF 支持',
         '6月30日_新增重复任务校验，批量导出任务支持持久化保留',
         '7月6日_文档预处理优化聊天软件截图与复杂图片 OCR',
@@ -21,6 +22,7 @@
         { href: '/number-check', icon: 'fa-check-double', text: '数字专检' },
         { href: '/alignment', icon: 'fa-object-group', text: '多语对照' },
         { href: '/zhongfanyi', icon: 'fa-spell-check', text: '中翻专检' },
+        { href: '/pdf-merge', icon: 'fa-object-group', text: '合并 PDF' },
         { href: '/word-count', icon: 'fa-calculator', text: '\u5b57\u6570\u7edf\u8ba1' },
     ];
     const navActiveAliases = {

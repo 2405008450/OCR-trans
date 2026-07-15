@@ -28,6 +28,7 @@ LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']
 REFRESH_HINT = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。"
 REFRESH_HINT_HTML = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。"
 RELEASE_NOTES = [
+    "7月15日_上线合并 PDF，支持共享目录扫描、排序选择与本地合并下载",
     "6月16日_数字专检新增 PDF 支持",
     "6月30日_新增重复任务校验，批量导出任务支持持久化保留",
     "7月6日_文档预处理优化聊天软件截图与复杂图片 OCR",
@@ -46,6 +47,7 @@ TOOL_NAV_GROUPS = [
     ("转换与处理", "fa-shuffle", [
         ("/pdf2docx", "fa-file-word", "文档预处理", "PDF / 图片转可编辑 Word"),
         ("/msg-convert", "fa-envelope-open-text", "MSG 转文档", "邮件转 Word / PDF，保留正文与内嵌图片"),
+        ("/pdf-merge", "fa-object-group", "合并 PDF", "共享目录选取、排序并合并 PDF"),
         ("/word-count", "fa-calculator", "字数统计", "批量扫描并生成统计报告"),
     ]),
     ("检查与校对", "fa-shield-halved", [
@@ -813,6 +815,11 @@ async def msg_convert_page():
 @app.get("/word-count", response_class=HTMLResponse)
 async def word_count_page():
     return _render_page("word_count.html", "/word-count")
+
+
+@app.get("/pdf-merge", response_class=HTMLResponse)
+async def pdf_merge_page():
+    return _render_page("pdf_merge.html", "/pdf-merge")
 
 
 @app.get("/healthz")

@@ -17,6 +17,7 @@ TASK_TYPE_LABELS = {
     'pdf2docx': 'PDF2DOCX',
     'msg_convert': 'MSG 转文档',
     'word_count': '字数统计',
+    'pdf_merge': '合并 PDF',
 }
 
 

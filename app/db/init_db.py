@@ -15,6 +15,7 @@ LABEL_MAP = {
     'business_licence': '证件翻译（营业执照）',
     'pdf2docx': 'PDF2DOCX',
     'word_count': '字数统计',
+    'pdf_merge': '合并 PDF',
 }
 
 

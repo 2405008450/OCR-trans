@@ -65,6 +65,7 @@ businesslicence/outputs/*
 
 tmp/
 .codex-docx-qa/
-tests/*
-!tests/test_msg_convert_service.py
 tests/
+!tests/
+tests/*
+!tests/test_pdf_merge_service.py

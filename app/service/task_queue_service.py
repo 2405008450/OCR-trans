@@ -42,6 +42,7 @@ from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_MODEL,
     execute_pdf2docx_task_from_path,
 )
+from app.service.pdf_merge_service import execute_pdf_merge_task, prepare_pdf_merge_request
 from app.service.word_count_service import (
     execute_word_count_task,
     prepare_word_count_request,
@@ -86,6 +87,7 @@ class TaskQueueService:
         'number_check': 2,
         'zhongfanyi': 2,
         'word_count': 1,
+        'pdf_merge': 1,
         'msg_convert': 1,
     }
     SHARED_TASK_GROUPS: Dict[str, str] = {
@@ -737,6 +739,36 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
+    async def submit_pdf_merge_task(
+        self,
+        *,
+        directory_path: str,
+        relative_paths: list[str],
+        output_filename: str,
+    ) -> TaskSubmitResult:
+        prepared = prepare_pdf_merge_request(
+            directory_path=directory_path,
+            relative_paths=relative_paths,
+            output_filename=output_filename,
+        )
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='pdf_merge',
+                filename=prepared['filename'],
+                params=prepared['params'],
+                staged_uploads=[],
+            )
+            if submit_result.deduped:
+                return submit_result
+            self._update_task_input_files(reserved_task.task_id, prepared['input_files'])
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
     async def submit_drivers_license_task(self, *, files: list[UploadFile], processing_mode: str) -> TaskSubmitResult:
         display_name = ' | '.join([(file.filename or 'input.bin') for file in files])
         upload_specs = [(f'image{index:02d}', file, f'image_{index}.bin') for index, file in enumerate(files, start=1)]
@@ -840,6 +872,14 @@ class TaskQueueService:
 
         if task_type == 'word_count':
             return [] if self._get_input_value(input_files, 'directory_path') else ['directory_path']
+
+        if task_type == 'pdf_merge':
+            missing = []
+            if not self._get_input_value(input_files, 'directory_path'):
+                missing.append('directory_path')
+            if not (input_files.get('relative_paths') or []):
+                missing.append('relative_paths')
+            return missing
 
         if task_type == 'drivers_license':
             return [] if (input_files.get('files') or []) else ['files']
@@ -1051,6 +1091,9 @@ class TaskQueueService:
             elif task_type == 'word_count':
                 result = await self._execute_word_count(task_id, display_no, input_files, params, update)
                 output_path = result.get('report_excel') if result else None
+            elif task_type == 'pdf_merge':
+                result = await self._execute_pdf_merge(task_id, display_no, input_files, params, update)
+                output_path = result.get('output_pdf') if result else None
             elif task_type == 'msg_convert':
                 result = await self._execute_msg_convert(task_id, display_no, input_files, params, update)
                 output_path = (result.get('output_docx') or result.get('output_pdf')) if result else None
@@ -1217,6 +1260,17 @@ class TaskQueueService:
             executor=self._task_executor,
         )
 
+    async def _execute_pdf_merge(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        return await execute_pdf_merge_task(
+            task_id=task_id,
+            display_no=display_no,
+            directory_path=input_files['directory_path'],
+            relative_paths=input_files.get('relative_paths') or [],
+            output_filename=params.get('output_filename') or '合并结果.pdf',
+            progress_callback=update,
+            executor=self._task_executor,
+        )
+
     async def _execute_msg_convert(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         return await execute_msg_convert_task(
             task_id=task_id,
@@ -1298,6 +1352,8 @@ class TaskQueueService:
             add_result('report_excel', ftype='report')
             add_result('report_json', ftype='report')
             add_result('ocr_text_archive', ftype='report')
+        elif task_type == 'pdf_merge':
+            add_result('output_pdf')
         elif task_type == 'msg_convert':
             add_result('output_docx')
             add_result('output_pdf')

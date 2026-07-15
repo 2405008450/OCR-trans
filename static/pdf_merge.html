@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>合并 PDF</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg: #07111f;
+            --panel: rgba(255, 255, 255, 0.07);
+            --panel-strong: rgba(255, 255, 255, 0.11);
+            --line: rgba(255, 255, 255, 0.12);
+            --text: #f8fafc;
+            --muted: rgba(226, 232, 240, 0.72);
+            --red: #fb7185;
+            --red-strong: #e11d48;
+            --cyan: #38bdf8;
+            --green: #22c55e;
+            --amber: #f59e0b;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            background:
+                radial-gradient(circle at 14% 5%, rgba(251, 113, 133, 0.19), transparent 28%),
+                radial-gradient(circle at 92% 18%, rgba(56, 189, 248, 0.13), transparent 25%),
+                linear-gradient(145deg, #050b14 0%, #07111f 48%, #102235 100%);
+        }
+
+        .page {
+            width: min(1320px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 24px 0 54px;
+        }
+
+        .title-row {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+
+        h1 { margin: 0 0 8px; font-size: 30px; }
+        h2 { margin: 0; font-size: 17px; }
+        .subtitle { margin: 0; color: var(--muted); line-height: 1.7; }
+
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .stack { display: grid; gap: 18px; }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: var(--panel);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+            overflow: hidden;
+        }
+
+        .panel-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 18px 18px 0;
+        }
+
+        .panel-body { padding: 18px; }
+        .field { margin-bottom: 17px; }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #e2e8f0;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            min-height: 44px;
+            padding: 0 13px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            outline: none;
+            color: var(--text);
+            background: rgba(15, 23, 42, 0.76);
+        }
+
+        input[type="text"]:focus {
+            border-color: rgba(251, 113, 133, 0.75);
+            box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.12);
+        }
+
+        input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--red); }
+
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .button-row, .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        button, .download-link {
+            min-height: 42px;
+            padding: 0 16px;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            color: white;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+            background: linear-gradient(135deg, var(--red-strong), #be123c);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        button.secondary, .download-link.secondary {
+            border-color: var(--line);
+            background: rgba(15, 23, 42, 0.72);
+            color: #e2e8f0;
+        }
+
+        button.compact { min-height: 34px; padding: 0 11px; font-size: 12px; }
+        button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+        .hint-list, .notice {
+            margin-top: 17px;
+            padding: 13px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            color: var(--muted);
+            background: rgba(15, 23, 42, 0.45);
+            font-size: 12px;
+            line-height: 1.65;
+        }
+
+        .notice.warning { border-color: rgba(245, 158, 11, 0.5); color: #fde68a; }
+        .notice.error { border-color: rgba(244, 63, 94, 0.55); color: #fecdd3; }
+        .notice.success { border-color: rgba(34, 197, 94, 0.45); color: #bbf7d0; }
+        .is-hidden { display: none !important; }
+
+        .root-list { display: grid; gap: 7px; margin-top: 8px; }
+        .root-item { display: flex; gap: 8px; align-items: flex-start; word-break: break-all; }
+
+        .selection-summary {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin: 17px 0;
+        }
+
+        .summary-card, .metric {
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.48);
+        }
+
+        .summary-card small, .metric small { display: block; color: var(--muted); margin-bottom: 5px; }
+        .summary-card strong, .metric strong { font-size: 20px; }
+
+        .file-panel-head { align-items: flex-start; }
+        .file-panel-head .subtitle { font-size: 12px; text-align: right; }
+
+        .file-list {
+            display: grid;
+            gap: 8px;
+            max-height: 510px;
+            overflow: auto;
+            padding-right: 3px;
+        }
+
+        .file-row {
+            display: grid;
+            grid-template-columns: 28px 30px minmax(0, 1fr) 90px 76px;
+            align-items: center;
+            gap: 9px;
+            min-height: 58px;
+            padding: 9px 10px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.48);
+            transition: border-color 0.16s ease, background 0.16s ease, opacity 0.16s ease;
+        }
+
+        .file-row.is-selected { border-color: rgba(251, 113, 133, 0.36); }
+        .file-row.is-unselected { opacity: 0.58; }
+        .file-row.is-dragging { opacity: 0.35; }
+        .drag-handle { color: var(--muted); cursor: grab; text-align: center; }
+        .order-number { color: #fecdd3; font-weight: 800; text-align: center; }
+        .file-copy { min-width: 0; }
+        .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+        .file-path { margin-top: 4px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-size { color: var(--muted); font-size: 12px; text-align: right; }
+        .order-actions { display: flex; justify-content: flex-end; gap: 5px; }
+        .icon-btn { min-width: 32px; min-height: 32px; padding: 0; border-color: var(--line); background: rgba(30, 41, 59, 0.82); }
+
+        .empty {
+            padding: 44px 18px;
+            border: 1px dashed var(--line);
+            border-radius: 8px;
+            color: var(--muted);
+            text-align: center;
+            line-height: 1.7;
+        }
+
+        .progress-shell {
+            height: 9px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.09);
+        }
+
+        .progress-fill {
+            width: 0;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, var(--red), var(--cyan));
+            transition: width 0.25s ease;
+        }
+
+        .status-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin: 11px 0 17px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .metric:first-child { border-color: rgba(251, 113, 133, 0.42); }
+
+        .result-table {
+            width: 100%;
+            margin-top: 17px;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .result-table th, .result-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+        .result-table th { color: var(--muted); }
+        .result-table td:first-child { word-break: break-all; }
+        .result-table td:last-child, .result-table th:last-child { text-align: right; }
+
+        @media (max-width: 980px) {
+            .layout { grid-template-columns: 1fr; }
+            .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+
+        @media (max-width: 640px) {
+            .page { width: min(100% - 20px, 1320px); padding-top: 16px; }
+            .title-row { align-items: flex-start; flex-direction: column; }
+            .file-row { grid-template-columns: 24px 27px minmax(0, 1fr) 70px; }
+            .order-actions { grid-column: 3 / 5; }
+            .metric-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="title-row">
+            <div>
+                <h1>合并 PDF</h1>
+                <p class="subtitle">从局域网共享目录读取 PDF，按指定顺序在本地合并；源目录保持只读。</p>
+            </div>
+            <a class="download-link secondary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
+        </div>
+
+        <div class="layout">
+            <section class="panel">
+                <div class="panel-head"><h2><i class="fas fa-folder-tree"></i> 选择来源</h2></div>
+                <div class="panel-body">
+                    <div class="field">
+                        <label for="directoryPath">共享目录路径</label>
+                        <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\客户\项目" />
+                    </div>
+                    <div class="field">
+                        <label class="check-row"><input id="recursiveInput" type="checkbox" checked /> 扫描子目录</label>
+                    </div>
+                    <div class="button-row">
+                        <button id="scanBtn"><i class="fas fa-magnifying-glass"></i> 扫描 PDF</button>
+                        <button id="resetBtn" class="secondary"><i class="fas fa-rotate-left"></i> 清空</button>
+                    </div>
+
+                    <div id="scanMessage" class="notice is-hidden"></div>
+
+                    <div class="selection-summary">
+                        <div class="summary-card"><small>已选择</small><strong id="selectedCount">0</strong></div>
+                        <div class="summary-card"><small>合计大小</small><strong id="selectedSize">0 B</strong></div>
+                    </div>
+
+                    <div class="field">
+                        <label for="outputFilename">输出文件名</label>
+                        <input id="outputFilename" type="text" value="合并结果.pdf" maxlength="124" />
+                    </div>
+                    <button id="submitBtn" disabled><i class="fas fa-object-group"></i> 开始合并</button>
+
+                    <div class="hint-list">
+                        <div><strong>允许根目录</strong></div>
+                        <div id="allowedRoots" class="root-list"></div>
+                        <div id="limitHint" style="margin-top:9px"></div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="stack">
+                <section class="panel">
+                    <div class="panel-head file-panel-head">
+                        <div>
+                            <h2><i class="fas fa-list-ol"></i> 文件与合并顺序</h2>
+                            <p class="subtitle">拖动文件，或使用右侧按钮调整顺序。</p>
+                        </div>
+                        <div class="toolbar">
+                            <button id="selectAllBtn" class="secondary compact" disabled>全选</button>
+                            <button id="clearSelectionBtn" class="secondary compact" disabled>取消全选</button>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div id="fileList" class="file-list">
+                            <div class="empty"><i class="fas fa-file-pdf"></i><br>输入共享目录并扫描后，PDF 会显示在这里。</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2><i class="fas fa-circle-check"></i> 合并结果</h2>
+                        <span id="taskIdText" class="subtitle"></span>
+                    </div>
+                    <div class="panel-body">
+                        <div class="progress-shell"><div id="progressFill" class="progress-fill"></div></div>
+                        <div class="status-line">
+                            <span id="statusText">等待提交</span>
+                            <strong id="progressText">0%</strong>
+                        </div>
+                        <div class="metric-grid">
+                            <div class="metric"><small>输入文件</small><strong id="resultFileCount">0</strong></div>
+                            <div class="metric"><small>合并页数</small><strong id="resultPageCount">0</strong></div>
+                            <div class="metric"><small>输入大小</small><strong id="resultInputSize">0 B</strong></div>
+                            <div class="metric"><small>输出大小</small><strong id="resultOutputSize">0 B</strong></div>
+                        </div>
+                        <div id="downloadArea" class="button-row" style="display:none; margin-top:17px"></div>
+                        <div style="overflow:auto">
+                            <table id="resultTable" class="result-table is-hidden">
+                                <thead><tr><th>顺序与文件</th><th>页数</th></tr></thead>
+                                <tbody id="resultRows"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+    <script src="/static/pdf_merge.js"></script>
+    <script src="/static/header.js"></script>
+</body>
+</html>

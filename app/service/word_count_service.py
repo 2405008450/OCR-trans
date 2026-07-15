@@ -601,6 +601,11 @@ def _resolve_allowed_directory(raw_path: str) -> tuple[Path, Path]:
     return candidate, allowed_root
 
 
+def resolve_allowed_shared_input_path(raw_path: str) -> tuple[Path, Path, str]:
+    """解析共享路径并执行与字数统计相同的白名单和 UNC 映射校验。"""
+    return _resolve_allowed_input_path(raw_path)
+
+
 def _resolve_allowed_input_path(raw_path: str) -> tuple[Path, Path, str]:
     raw_text = str(raw_path or "").strip()
     if not raw_text:

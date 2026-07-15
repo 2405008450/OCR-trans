@@ -69,6 +69,7 @@ from app.service.pdf2docx_service import (
     get_pdf2docx_models,
     normalize_pdf2docx_layout_mode,
 )
+from app.service.pdf_merge_service import discover_pdf_files, get_pdf_merge_config
 from app.service.task_queue_service import UploadSizeLimitError, task_queue_service
 from app.service.word_count_service import get_word_count_config as build_word_count_config
 
@@ -105,6 +106,17 @@ class WordCountSubmitBody(BaseModel):
     extensions: Optional[List[str]] = None
     ocr_mode: Literal["auto", "on", "off"] = "auto"
     ocr_model: Optional[str] = None
+
+
+class PdfMergeDiscoverBody(BaseModel):
+    directory_path: str
+    recursive: bool = True
+
+
+class PdfMergeSubmitBody(BaseModel):
+    directory_path: str
+    relative_paths: List[str]
+    output_filename: str = "合并结果.pdf"
 
 
 def _upload_file_size(file: UploadFile) -> int:
@@ -759,6 +771,49 @@ async def submit_word_count_upload(
 
 @router.get("/word-count/status/{task_id}")
 async def get_word_count_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue_task
+
+
+@router.get("/pdf-merge/config")
+async def get_pdf_merge_page_config():
+    return get_pdf_merge_config()
+
+
+@router.post("/pdf-merge/discover")
+async def discover_pdf_merge_files(body: PdfMergeDiscoverBody):
+    try:
+        return await asyncio.to_thread(
+            discover_pdf_files,
+            directory_path=body.directory_path,
+            recursive=body.recursive,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/pdf-merge")
+async def submit_pdf_merge(body: PdfMergeSubmitBody):
+    try:
+        submit_result = await task_queue_service.submit_pdf_merge_task(
+            directory_path=body.directory_path,
+            relative_paths=body.relative_paths,
+            output_filename=body.output_filename,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.get("/pdf-merge/status/{task_id}")
+async def get_pdf_merge_status(task_id: str):
     queue_task = task_queue_service.get_task_status(task_id)
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")
