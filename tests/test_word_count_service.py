@@ -60,6 +60,68 @@ def _allow_root(monkeypatch, root: Path):
     monkeypatch.setattr(queue_module.settings, "WORD_COUNT_ALLOW_LOCAL_PATHS", "False")
 
 
+def test_discover_and_prepare_selected_word_count_files(monkeypatch, tmp_path):
+    root = tmp_path / "共享目录"
+    root.mkdir()
+    (root / "a.txt").write_text("甲乙", encoding="utf-8")
+    (root / "b.txt").write_text("hello world", encoding="utf-8")
+    (root / "ignore.exe").write_bytes(b"MZ")
+    _allow_root(monkeypatch, root)
+
+    discovered = word_count_service.discover_word_count_files(
+        directory_path=str(root),
+        recursive=True,
+        extensions=[".txt"],
+    )
+    assert [item["relative_path"] for item in discovered["files"]] == ["a.txt", "b.txt"]
+
+    prepared = word_count_service.prepare_word_count_request(
+        directory_path=str(root),
+        extensions=[".txt"],
+        relative_paths=["b.txt"],
+    )
+    assert prepared["input_files"]["relative_paths"] == ["b.txt"]
+    assert prepared["params"]["relative_paths"] == ["b.txt"]
+
+
+def test_word_count_task_only_processes_selected_files(monkeypatch, tmp_path):
+    root = tmp_path / "共享目录"
+    root.mkdir()
+    (root / "a.txt").write_text("甲乙", encoding="utf-8")
+    (root / "b.txt").write_text("hello world", encoding="utf-8")
+    _allow_root(monkeypatch, root)
+    monkeypatch.setattr(word_count_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+
+    result = word_count_service.run_word_count_task_sync(
+        task_id="selected-task",
+        display_no="WC-SELECTED",
+        directory_path=str(root),
+        recursive=True,
+        include_hidden=False,
+        extensions=[".txt"],
+        relative_paths=["b.txt"],
+    )
+
+    assert [item["relative_path"] for item in result["files"]] == ["b.txt"]
+    assert result["summary"]["counted_files"] == 1
+
+
+def test_selected_word_count_file_respects_recursive_option(monkeypatch, tmp_path):
+    root = tmp_path / "共享目录"
+    nested = root / "子目录"
+    nested.mkdir(parents=True)
+    (nested / "a.txt").write_text("甲乙", encoding="utf-8")
+    _allow_root(monkeypatch, root)
+
+    with pytest.raises(ValueError, match="未启用子目录扫描"):
+        word_count_service.prepare_word_count_request(
+            directory_path=str(root),
+            recursive=False,
+            extensions=[".txt"],
+            relative_paths=["子目录/a.txt"],
+        )
+
+
 def test_word_like_counter_counts_mixed_languages():
     text = "你好 world 123，テスト 한국어"
 

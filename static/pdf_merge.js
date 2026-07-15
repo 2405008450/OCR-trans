@@ -249,7 +249,7 @@ function renderResult(result, task) {
 
   const area = document.getElementById('downloadArea');
   if (result.output_pdf) {
-    area.innerHTML = `<a class="download-link" href="${downloadUrl(task.task_id, result.output_pdf, result.output_filename || '合并结果.pdf')}"><i class="fas fa-download"></i> 下载合并 PDF</a>`;
+    area.innerHTML = `<a class="download-link" href="${downloadUrl(task.task_id, result.output_pdf, result.output_filename || '合并结果.pdf')}" download><i class="fas fa-download"></i> 下载合并 PDF</a>`;
     area.style.display = 'flex';
   }
 

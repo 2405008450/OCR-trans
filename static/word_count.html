@@ -267,6 +267,63 @@
             accent-color: var(--cyan);
         }
 
+        .scan-selection {
+            margin: 15px 0;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(2, 6, 23, 0.28);
+        }
+
+        .scan-selection-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .scan-selection-actions { display: flex; gap: 7px; }
+
+        .scan-selection-actions button {
+            min-height: 30px;
+            padding: 0 10px;
+            font-size: 11px;
+        }
+
+        .candidate-list { max-height: 280px; overflow: auto; }
+
+        .candidate-row {
+            display: grid;
+            grid-template-columns: 24px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 9px;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            cursor: pointer;
+        }
+
+        .candidate-row:last-child { border-bottom: 0; }
+        .candidate-row:hover { background: rgba(56, 189, 248, 0.08); }
+        .candidate-row.disabled { cursor: not-allowed; opacity: 0.5; }
+        .candidate-row input { margin: 0; }
+        .candidate-copy { min-width: 0; }
+        .candidate-name { display: block; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+        .candidate-path { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+        .candidate-meta { color: var(--muted); font-size: 10px; text-align: right; white-space: nowrap; }
+
+        .scan-message {
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .scan-message.error { color: #fecaca; }
+        .scan-message.success { color: #bbf7d0; }
+
         .hint-list {
             display: grid;
             gap: 8px;
@@ -650,10 +707,26 @@
                     <div id="pathScanOptions">
                         <label class="check-row"><input id="recursiveInput" type="checkbox" checked /> 递归扫描子目录</label>
                         <label class="check-row"><input id="hiddenInput" type="checkbox" /> 包含隐藏文件和临时文件</label>
+                        <div class="button-row">
+                            <button id="scanFilesBtn" class="secondary"><i class="fas fa-magnifying-glass"></i> 扫描并选择文件</button>
+                        </div>
+                        <div id="scanSelectionMessage" class="scan-message">填写路径后先扫描，候选文件会显示在下方。</div>
+                        <div id="scanSelection" class="scan-selection">
+                            <div class="scan-selection-head">
+                                <span class="field-hint"><strong id="selectedPathFileCount">0</strong> 个已选 · <span id="selectedPathFileSize">0 B</span></span>
+                                <div class="scan-selection-actions">
+                                    <button id="selectAllPathFiles" type="button" class="secondary" disabled>全选</button>
+                                    <button id="clearPathFiles" type="button" class="secondary" disabled>取消全选</button>
+                                </div>
+                            </div>
+                            <div id="candidateFileList" class="candidate-list">
+                                <div class="empty">尚未扫描共享路径</div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="button-row">
-                        <button id="submitBtn"><i class="fas fa-play"></i> <span id="submitBtnText">开始统计</span></button>
+                        <button id="submitBtn" disabled><i class="fas fa-play"></i> <span id="submitBtnText">统计已选文件</span></button>
                         <button id="resetBtn" class="secondary"><i class="fas fa-rotate-left"></i> 清空</button>
                     </div>
 

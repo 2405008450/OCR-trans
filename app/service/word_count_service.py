@@ -316,6 +316,73 @@ def get_word_count_config() -> dict[str, Any]:
     }
 
 
+def discover_word_count_files(
+    *,
+    directory_path: str,
+    recursive: bool = True,
+    include_hidden: bool = False,
+    extensions: Optional[Iterable[str]] = None,
+) -> dict[str, Any]:
+    """扫描共享路径并返回可在网页中勾选的候选文件。"""
+    input_path, _, input_kind = _resolve_allowed_input_path(directory_path)
+    scan_extensions = set(normalize_scan_extensions(extensions))
+    max_files = max(1, int(settings.WORD_COUNT_MAX_FILES or 5000))
+    max_bytes = max(1, int(settings.WORD_COUNT_MAX_FILE_MB or 200)) * 1024 * 1024
+    if input_kind == "file":
+        candidates = [input_path] if input_path.suffix.lower() in scan_extensions else []
+        relative_root = input_path.parent
+    else:
+        candidates = list(_iter_candidate_files(input_path, recursive, include_hidden, scan_extensions))
+        relative_root = input_path
+
+    truncated = len(candidates) > max_files
+    visible = candidates[:max_files]
+    files: list[dict[str, Any]] = []
+    for candidate in visible:
+        try:
+            file_stat = candidate.stat()
+        except OSError:
+            continue
+        size = file_stat.st_size
+        extension = candidate.suffix.lower()
+        relative_path = candidate.relative_to(relative_root).as_posix()
+        selectable = size <= max_bytes
+        files.append(
+            {
+                "relative_path": relative_path,
+                "name": candidate.name,
+                "extension": extension,
+                "size": size,
+                "size_mb": round(size / (1024 * 1024), 2),
+                "modified_at": datetime.fromtimestamp(file_stat.st_mtime).isoformat(timespec="seconds"),
+                "category": (
+                    "图片 OCR"
+                    if extension in IMAGE_EXTENSIONS
+                    else "CAD"
+                    if extension in CAD_EXTENSIONS
+                    else "PDF"
+                    if extension == ".pdf"
+                    else "Office / 文本"
+                ),
+                "selectable": selectable,
+                "reason": "超过单文件大小限制" if not selectable else "",
+            }
+        )
+    return {
+        "directory_path": str(directory_path or "").strip(),
+        "input_kind": input_kind,
+        "recursive": bool(recursive),
+        "include_hidden": bool(include_hidden),
+        "extensions": sorted(scan_extensions),
+        "files": files,
+        "file_count": len(files),
+        "selectable_count": sum(1 for item in files if item["selectable"]),
+        "total_size": sum(int(item["size"]) for item in files),
+        "truncated": truncated,
+        "max_files": max_files,
+    }
+
+
 def prepare_word_count_request(
     *,
     directory_path: str,
@@ -324,6 +391,7 @@ def prepare_word_count_request(
     extensions: Optional[Iterable[str]] = None,
     ocr_mode: str = OCR_MODE_AUTO,
     ocr_model: Optional[str] = None,
+    relative_paths: Optional[Iterable[str]] = None,
 ) -> dict[str, Any]:
     input_path, matched_root, input_kind = _resolve_allowed_input_path(directory_path)
     normalized_extensions = normalize_scan_extensions(extensions)
@@ -332,6 +400,16 @@ def prepare_word_count_request(
     if normalized_ocr_model not in get_pdf2docx_models():
         raise ValueError(f"不支持的 OCR 模型: {normalized_ocr_model}")
     ocr_enabled = _ocr_enabled_for_input(normalized_ocr_mode, input_kind)
+    normalized_relative_paths: Optional[list[str]] = None
+    if input_kind == "directory" and relative_paths is not None:
+        normalized_relative_paths = _normalize_selected_word_count_paths(relative_paths)
+        _resolve_selected_word_count_files(
+            input_path,
+            normalized_relative_paths,
+            extensions=set(normalized_extensions),
+            include_hidden=include_hidden,
+            recursive=recursive,
+        )
     params = {
         "directory_path": str(input_path),
         "input_source": "path",
@@ -346,6 +424,7 @@ def prepare_word_count_request(
         "ocr_enabled": ocr_enabled,
         "ocr_model": normalized_ocr_model,
         "ocr_route": PDF2DOCX_DEFAULT_GEMINI_ROUTE,
+        "relative_paths": normalized_relative_paths,
     }
     return {
         "filename": str(input_path),
@@ -354,6 +433,7 @@ def prepare_word_count_request(
             "directory_path": str(input_path),
             "input_kind": input_kind,
             "allowed_root": str(matched_root),
+            "relative_paths": normalized_relative_paths,
         },
     }
 
@@ -411,6 +491,7 @@ async def execute_word_count_task(
     ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     input_source: str = "path",
     original_filename: Optional[str] = None,
+    relative_paths: Optional[Iterable[str]] = None,
     progress_callback: Optional[ProgressCallback] = None,
     executor=None,
 ) -> dict[str, Any]:
@@ -438,6 +519,7 @@ async def execute_word_count_task(
             ocr_route=ocr_route,
             input_source=input_source,
             original_filename=original_filename,
+            relative_paths=relative_paths,
             progress_callback=sync_report,
         ),
     )
@@ -456,6 +538,7 @@ def run_word_count_task_sync(
     ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     input_source: str = "path",
     original_filename: Optional[str] = None,
+    relative_paths: Optional[Iterable[str]] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
 ) -> dict[str, Any]:
     started_at = datetime.now()
@@ -479,9 +562,20 @@ def run_word_count_task_sync(
     ocr_text_dir = output_dir / "OCR识别文本"
 
     _report(progress_callback, 5, "正在扫描文件..." if input_kind == "file" else "正在扫描目录...")
+    normalized_relative_paths: Optional[list[str]] = None
     if input_kind == "file":
         candidates = [input_path] if input_path.suffix.lower() in scan_extensions else []
         relative_root = input_path.parent
+    elif relative_paths is not None:
+        normalized_relative_paths = _normalize_selected_word_count_paths(relative_paths)
+        candidates = _resolve_selected_word_count_files(
+            input_path,
+            normalized_relative_paths,
+            extensions=scan_extensions,
+            include_hidden=include_hidden,
+            recursive=recursive,
+        )
+        relative_root = input_path
     else:
         candidates = list(_iter_candidate_files(input_path, recursive, include_hidden, scan_extensions))
         relative_root = input_path
@@ -543,6 +637,7 @@ def run_word_count_task_sync(
         "ocr_enabled": ocr_enabled,
         "ocr_model": normalized_ocr_model,
         "ocr_route": ocr_route,
+        "selected_relative_paths": normalized_relative_paths,
         "ocr_text_archive": _output_web_path(ocr_archive_path) if ocr_archive_path else "",
         "summary": summary,
         "files": file_results,
@@ -914,6 +1009,72 @@ def _iter_candidate_files(
             if not followlinks and file_path.is_symlink():
                 continue
             yield file_path
+
+
+def _normalize_selected_word_count_paths(relative_paths: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_path in relative_paths or []:
+        raw_text = str(raw_path or "").strip().replace("\\", "/")
+        pure_path = Path(raw_text)
+        parts = [part for part in raw_text.split("/") if part]
+        if (
+            not raw_text
+            or pure_path.is_absolute()
+            or raw_text.startswith("/")
+            or any(part in {".", ".."} for part in parts)
+        ):
+            raise ValueError(f"文件相对路径无效: {raw_path}")
+        clean_path = "/".join(parts)
+        compare_key = clean_path.casefold()
+        if compare_key in seen:
+            raise ValueError(f"不能重复选择同一个文件: {clean_path}")
+        seen.add(compare_key)
+        normalized.append(clean_path)
+    if not normalized:
+        raise ValueError("请至少勾选一个待统计文件")
+    max_files = max(1, int(settings.WORD_COUNT_MAX_FILES or 5000))
+    if len(normalized) > max_files:
+        raise ValueError(f"一次最多选择 {max_files} 个文件")
+    return normalized
+
+
+def _resolve_selected_word_count_files(
+    root: Path,
+    relative_paths: Iterable[str],
+    *,
+    extensions: set[str],
+    include_hidden: bool,
+    recursive: bool,
+) -> list[Path]:
+    root = root.resolve(strict=False)
+    max_bytes = max(1, int(settings.WORD_COUNT_MAX_FILE_MB or 200)) * 1024 * 1024
+    resolved: list[Path] = []
+    followlinks = settings.WORD_COUNT_FOLLOW_SYMLINKS_ENABLED
+    for relative_path in relative_paths:
+        parts = relative_path.replace("\\", "/").split("/")
+        if not include_hidden and any(_is_hidden_name(part) for part in parts):
+            raise ValueError(f"未启用隐藏文件扫描: {relative_path}")
+        if not recursive and len(parts) > 1:
+            raise ValueError(f"未启用子目录扫描: {relative_path}")
+        unresolved_candidate = root.joinpath(*parts)
+        if not followlinks:
+            current = root
+            for part in parts:
+                current = current / part
+                if current.is_symlink():
+                    raise PermissionError(f"当前配置不允许处理符号链接: {relative_path}")
+        candidate = unresolved_candidate.resolve(strict=False)
+        if not _is_relative_to_path(candidate, root):
+            raise PermissionError(f"文件路径超出所选目录: {relative_path}")
+        if not candidate.exists() or not candidate.is_file():
+            raise FileNotFoundError(f"待统计文件不存在或暂时不可访问: {relative_path}")
+        if candidate.suffix.lower() not in extensions:
+            raise ValueError(f"文件不符合当前扩展名筛选: {relative_path}")
+        if candidate.stat().st_size > max_bytes:
+            raise ValueError(f"文件超过 {settings.WORD_COUNT_MAX_FILE_MB} MB 限制: {relative_path}")
+        resolved.append(candidate)
+    return resolved
 
 
 def _is_hidden_name(name: str) -> bool:

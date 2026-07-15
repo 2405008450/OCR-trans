@@ -6,11 +6,11 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from app.core.config import settings
@@ -70,8 +70,12 @@ from app.service.pdf2docx_service import (
     normalize_pdf2docx_layout_mode,
 )
 from app.service.pdf_merge_service import discover_pdf_files, get_pdf_merge_config
+from app.service.pdf_tools_service import get_pdf_tools_config
 from app.service.task_queue_service import UploadSizeLimitError, task_queue_service
-from app.service.word_count_service import get_word_count_config as build_word_count_config
+from app.service.word_count_service import (
+    discover_word_count_files,
+    get_word_count_config as build_word_count_config,
+)
 
 router = APIRouter(prefix="/task", tags=["Task"])
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -106,6 +110,14 @@ class WordCountSubmitBody(BaseModel):
     extensions: Optional[List[str]] = None
     ocr_mode: Literal["auto", "on", "off"] = "auto"
     ocr_model: Optional[str] = None
+    relative_paths: Optional[List[str]] = None
+
+
+class WordCountDiscoverBody(BaseModel):
+    directory_path: str
+    recursive: bool = True
+    include_hidden: bool = False
+    extensions: Optional[List[str]] = None
 
 
 class PdfMergeDiscoverBody(BaseModel):
@@ -117,6 +129,13 @@ class PdfMergeSubmitBody(BaseModel):
     directory_path: str
     relative_paths: List[str]
     output_filename: str = "合并结果.pdf"
+
+
+class PdfToolsSubmitBody(BaseModel):
+    directory_path: str
+    relative_path: str
+    operation: Literal["split", "compress", "extract", "delete", "rotate"]
+    options: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _upload_file_size(file: UploadFile) -> int:
@@ -724,6 +743,20 @@ async def get_word_count_page_config():
     return build_word_count_config()
 
 
+@router.post("/word-count/discover")
+async def discover_word_count_path_files(body: WordCountDiscoverBody):
+    try:
+        return await asyncio.to_thread(
+            discover_word_count_files,
+            directory_path=body.directory_path,
+            recursive=body.recursive,
+            include_hidden=body.include_hidden,
+            extensions=body.extensions,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/word-count")
 async def submit_word_count(body: WordCountSubmitBody):
     try:
@@ -734,6 +767,7 @@ async def submit_word_count(body: WordCountSubmitBody):
             extensions=body.extensions,
             ocr_mode=body.ocr_mode,
             ocr_model=body.ocr_model,
+            relative_paths=body.relative_paths,
         )
     except (ValueError, FileNotFoundError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -814,6 +848,50 @@ async def submit_pdf_merge(body: PdfMergeSubmitBody):
 
 @router.get("/pdf-merge/status/{task_id}")
 async def get_pdf_merge_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue_task
+
+
+@router.get("/pdf-tools/config")
+async def get_pdf_tools_page_config():
+    return get_pdf_tools_config()
+
+
+@router.post("/pdf-tools/discover")
+async def discover_pdf_tool_files(body: PdfMergeDiscoverBody):
+    try:
+        return await asyncio.to_thread(
+            discover_pdf_files,
+            directory_path=body.directory_path,
+            recursive=body.recursive,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/pdf-tools")
+async def submit_pdf_tools(body: PdfToolsSubmitBody):
+    try:
+        submit_result = await task_queue_service.submit_pdf_tools_task(
+            directory_path=body.directory_path,
+            relative_path=body.relative_path,
+            operation=body.operation,
+            options=body.options,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.get("/pdf-tools/status/{task_id}")
+async def get_pdf_tools_status(task_id: str):
     queue_task = task_queue_service.get_task_status(task_id)
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")

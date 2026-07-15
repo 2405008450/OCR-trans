@@ -50,7 +50,17 @@ def test_discover_pdf_files_uses_natural_order(local_shared_root: Path) -> None:
         "10.pdf",
         "子目录/3.pdf",
     ]
+    assert [item["page_count"] for item in result["files"]] == [1, 1, 1]
     assert result["truncated"] is False
+
+
+def test_discover_pdf_files_keeps_unreadable_pdf_with_unknown_page_count(local_shared_root: Path) -> None:
+    (local_shared_root / "broken.pdf").write_bytes(b"not a valid PDF")
+
+    result = discover_pdf_files(directory_path=str(local_shared_root), recursive=False)
+
+    assert result["files"][0]["relative_path"] == "broken.pdf"
+    assert result["files"][0]["page_count"] is None
 
 
 def test_prepare_pdf_merge_rejects_invalid_selection(local_shared_root: Path) -> None:

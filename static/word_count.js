@@ -15,6 +15,8 @@ let ocrModes = {};
 let uploadMaxFileMb = 50;
 let uploadExtensions = [];
 let selectedUploadFile = null;
+let discoveredPathFiles = [];
+let pathScanCompleted = false;
 
 const statusTextMap = {
   queued: '排队中',
@@ -35,6 +37,9 @@ const fileStatusText = {
 function init() {
   document.getElementById('submitBtn').addEventListener('click', submitTask);
   document.getElementById('resetBtn').addEventListener('click', resetPage);
+  document.getElementById('scanFilesBtn').addEventListener('click', scanPathFiles);
+  document.getElementById('selectAllPathFiles').addEventListener('click', () => setAllPathFiles(true));
+  document.getElementById('clearPathFiles').addEventListener('click', () => setAllPathFiles(false));
   document.querySelectorAll('input[name="ocrMode"]').forEach((input) => {
     input.addEventListener('change', updateOcrControls);
   });
@@ -43,6 +48,12 @@ function init() {
   });
   document.getElementById('uploadFileInput').addEventListener('change', (event) => {
     setSelectedUploadFile(event.target.files?.[0] || null);
+  });
+  ['directoryPath', 'extensionsInput'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', invalidatePathScan);
+  });
+  ['recursiveInput', 'hiddenInput'].forEach((id) => {
+    document.getElementById(id).addEventListener('change', invalidatePathScan);
   });
   initUploadDropzone();
   initTooltips();
@@ -126,8 +137,13 @@ function renderConfig(config) {
 async function submitTask() {
   const inputSource = currentInputSource();
   const directoryPath = document.getElementById('directoryPath').value.trim();
+  const selectedPathFiles = discoveredPathFiles.filter((item) => item.selected && item.selectable !== false);
   if (inputSource === 'path' && !directoryPath) {
     alert('请填写共享目录或文件路径');
+    return;
+  }
+  if (inputSource === 'path' && (!pathScanCompleted || !selectedPathFiles.length)) {
+    alert('请先扫描路径并至少勾选一个待统计文件');
     return;
   }
   if (inputSource === 'upload' && !selectedUploadFile) {
@@ -159,6 +175,7 @@ async function submitTask() {
       extensions: parseExtensions(document.getElementById('extensionsInput').value),
       ocr_mode: ocrMode,
       ocr_model: ocrModel || null,
+      relative_paths: selectedPathFiles.map((item) => item.relative_path),
     };
     requestOptions = {
       method: 'POST',
@@ -172,7 +189,7 @@ async function submitTask() {
     const payload = await response.json();
     if (!response.ok) {
       alert(payload.detail || '提交失败');
-      submitBtn.disabled = false;
+      updateSubmitAvailability();
       setStatus({ status: 'failed', progress: 0, message: payload.detail || '提交失败' });
       return;
     }
@@ -183,9 +200,116 @@ async function submitTask() {
   } catch (error) {
     console.error('submitTask', error);
     alert('提交失败，请检查服务是否可用');
-    submitBtn.disabled = false;
+    updateSubmitAvailability();
     setStatus({ status: 'failed', progress: 0, message: '提交失败' });
   }
+}
+
+async function scanPathFiles() {
+  const directoryPath = document.getElementById('directoryPath').value.trim();
+  if (!directoryPath) {
+    setScanSelectionMessage('请先填写共享目录或文件路径。', 'error');
+    return;
+  }
+  const scanButton = document.getElementById('scanFilesBtn');
+  scanButton.disabled = true;
+  setScanSelectionMessage('正在扫描候选文件，请稍候...', '');
+  try {
+    const response = await fetch('/task/word-count/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        directory_path: directoryPath,
+        recursive: document.getElementById('recursiveInput').checked,
+        include_hidden: document.getElementById('hiddenInput').checked,
+        extensions: parseExtensions(document.getElementById('extensionsInput').value),
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || '扫描失败');
+    discoveredPathFiles = (payload.files || []).map((item) => ({
+      ...item,
+      selected: item.selectable !== false,
+    }));
+    pathScanCompleted = true;
+    renderCandidateFiles();
+    const unavailable = discoveredPathFiles.filter((item) => item.selectable === false).length;
+    let message = `已找到 ${discoveredPathFiles.length} 个候选文件，默认选中 ${payload.selectable_count || 0} 个。`;
+    if (payload.truncated) message += ` 结果已按 ${payload.max_files} 个上限截断。`;
+    if (unavailable) message += ` ${unavailable} 个超限文件不可勾选。`;
+    setScanSelectionMessage(message, discoveredPathFiles.length ? 'success' : '');
+  } catch (error) {
+    discoveredPathFiles = [];
+    pathScanCompleted = false;
+    renderCandidateFiles();
+    setScanSelectionMessage(error.message || '扫描失败，请检查路径和权限。', 'error');
+  } finally {
+    scanButton.disabled = false;
+    updateSubmitAvailability();
+  }
+}
+
+function renderCandidateFiles() {
+  const list = document.getElementById('candidateFileList');
+  if (!discoveredPathFiles.length) {
+    list.innerHTML = `<div class="empty">${pathScanCompleted ? '没有找到符合条件的文件' : '尚未扫描共享路径'}</div>`;
+  } else {
+    list.innerHTML = discoveredPathFiles.map((item, index) => {
+      const disabled = item.selectable === false;
+      const meta = [item.category, formatFileSize(item.size), item.reason].filter(Boolean).join(' · ');
+      return `<label class="candidate-row ${disabled ? 'disabled' : ''}">
+        <input type="checkbox" data-index="${index}" ${item.selected ? 'checked' : ''} ${disabled ? 'disabled' : ''} />
+        <span class="candidate-copy"><span class="candidate-name">${escHtml(item.name || item.relative_path)}</span><span class="candidate-path">${escHtml(item.relative_path)}</span></span>
+        <span class="candidate-meta">${escHtml(meta)}</span>
+      </label>`;
+    }).join('');
+    list.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      input.addEventListener('change', () => {
+        discoveredPathFiles[Number(input.dataset.index)].selected = input.checked;
+        updatePathSelectionSummary();
+      });
+    });
+  }
+  updatePathSelectionSummary();
+}
+
+function updatePathSelectionSummary() {
+  const selected = discoveredPathFiles.filter((item) => item.selected && item.selectable !== false);
+  const size = selected.reduce((sum, item) => sum + Number(item.size || 0), 0);
+  document.getElementById('selectedPathFileCount').textContent = selected.length.toLocaleString();
+  document.getElementById('selectedPathFileSize').textContent = formatFileSize(size);
+  const hasSelectable = discoveredPathFiles.some((item) => item.selectable !== false);
+  document.getElementById('selectAllPathFiles').disabled = !hasSelectable;
+  document.getElementById('clearPathFiles').disabled = !hasSelectable;
+  updateSubmitAvailability();
+}
+
+function setAllPathFiles(selected) {
+  discoveredPathFiles.forEach((item) => {
+    if (item.selectable !== false) item.selected = selected;
+  });
+  renderCandidateFiles();
+}
+
+function invalidatePathScan() {
+  discoveredPathFiles = [];
+  pathScanCompleted = false;
+  renderCandidateFiles();
+  setScanSelectionMessage('扫描条件已变化，请重新扫描文件。', '');
+}
+
+function setScanSelectionMessage(message, type) {
+  const element = document.getElementById('scanSelectionMessage');
+  element.textContent = message;
+  element.className = `scan-message ${type || ''}`.trim();
+}
+
+function updateSubmitAvailability() {
+  const running = Boolean(pollTimer);
+  const uploadMode = currentInputSource() === 'upload';
+  const hasPathSelection = pathScanCompleted
+    && discoveredPathFiles.some((item) => item.selected && item.selectable !== false);
+  document.getElementById('submitBtn').disabled = running || (uploadMode ? !selectedUploadFile : !hasPathSelection);
 }
 
 function parseExtensions(raw) {
@@ -219,7 +343,7 @@ async function loadStatus() {
     renderResult(task.result, task);
     if (['done', 'failed', 'cancelled'].includes(task.status)) {
       stopPolling();
-      document.getElementById('submitBtn').disabled = false;
+      updateSubmitAvailability();
     }
   } catch (error) {
     console.error('loadStatus', error);
@@ -260,13 +384,13 @@ function renderDownloads(result, task) {
   const area = document.getElementById('downloadArea');
   const links = [];
   if (result.report_excel) {
-    links.push(`<a class="download-link" href="${downloadUrl(task.task_id, result.report_excel, '字数统计报告.xlsx')}"><i class="fas fa-file-excel"></i> 下载 Excel</a>`);
+    links.push(`<a class="download-link" href="${downloadUrl(task.task_id, result.report_excel, '字数统计报告.xlsx')}" download><i class="fas fa-file-excel"></i> 下载 Excel</a>`);
   }
   if (result.report_json) {
-    links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.report_json, '字数统计结果.json')}"><i class="fas fa-code"></i> 下载 JSON</a>`);
+    links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.report_json, '字数统计结果.json')}" download><i class="fas fa-code"></i> 下载 JSON</a>`);
   }
   if (result.ocr_text_archive) {
-    links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.ocr_text_archive, 'OCR识别文本.zip')}"><i class="fas fa-file-zipper"></i> 下载 OCR 文本</a>`);
+    links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.ocr_text_archive, 'OCR识别文本.zip')}" download><i class="fas fa-file-zipper"></i> 下载 OCR 文本</a>`);
   }
   area.innerHTML = links.join('');
   area.style.display = links.length ? 'flex' : 'none';
@@ -319,10 +443,14 @@ function resetPage() {
   document.getElementById('hiddenInput').checked = false;
   document.getElementById('inputSourcePath').checked = true;
   selectedUploadFile = null;
+  discoveredPathFiles = [];
+  pathScanCompleted = false;
   document.getElementById('uploadFileInput').value = '';
   document.getElementById('ocrModeAuto').checked = true;
   document.getElementById('ocrModelSelect').value = defaultOcrModel;
   renderUploadSelection();
+  renderCandidateFiles();
+  setScanSelectionMessage('填写路径后先扫描，候选文件会显示在下方。', '');
   updateInputSource();
   document.getElementById('taskIdText').textContent = '';
   document.getElementById('downloadArea').style.display = 'none';
@@ -334,7 +462,7 @@ function resetPage() {
   document.getElementById('cjkWords').textContent = '0';
   document.getElementById('latinWords').textContent = '0';
   document.getElementById('numberTokens').textContent = '0';
-  document.getElementById('submitBtn').disabled = false;
+  updateSubmitAvailability();
   setStatus({ status: '', progress: 0, message: '等待提交' });
 }
 
@@ -364,7 +492,8 @@ function updateInputSource() {
   document.getElementById('pathScanOptions').classList.toggle('is-hidden', uploadMode);
   document.getElementById('pathHints').classList.toggle('is-hidden', uploadMode);
   document.getElementById('uploadInputFields').classList.toggle('is-hidden', !uploadMode);
-  document.getElementById('submitBtnText').textContent = uploadMode ? '上传并统计' : '开始统计';
+  document.getElementById('submitBtnText').textContent = uploadMode ? '上传并统计' : '统计已选文件';
+  updateSubmitAvailability();
   updateOcrControls();
 }
 
@@ -395,6 +524,7 @@ function setSelectedUploadFile(file) {
     selectedUploadFile = file || null;
   }
   renderUploadSelection();
+  updateSubmitAvailability();
 }
 
 function validateUploadFile(file) {

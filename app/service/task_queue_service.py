@@ -43,6 +43,7 @@ from app.service.pdf2docx_service import (
     execute_pdf2docx_task_from_path,
 )
 from app.service.pdf_merge_service import execute_pdf_merge_task, prepare_pdf_merge_request
+from app.service.pdf_tools_service import execute_pdf_tools_task, prepare_pdf_tools_request
 from app.service.word_count_service import (
     execute_word_count_task,
     prepare_word_count_request,
@@ -88,6 +89,7 @@ class TaskQueueService:
         'zhongfanyi': 2,
         'word_count': 1,
         'pdf_merge': 1,
+        'pdf_tools': 1,
         'msg_convert': 1,
     }
     SHARED_TASK_GROUPS: Dict[str, str] = {
@@ -656,6 +658,7 @@ class TaskQueueService:
         extensions: Optional[list[str]] = None,
         ocr_mode: str = 'auto',
         ocr_model: Optional[str] = None,
+        relative_paths: Optional[list[str]] = None,
     ) -> TaskSubmitResult:
         prepared = prepare_word_count_request(
             directory_path=directory_path,
@@ -664,6 +667,7 @@ class TaskQueueService:
             extensions=extensions,
             ocr_mode=ocr_mode,
             ocr_model=ocr_model,
+            relative_paths=relative_paths,
         )
         params = prepared['params']
         input_files = prepared['input_files']
@@ -755,6 +759,38 @@ class TaskQueueService:
         try:
             submit_result, reserved_task = self._reserve_task_submission(
                 task_type='pdf_merge',
+                filename=prepared['filename'],
+                params=prepared['params'],
+                staged_uploads=[],
+            )
+            if submit_result.deduped:
+                return submit_result
+            self._update_task_input_files(reserved_task.task_id, prepared['input_files'])
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
+    async def submit_pdf_tools_task(
+        self,
+        *,
+        directory_path: str,
+        relative_path: str,
+        operation: str,
+        options: Optional[dict[str, Any]] = None,
+    ) -> TaskSubmitResult:
+        prepared = prepare_pdf_tools_request(
+            directory_path=directory_path,
+            relative_path=relative_path,
+            operation=operation,
+            options=options or {},
+        )
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='pdf_tools',
                 filename=prepared['filename'],
                 params=prepared['params'],
                 staged_uploads=[],
@@ -879,6 +915,14 @@ class TaskQueueService:
                 missing.append('directory_path')
             if not (input_files.get('relative_paths') or []):
                 missing.append('relative_paths')
+            return missing
+
+        if task_type == 'pdf_tools':
+            missing = []
+            if not self._get_input_value(input_files, 'directory_path'):
+                missing.append('directory_path')
+            if not self._get_input_value(input_files, 'relative_path'):
+                missing.append('relative_path')
             return missing
 
         if task_type == 'drivers_license':
@@ -1094,6 +1138,9 @@ class TaskQueueService:
             elif task_type == 'pdf_merge':
                 result = await self._execute_pdf_merge(task_id, display_no, input_files, params, update)
                 output_path = result.get('output_pdf') if result else None
+            elif task_type == 'pdf_tools':
+                result = await self._execute_pdf_tools(task_id, display_no, input_files, params, update)
+                output_path = (result.get('output_pdf') or result.get('archive_zip')) if result else None
             elif task_type == 'msg_convert':
                 result = await self._execute_msg_convert(task_id, display_no, input_files, params, update)
                 output_path = (result.get('output_docx') or result.get('output_pdf')) if result else None
@@ -1256,6 +1303,7 @@ class TaskQueueService:
             ocr_route=params.get('ocr_route') or PDF2DOCX_DEFAULT_GEMINI_ROUTE,
             input_source=params.get('input_source', 'path'),
             original_filename=input_files.get('original_filename'),
+            relative_paths=input_files.get('relative_paths'),
             progress_callback=update,
             executor=self._task_executor,
         )
@@ -1267,6 +1315,18 @@ class TaskQueueService:
             directory_path=input_files['directory_path'],
             relative_paths=input_files.get('relative_paths') or [],
             output_filename=params.get('output_filename') or '合并结果.pdf',
+            progress_callback=update,
+            executor=self._task_executor,
+        )
+
+    async def _execute_pdf_tools(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        return await execute_pdf_tools_task(
+            task_id=task_id,
+            display_no=display_no,
+            directory_path=input_files['directory_path'],
+            relative_path=input_files['relative_path'],
+            operation=params.get('operation') or '',
+            options=params.get('options') or {},
             progress_callback=update,
             executor=self._task_executor,
         )
@@ -1354,6 +1414,18 @@ class TaskQueueService:
             add_result('ocr_text_archive', ftype='report')
         elif task_type == 'pdf_merge':
             add_result('output_pdf')
+        elif task_type == 'pdf_tools':
+            add_result('output_pdf')
+            add_result('archive_zip')
+            for item in result.get('output_files', []):
+                if isinstance(item, dict) and isinstance(item.get('path'), str):
+                    files.append(
+                        {
+                            'name': item.get('filename') or friendly(item['path'], original_filename, 'part'),
+                            'path': item['path'],
+                            'type': 'output',
+                        }
+                    )
         elif task_type == 'msg_convert':
             add_result('output_docx')
             add_result('output_pdf')

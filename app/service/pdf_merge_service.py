@@ -64,12 +64,14 @@ def discover_pdf_files(*, directory_path: str, recursive: bool = True) -> dict[s
             except OSError:
                 continue
             relative_path = candidate.relative_to(root).as_posix()
+            page_count = _read_pdf_page_count(candidate)
             candidates.append(
                 {
                     "relative_path": relative_path,
                     "name": candidate.name,
                     "size": stat.st_size,
                     "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                    "page_count": page_count,
                     "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
                 }
             )
@@ -90,6 +92,19 @@ def discover_pdf_files(*, directory_path: str, recursive: bool = True) -> dict[s
         "truncated": truncated,
         "max_files": max_files,
     }
+
+
+def _read_pdf_page_count(path: Path) -> Optional[int]:
+    """读取扫描列表所需页数；单个异常文件不应中断整个目录扫描。"""
+    try:
+        with path.open("rb") as source:
+            reader = PdfReader(source, strict=False)
+            if reader.is_encrypted and reader.decrypt("") == 0:
+                return None
+            page_count = len(reader.pages)
+            return page_count if page_count > 0 else None
+    except Exception:
+        return None
 
 
 def prepare_pdf_merge_request(
