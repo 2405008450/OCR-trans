@@ -71,3 +71,5 @@ tests/*
 !tests/test_pdf_merge_service.py
 !tests/test_pdf_tools_service.py
 tests
+!tests/
+!tests/test_file_rename_service.py

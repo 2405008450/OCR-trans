@@ -25,6 +25,10 @@ from app.service.business_licence_service import (
 )
 from app.service.doc_translate_service import DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE, execute_doc_translate_task
 from app.service.drivers_license_service import execute_drivers_license_task
+from app.service.file_rename_service import (
+    execute_file_rename_copy_task,
+    prepare_file_rename_request,
+)
 from app.service.msg_convert_service import (
     MSG_CONVERT_DEFAULT_OUTPUT_FORMAT,
     execute_msg_convert_task,
@@ -91,6 +95,7 @@ class TaskQueueService:
         'pdf_merge': 1,
         'pdf_tools': 1,
         'msg_convert': 1,
+        'file_rename': 1,
     }
     SHARED_TASK_GROUPS: Dict[str, str] = {
         'number_check': 'specialist_text',
@@ -773,6 +778,64 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
+    async def submit_file_rename_task(
+        self,
+        *,
+        directory_path: str,
+        relative_paths: list[str],
+        mode: str,
+        recursive: bool = True,
+        include_hidden: bool = False,
+        regex_pattern: str = '',
+        replacement: str = '',
+        ignore_case: bool = False,
+        cleanup_remove_leading_number: bool = True,
+        cleanup_leading_number_max_digits: int = 6,
+        cleanup_leading_number_space: bool = True,
+        cleanup_leading_number_underscore: bool = True,
+        cleanup_remove_datetime: bool = True,
+        cleanup_datetime_compact: bool = True,
+        cleanup_datetime_dotted: bool = True,
+        cleanup_remove_translated: bool = True,
+        cleanup_translated_suffix: str = '_translated',
+    ) -> TaskSubmitResult:
+        prepared = prepare_file_rename_request(
+            directory_path=directory_path,
+            relative_paths=relative_paths,
+            mode=mode,
+            recursive=recursive,
+            include_hidden=include_hidden,
+            regex_pattern=regex_pattern,
+            replacement=replacement,
+            ignore_case=ignore_case,
+            cleanup_remove_leading_number=cleanup_remove_leading_number,
+            cleanup_leading_number_max_digits=cleanup_leading_number_max_digits,
+            cleanup_leading_number_space=cleanup_leading_number_space,
+            cleanup_leading_number_underscore=cleanup_leading_number_underscore,
+            cleanup_remove_datetime=cleanup_remove_datetime,
+            cleanup_datetime_compact=cleanup_datetime_compact,
+            cleanup_datetime_dotted=cleanup_datetime_dotted,
+            cleanup_remove_translated=cleanup_remove_translated,
+            cleanup_translated_suffix=cleanup_translated_suffix,
+        )
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='file_rename',
+                filename=prepared['filename'],
+                params=prepared['params'],
+                staged_uploads=[],
+            )
+            if submit_result.deduped:
+                return submit_result
+            self._update_task_input_files(reserved_task.task_id, prepared['input_files'])
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
     async def submit_pdf_tools_task(
         self,
         *,
@@ -910,6 +973,14 @@ class TaskQueueService:
             return [] if self._get_input_value(input_files, 'directory_path') else ['directory_path']
 
         if task_type == 'pdf_merge':
+            missing = []
+            if not self._get_input_value(input_files, 'directory_path'):
+                missing.append('directory_path')
+            if not (input_files.get('relative_paths') or []):
+                missing.append('relative_paths')
+            return missing
+
+        if task_type == 'file_rename':
             missing = []
             if not self._get_input_value(input_files, 'directory_path'):
                 missing.append('directory_path')
@@ -1138,6 +1209,9 @@ class TaskQueueService:
             elif task_type == 'pdf_merge':
                 result = await self._execute_pdf_merge(task_id, display_no, input_files, params, update)
                 output_path = result.get('output_pdf') if result else None
+            elif task_type == 'file_rename':
+                result = await self._execute_file_rename(task_id, display_no, input_files, params, update)
+                output_path = None
             elif task_type == 'pdf_tools':
                 result = await self._execute_pdf_tools(task_id, display_no, input_files, params, update)
                 output_path = (result.get('output_pdf') or result.get('archive_zip')) if result else None
@@ -1315,6 +1389,31 @@ class TaskQueueService:
             directory_path=input_files['directory_path'],
             relative_paths=input_files.get('relative_paths') or [],
             output_filename=params.get('output_filename') or '合并结果.pdf',
+            progress_callback=update,
+            executor=self._task_executor,
+        )
+
+    async def _execute_file_rename(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        return await execute_file_rename_copy_task(
+            task_id=task_id,
+            display_no=display_no,
+            directory_path=input_files['directory_path'],
+            relative_paths=input_files.get('relative_paths') or [],
+            mode=params.get('mode') or 'numbering',
+            recursive=bool(params.get('recursive', True)),
+            include_hidden=bool(params.get('include_hidden', False)),
+            regex_pattern=params.get('regex_pattern') or '',
+            replacement=params.get('replacement') or '',
+            ignore_case=bool(params.get('ignore_case', False)),
+            cleanup_remove_leading_number=bool(params.get('cleanup_remove_leading_number', True)),
+            cleanup_leading_number_max_digits=int(params.get('cleanup_leading_number_max_digits', 6)),
+            cleanup_leading_number_space=bool(params.get('cleanup_leading_number_space', True)),
+            cleanup_leading_number_underscore=bool(params.get('cleanup_leading_number_underscore', True)),
+            cleanup_remove_datetime=bool(params.get('cleanup_remove_datetime', True)),
+            cleanup_datetime_compact=bool(params.get('cleanup_datetime_compact', True)),
+            cleanup_datetime_dotted=bool(params.get('cleanup_datetime_dotted', True)),
+            cleanup_remove_translated=bool(params.get('cleanup_remove_translated', True)),
+            cleanup_translated_suffix=str(params.get('cleanup_translated_suffix', '_translated')),
             progress_callback=update,
             executor=self._task_executor,
         )

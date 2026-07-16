@@ -25,9 +25,8 @@ HTML_CACHE_HEADERS = {
     "Expires": "0",
 }
 LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']+)(?P=quote)')
-REFRESH_HINT = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 Ctrl+F5 强制刷新；Mac 请按 Command+Shift+R。"
-REFRESH_HINT_HTML = "页面更新后若按钮异常、上传无响应或界面显示异常，请先按 <kbd>Ctrl+F5</kbd> 强制刷新；Mac 请按 <kbd>Command+Shift+R</kbd>。"
 RELEASE_NOTES = [
+    "7月16日_上线批量文件改名，支持自动编号、正则替换预览和源目录内副本生成",
     "7月15日_PDF 工具箱整合合并、拆分、四档压缩和页面处理，提取/删页支持奇偶页快捷选择",
     "6月16日_数字专检新增 PDF 支持",
     "6月30日_新增重复任务校验，批量导出任务支持持久化保留",
@@ -49,6 +48,7 @@ TOOL_NAV_GROUPS = [
         ("/msg-convert", "fa-envelope-open-text", "MSG 转文档", "邮件转 Word / PDF，保留正文与内嵌图片"),
         ("/pdf-tools", "fa-screwdriver-wrench", "PDF 工具箱", "合并、拆分、压缩、提取、删页和旋转"),
         ("/word-count", "fa-calculator", "字数统计", "批量扫描并生成统计报告"),
+        ("/file-rename", "fa-file-signature", "批量文件改名", "自动编号、正则替换并生成安全副本"),
     ]),
     ("检查与校对", "fa-shield-halved", [
         ("/number-check", "fa-check-double", "数字专检", "双语文档数字一致性检查"),
@@ -272,83 +272,6 @@ APP_SHELL_BOOTSTRAP = f"""
         color: #fff;
         margin-bottom: 24px;
     }}
-    .shell-refresh-notice {{
-        display: grid;
-        grid-template-columns: auto 1fr;
-        align-items: flex-start;
-        gap: 14px;
-        margin-bottom: 20px;
-        padding: 16px 18px;
-        border-radius: 20px;
-        border: 1px solid rgba(251, 191, 36, 0.42);
-        background: linear-gradient(135deg, rgba(251, 191, 36, 0.24), rgba(249, 115, 22, 0.2));
-        box-shadow: 0 20px 44px rgba(120, 53, 15, 0.2);
-        position: relative;
-        overflow: hidden;
-    }}
-    .shell-refresh-notice::before {{
-        content: '';
-        position: absolute;
-        inset: 0 auto 0 0;
-        width: 6px;
-        background: linear-gradient(180deg, #facc15, #f97316);
-    }}
-    .shell-refresh-notice .notice-icon {{
-        width: 42px;
-        height: 42px;
-        border-radius: 14px;
-        display: grid;
-        place-items: center;
-        background: rgba(120, 53, 15, 0.18);
-        color: #fff7ed;
-        box-shadow: inset 0 0 0 1px rgba(255, 247, 237, 0.12);
-    }}
-    .shell-refresh-notice .notice-copy {{
-        min-width: 0;
-    }}
-    .shell-refresh-notice .notice-badge {{
-        display: inline-flex;
-        align-items: center;
-        min-height: 24px;
-        padding: 0 10px;
-        margin-bottom: 8px;
-        border-radius: 999px;
-        background: rgba(120, 53, 15, 0.22);
-        color: #fff7ed;
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-    }}
-    .shell-refresh-notice .notice-title {{
-        display: block;
-        margin-bottom: 6px;
-        color: #fff7ed;
-        font-size: 17px;
-        font-weight: 800;
-        line-height: 1.35;
-    }}
-    .shell-refresh-notice .notice-text {{
-        color: rgba(255, 247, 237, 0.96);
-        font-size: 14px;
-        font-weight: 600;
-        line-height: 1.7;
-    }}
-    .shell-refresh-notice kbd {{
-        display: inline-flex;
-        align-items: center;
-        min-height: 26px;
-        margin: 0 3px;
-        padding: 0 9px;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 247, 237, 0.32);
-        background: rgba(120, 53, 15, 0.3);
-        color: #ffffff;
-        font-size: 12px;
-        font-weight: 800;
-        font-family: Consolas, "SFMono-Regular", "Liberation Mono", Menlo, monospace;
-        box-shadow: inset 0 -1px 0 rgba(255, 247, 237, 0.16);
-        vertical-align: middle;
-    }}
     .shell-release-note {{
         display: flex;
         align-items: center;
@@ -525,17 +448,6 @@ APP_SHELL_BOOTSTRAP = f"""
             max-height: min(66vh, 520px);
             overflow-y: auto;
         }}
-        .shell-refresh-notice {{
-            border-radius: 16px;
-            padding: 14px 14px 14px 16px;
-            gap: 12px;
-        }}
-        .shell-refresh-notice .notice-title {{
-            font-size: 15px;
-        }}
-        .shell-refresh-notice .notice-text {{
-            font-size: 13px;
-        }}
         .shell-release-note {{
             align-items: flex-start;
             border-radius: 12px;
@@ -709,19 +621,11 @@ def _build_app_shell_markup(current_path: str) -> str:
             <nav class="unified-top-nav">
                 {"".join(primary_nav_html)}
                 <details class="tool-menu{' is-active' if tool_menu_active else ''}">
-                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>8</span></summary>
+                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>9</span></summary>
                     <div class="tool-menu-panel">{"".join(tool_groups_html)}</div>
                 </details>
             </nav>
         </header>
-        <section class="shell-refresh-notice">
-            <div class="notice-icon"><i class="fas fa-triangle-exclamation"></i></div>
-            <div class="notice-copy">
-                <div class="notice-badge">使用提示</div>
-                <strong class="notice-title">页面异常时先强制刷新缓存</strong>
-                <div class="notice-text">{REFRESH_HINT_HTML}</div>
-            </div>
-        </section>
         <section class="shell-release-note">
             <div class="release-icon"><i class="fas fa-bullhorn"></i></div>
             <div class="release-copy">
@@ -815,6 +719,11 @@ async def msg_convert_page():
 @app.get("/word-count", response_class=HTMLResponse)
 async def word_count_page():
     return _render_page("word_count.html", "/word-count")
+
+
+@app.get("/file-rename", response_class=HTMLResponse)
+async def file_rename_page():
+    return _render_page("file_rename.html", "/file-rename")
 
 
 @app.get("/pdf-merge", include_in_schema=False)

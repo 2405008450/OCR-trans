@@ -19,6 +19,7 @@ TASK_TYPE_LABELS = {
     'word_count': '字数统计',
     'pdf_merge': 'PDF 工具箱 · 合并',
     'pdf_tools': 'PDF 工具箱',
+    'file_rename': '批量文件改名',
 }
 
 

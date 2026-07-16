@@ -41,6 +41,11 @@ from app.service.doc_translate_service import (
     normalize_doc_translate_translation_engine,
 )
 from app.service.drivers_license_service import get_drivers_license_config
+from app.service.file_rename_service import (
+    build_file_rename_preview,
+    discover_file_rename_files,
+    get_file_rename_config,
+)
 from app.service.gemini_service import get_gemini_routes
 from app.service.msg_convert_service import (
     MSG_CONVERT_ALLOWED_EXTENSIONS,
@@ -123,6 +128,32 @@ class WordCountDiscoverBody(BaseModel):
 class PdfMergeDiscoverBody(BaseModel):
     directory_path: str
     recursive: bool = True
+
+
+class FileRenameDiscoverBody(BaseModel):
+    directory_path: str
+    recursive: bool = True
+    include_hidden: bool = False
+
+
+class FileRenameRequestBody(BaseModel):
+    directory_path: str
+    relative_paths: List[str]
+    mode: Literal["cleanup", "numbering", "regex"] = "cleanup"
+    recursive: bool = True
+    include_hidden: bool = False
+    regex_pattern: str = ""
+    replacement: str = ""
+    ignore_case: bool = False
+    cleanup_remove_leading_number: bool = True
+    cleanup_leading_number_max_digits: int = Field(6, ge=1, le=12)
+    cleanup_leading_number_space: bool = True
+    cleanup_leading_number_underscore: bool = True
+    cleanup_remove_datetime: bool = True
+    cleanup_datetime_compact: bool = True
+    cleanup_datetime_dotted: bool = True
+    cleanup_remove_translated: bool = True
+    cleanup_translated_suffix: str = Field("_translated", max_length=80)
 
 
 class PdfMergeSubmitBody(BaseModel):
@@ -814,6 +845,91 @@ async def get_word_count_status(task_id: str):
 @router.get("/pdf-merge/config")
 async def get_pdf_merge_page_config():
     return get_pdf_merge_config()
+
+
+@router.get("/file-rename/config")
+async def get_file_rename_page_config():
+    return get_file_rename_config()
+
+
+@router.post("/file-rename/discover")
+async def discover_file_rename_path_files(body: FileRenameDiscoverBody):
+    try:
+        return await asyncio.to_thread(
+            discover_file_rename_files,
+            directory_path=body.directory_path,
+            recursive=body.recursive,
+            include_hidden=body.include_hidden,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/file-rename/preview")
+async def preview_file_rename(body: FileRenameRequestBody):
+    try:
+        return await asyncio.to_thread(
+            build_file_rename_preview,
+            directory_path=body.directory_path,
+            relative_paths=body.relative_paths,
+            mode=body.mode,
+            recursive=body.recursive,
+            include_hidden=body.include_hidden,
+            regex_pattern=body.regex_pattern,
+            replacement=body.replacement,
+            ignore_case=body.ignore_case,
+            cleanup_remove_leading_number=body.cleanup_remove_leading_number,
+            cleanup_leading_number_max_digits=body.cleanup_leading_number_max_digits,
+            cleanup_leading_number_space=body.cleanup_leading_number_space,
+            cleanup_leading_number_underscore=body.cleanup_leading_number_underscore,
+            cleanup_remove_datetime=body.cleanup_remove_datetime,
+            cleanup_datetime_compact=body.cleanup_datetime_compact,
+            cleanup_datetime_dotted=body.cleanup_datetime_dotted,
+            cleanup_remove_translated=body.cleanup_remove_translated,
+            cleanup_translated_suffix=body.cleanup_translated_suffix,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/file-rename")
+async def submit_file_rename(body: FileRenameRequestBody):
+    try:
+        submit_result = await task_queue_service.submit_file_rename_task(
+            directory_path=body.directory_path,
+            relative_paths=body.relative_paths,
+            mode=body.mode,
+            recursive=body.recursive,
+            include_hidden=body.include_hidden,
+            regex_pattern=body.regex_pattern,
+            replacement=body.replacement,
+            ignore_case=body.ignore_case,
+            cleanup_remove_leading_number=body.cleanup_remove_leading_number,
+            cleanup_leading_number_max_digits=body.cleanup_leading_number_max_digits,
+            cleanup_leading_number_space=body.cleanup_leading_number_space,
+            cleanup_leading_number_underscore=body.cleanup_leading_number_underscore,
+            cleanup_remove_datetime=body.cleanup_remove_datetime,
+            cleanup_datetime_compact=body.cleanup_datetime_compact,
+            cleanup_datetime_dotted=body.cleanup_datetime_dotted,
+            cleanup_remove_translated=body.cleanup_remove_translated,
+            cleanup_translated_suffix=body.cleanup_translated_suffix,
+        )
+    except (ValueError, FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.get("/file-rename/status/{task_id}")
+async def get_file_rename_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue_task
 
 
 @router.post("/pdf-merge/discover")

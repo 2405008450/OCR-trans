@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>批量文件改名</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg:#07111f; --panel:rgba(255,255,255,.07); --line:rgba(255,255,255,.12);
+            --text:#f8fafc; --muted:rgba(226,232,240,.72); --cyan:#38bdf8;
+            --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --purple:#a855f7;
+        }
+        * { box-sizing:border-box; }
+        body {
+            margin:0; min-height:100vh; color:var(--text); font-family:"Segoe UI","Microsoft YaHei",sans-serif;
+            background:radial-gradient(circle at 15% 5%,rgba(56,189,248,.19),transparent 28%),
+                radial-gradient(circle at 88% 18%,rgba(168,85,247,.14),transparent 26%),
+                linear-gradient(145deg,#050b14,#07111f 50%,#102235);
+        }
+        .page { width:min(1320px,calc(100% - 32px)); margin:0 auto; padding:24px 0 54px; }
+        .title-row { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin-bottom:18px; }
+        h1 { margin:0 0 8px; font-size:30px; }
+        .subtitle { margin:0; color:var(--muted); line-height:1.7; }
+        .layout { display:grid; grid-template-columns:minmax(350px,430px) minmax(0,1fr); gap:18px; align-items:start; }
+        .panel { border:1px solid var(--line); border-radius:10px; background:var(--panel); box-shadow:0 18px 44px rgba(0,0,0,.22); }
+        .panel + .panel { margin-top:18px; }
+        .panel-head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:18px 18px 0; }
+        .panel-head h2 { margin:0; font-size:17px; }
+        .panel-body { padding:18px; }
+        .field { margin-bottom:16px; }
+        .field-label { display:block; margin-bottom:8px; color:#e2e8f0; font-size:13px; font-weight:700; }
+        input[type="text"], input[type="number"] {
+            width:100%; min-height:44px; padding:0 13px; border-radius:8px; border:1px solid var(--line);
+            outline:none; color:var(--text); background:rgba(15,23,42,.72);
+        }
+        input:focus { border-color:rgba(56,189,248,.68); box-shadow:0 0 0 3px rgba(56,189,248,.13); }
+        .check-row { display:flex; align-items:center; gap:9px; margin:9px 0; color:var(--muted); font-size:13px; }
+        button,.action-link {
+            min-height:42px; padding:0 16px; border:0; border-radius:8px; display:inline-flex; align-items:center;
+            justify-content:center; gap:8px; color:#082032; background:var(--cyan); font-weight:800; cursor:pointer; text-decoration:none;
+        }
+        button.secondary,.action-link.secondary { color:#e2e8f0; background:rgba(255,255,255,.08); border:1px solid var(--line); }
+        button.danger { color:#fff; background:#b91c1c; }
+        button:disabled { opacity:.46; cursor:not-allowed; }
+        .button-row { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+        .mode-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+        .mode-button { color:var(--muted); background:rgba(15,23,42,.56); border:1px solid var(--line); }
+        .mode-button.active { color:#082032; background:var(--cyan); border-color:var(--cyan); }
+        .notice { margin-top:12px; padding:10px 12px; border:1px solid rgba(56,189,248,.32); border-radius:8px; color:#bae6fd; background:rgba(56,189,248,.08); font-size:13px; line-height:1.6; overflow-wrap:anywhere; }
+        .notice.error { color:#fecaca; border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.08); }
+        .notice.success { color:#bbf7d0; border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.08); }
+        .notice.warning { color:#fde68a; border-color:rgba(245,158,11,.35); background:rgba(245,158,11,.08); }
+        .hint { color:var(--muted); font-size:12px; line-height:1.65; }
+        .root-list { margin-top:10px; display:grid; gap:7px; }
+        .root-item { display:flex; gap:8px; align-items:flex-start; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+        .selection-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin:12px 0 8px; }
+        .selection-actions { display:flex; gap:6px; }
+        .selection-actions button { min-height:31px; padding:0 10px; font-size:11px; }
+        .file-list { max-height:410px; overflow:auto; border:1px solid var(--line); border-radius:8px; background:rgba(2,6,23,.35); }
+        .folder-row { display:grid; grid-template-columns:24px 22px minmax(0,1fr) auto; align-items:center; gap:7px; min-height:42px; padding:7px 11px; border-bottom:1px solid rgba(255,255,255,.07); background:rgba(56,189,248,.055); }
+        .folder-row:hover { background:rgba(56,189,248,.11); }
+        .tree-toggle { width:24px; min-height:24px; padding:0; color:#bae6fd; background:transparent; border:0; border-radius:5px; font-size:11px; }
+        .tree-toggle:hover { background:rgba(56,189,248,.13); }
+        .folder-name { display:flex; align-items:center; justify-content:flex-start; gap:8px; min-width:0; min-height:28px; padding:0; border:0; color:#e0f2fe; background:transparent; font-size:13px; font-weight:800; text-align:left; overflow-wrap:anywhere; }
+        .folder-name:hover { color:#fff; background:transparent; }
+        .folder-name i { color:#fbbf24; }
+        .folder-meta { color:var(--muted); font-size:11px; white-space:nowrap; }
+        .file-row { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:9px; padding:10px 11px; border-bottom:1px solid rgba(255,255,255,.07); }
+        .file-row:last-child { border-bottom:0; }
+        .file-row:hover { background:rgba(56,189,248,.08); }
+        .file-name { font-size:13px; font-weight:700; overflow-wrap:anywhere; }
+        .file-path { margin-top:3px; color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+        .file-size { color:var(--muted); font-size:11px; white-space:nowrap; }
+        .empty { padding:32px 18px; color:var(--muted); text-align:center; line-height:1.7; }
+        .is-hidden { display:none !important; }
+        .example { margin-top:8px; color:#c4b5fd; font-size:12px; line-height:1.6; }
+        .cleanup-rules { display:grid; gap:10px; margin-top:12px; }
+        .cleanup-rule { padding:12px; border:1px solid var(--line); border-radius:8px; background:rgba(15,23,42,.42); }
+        .cleanup-rule.is-disabled .cleanup-tuning { opacity:.46; }
+        .cleanup-rule > .check-row { margin:0; color:#e2e8f0; font-weight:700; }
+        .cleanup-tuning { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin:10px 0 0 26px; padding-top:10px; border-top:1px dashed rgba(255,255,255,.11); }
+        .cleanup-tuning .check-row { margin:0; }
+        .inline-field { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; }
+        .inline-field input[type="number"] { width:76px; min-height:34px; padding:0 9px; }
+        .inline-field input[type="text"] { width:min(240px,55vw); min-height:34px; padding:0 9px; }
+        .tuning-label { color:var(--muted); font-size:12px; }
+        code { padding:2px 5px; border-radius:4px; color:#e9d5ff; background:rgba(168,85,247,.15); }
+        .metric-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:9px; margin:16px 0; }
+        .metric { min-width:0; padding:12px; border:1px solid var(--line); border-radius:8px; background:rgba(15,23,42,.54); }
+        .metric small { display:block; color:var(--muted); font-size:11px; }
+        .metric strong { display:block; margin-top:6px; font-size:18px; overflow-wrap:anywhere; }
+        .table-wrap { max-height:510px; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+        table { width:100%; border-collapse:collapse; font-size:12px; }
+        th,td { padding:10px; border-bottom:1px solid rgba(255,255,255,.07); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+        th { position:sticky; top:0; z-index:1; color:#cbd5e1; background:#101c2d; }
+        .status { display:inline-flex; padding:3px 7px; border-radius:999px; font-size:11px; white-space:nowrap; }
+        .status.ready { color:#bbf7d0; background:rgba(34,197,94,.14); }
+        .status.unmatched,.status.unchanged { color:#cbd5e1; background:rgba(148,163,184,.13); }
+        .status.invalid,.status.conflict { color:#fecaca; background:rgba(239,68,68,.14); }
+        .progress-shell { height:9px; border-radius:999px; overflow:hidden; background:rgba(255,255,255,.09); }
+        .progress-fill { width:0; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--cyan),var(--green)); transition:width .25s ease; }
+        .status-line { display:flex; justify-content:space-between; gap:12px; margin:10px 0 0; color:var(--muted); font-size:13px; }
+        @media(max-width:960px){ .layout{grid-template-columns:1fr;} .metric-grid{grid-template-columns:repeat(3,minmax(0,1fr));} }
+        @media(max-width:600px){ .page{width:min(100% - 20px,1320px);} .title-row{display:block;} .mode-grid{grid-template-columns:1fr;} .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="title-row">
+            <div>
+                <h1>批量文件改名</h1>
+                <p class="subtitle">扫描共享目录并预览编号或正则改名结果，在源目录内生成独立副本；源文件和原目录结构保持不变。</p>
+            </div>
+            <a class="action-link secondary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
+        </div>
+
+        <div class="layout">
+            <div>
+                <section class="panel">
+                    <div class="panel-head"><h2><i class="fas fa-folder-tree"></i> 选择文件</h2></div>
+                    <div class="panel-body">
+                        <div class="field">
+                            <label class="field-label" for="directoryPath">共享目录路径</label>
+                            <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\客户\项目" />
+                        </div>
+                        <label class="check-row"><input id="recursiveInput" type="checkbox" checked /> 递归扫描子目录</label>
+                        <label class="check-row"><input id="hiddenInput" type="checkbox" /> 包含隐藏文件和临时文件</label>
+                        <div class="button-row">
+                            <button id="scanBtn"><i class="fas fa-magnifying-glass"></i> 扫描文件</button>
+                            <button id="resetBtn" class="secondary"><i class="fas fa-rotate-left"></i> 清空</button>
+                            <button id="exportListBtn" class="secondary" disabled><i class="fas fa-file-csv"></i> 导出文件名单</button>
+                        </div>
+                        <div id="scanMessage" class="notice is-hidden"></div>
+
+                        <div class="field" style="margin-top:16px">
+                            <label class="field-label" for="fileSearch">列表筛选</label>
+                            <input id="fileSearch" type="text" placeholder="输入文件名或相对路径" />
+                        </div>
+                        <div class="selection-toolbar">
+                            <div class="hint">已选 <strong id="selectedCount">0</strong> 个 · <span id="selectedSize">0 B</span></div>
+                            <div class="selection-actions">
+                                <button id="selectAllBtn" class="secondary" disabled>全选</button>
+                                <button id="clearSelectionBtn" class="secondary" disabled>取消全选</button>
+                                <button id="expandAllBtn" class="secondary" disabled>展开全部</button>
+                                <button id="collapseAllBtn" class="secondary" disabled>折叠全部</button>
+                            </div>
+                        </div>
+                        <div id="fileList" class="file-list"><div class="empty">扫描目录后选择需要处理的文件。</div></div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2><i class="fas fa-shield-halved"></i> 安全说明</h2></div>
+                    <div class="panel-body">
+                        <div class="hint">源目录始终只读。系统只复制预览中标记为“将复制”的文件，未匹配文件不会占用副本空间；历史副本目录不会再次进入扫描结果。导出的 CSV 名单包含本次扫描到的全部文件，不受勾选和列表筛选影响。</div>
+                        <div class="hint" style="margin-top:10px"><strong>允许根目录</strong></div>
+                        <div id="allowedRoots" class="root-list"></div>
+                    </div>
+                </section>
+            </div>
+
+            <div>
+                <section class="panel">
+                    <div class="panel-head"><h2><i class="fas fa-pen-to-square"></i> 改名规则</h2></div>
+                    <div class="panel-body">
+                        <div class="mode-grid">
+                            <button class="mode-button" data-mode="numbering"><i class="fas fa-list-ol"></i> 自动编号</button>
+                            <button class="mode-button active" data-mode="cleanup"><i class="fas fa-broom"></i> 常用清理</button>
+                            <button class="mode-button" data-mode="regex"><i class="fas fa-code"></i> 高级正则</button>
+                        </div>
+                        <div id="cleanupFields" style="margin-top:16px">
+                            <div class="notice" style="margin-top:0">勾选需要清理的常见内容，系统会自动组合处理，无需填写正则表达式。</div>
+                            <div class="cleanup-rules">
+                                <div class="cleanup-rule">
+                                    <label class="check-row"><input id="cleanupLeadingNumberInput" type="checkbox" checked /> 去除开头序号</label>
+                                    <div class="cleanup-tuning">
+                                        <label class="inline-field">序号最大位数 <input id="cleanupMaxDigitsInput" type="number" min="1" max="12" value="6" /></label>
+                                        <span class="tuning-label">序号后的分隔符</span>
+                                        <label class="check-row"><input id="cleanupSeparatorSpaceInput" type="checkbox" checked /> 空格，例如 <code>004 文件名</code></label>
+                                        <label class="check-row"><input id="cleanupSeparatorUnderscoreInput" type="checkbox" checked /> 下划线，例如 <code>01_文件名</code></label>
+                                    </div>
+                                </div>
+                                <div class="cleanup-rule">
+                                    <label class="check-row"><input id="cleanupDatetimeInput" type="checkbox" checked /> 去除开头日期时间</label>
+                                    <div class="cleanup-tuning">
+                                        <span class="tuning-label">识别格式</span>
+                                        <label class="check-row"><input id="cleanupDatetimeCompactInput" type="checkbox" checked /> <code>20260702-000853_</code></label>
+                                        <label class="check-row"><input id="cleanupDatetimeDottedInput" type="checkbox" checked /> <code>2026.2.3_</code></label>
+                                    </div>
+                                </div>
+                                <div class="cleanup-rule">
+                                    <label class="check-row"><input id="cleanupTranslatedInput" type="checkbox" checked /> 去除结尾标记</label>
+                                    <div class="cleanup-tuning">
+                                        <label class="inline-field">结尾标记 <input id="cleanupSuffixInput" type="text" maxlength="80" value="_translated" /></label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="example">默认预设示例：<code>01_20160907-Homart蓝莓.pdf</code> → <code>20160907-Homart蓝莓.pdf</code><br><code>004 20240131功能清单备注_translated.docx</code> → <code>20240131功能清单备注.docx</code><br><code>20260702-000853_IMG_6363.docx</code> → <code>IMG_6363.docx</code></div>
+                        </div>
+                        <div id="numberingFields" class="notice is-hidden">按相对路径排序，所有已选文件共用一条序列，在原文件名前添加编号。</div>
+                        <div id="regexFields" class="is-hidden" style="margin-top:16px">
+                            <div class="field">
+                                <label class="field-label" for="patternInput">正则表达式（高级用户）</label>
+                                <input id="patternInput" type="text" value="^(?:\d{1,6}(?:\s+|_+))?(?:\d{8}-\d{6}_|\d{4}\.\d{1,2}\.\d{1,2}_)?(.*?)(?:_translated)?$" />
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="replacementInput">替换内容</label>
+                                <input id="replacementInput" type="text" value="\1" />
+                            </div>
+                            <label class="check-row"><input id="ignoreCaseInput" type="checkbox" /> 忽略英文字母大小写</label>
+                            <div class="example">一般情况建议使用“常用清理”。高级正则只处理文件主名并保留扩展名；捕获组使用 <code>\1</code> 或 <code>\g&lt;name&gt;</code>。</div>
+                        </div>
+                        <div class="button-row">
+                            <button id="previewBtn" disabled><i class="fas fa-eye"></i> 生成预览</button>
+                            <button id="executeBtn" class="danger" disabled><i class="fas fa-copy"></i> 生成改名副本</button>
+                        </div>
+                        <div id="previewMessage" class="notice is-hidden"></div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2><i class="fas fa-table-list"></i> 改名预览</h2><span id="previewMode" class="hint"></span></div>
+                    <div class="panel-body">
+                        <div class="metric-grid">
+                            <div class="metric"><small>已选择</small><strong id="selectedMetric">0</strong></div>
+                            <div class="metric"><small>将复制</small><strong id="processMetric">0</strong></div>
+                            <div class="metric"><small>未匹配/未变化</small><strong id="skipMetric">0</strong></div>
+                            <div class="metric"><small>冲突/无效</small><strong id="conflictMetric">0</strong></div>
+                            <div class="metric"><small>预计副本大小</small><strong id="sizeMetric">0 B</strong></div>
+                        </div>
+                        <div class="table-wrap">
+                            <table>
+                                <thead><tr><th style="width:92px">状态</th><th>原相对路径</th><th>副本相对路径</th><th>说明</th></tr></thead>
+                                <tbody id="previewRows"><tr><td colspan="4"><div class="empty">选择文件和规则后生成预览。</div></td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2><i class="fas fa-copy"></i> 副本生成进度</h2><span id="taskIdText" class="hint"></span></div>
+                    <div class="panel-body">
+                        <div class="progress-shell"><div id="progressFill" class="progress-fill"></div></div>
+                        <div class="status-line"><span id="statusText">等待提交</span><strong id="progressText">0%</strong></div>
+                        <div id="resultMessage" class="notice is-hidden"></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+    <script src="/static/header.js"></script>
+    <script src="/static/file_rename.js"></script>
+</body>
+</html>
