@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>批量文件改名</title>
+    <title>文件名整理</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
@@ -109,8 +109,8 @@
     <div class="page">
         <div class="title-row">
             <div>
-                <h1>批量文件改名</h1>
-                <p class="subtitle">扫描共享目录并预览编号或正则改名结果，在源目录内生成独立副本；源文件和原目录结构保持不变。</p>
+                <h1>文件名整理</h1>
+                <p class="subtitle">扫描共享目录，预览编号清理、自动编号或正则重命名结果，在源目录内生成独立副本；源文件和原目录结构保持不变。</p>
             </div>
             <a class="action-link secondary" href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
         </div>
@@ -166,8 +166,8 @@
                     <div class="panel-body">
                         <div class="mode-grid">
                             <button class="mode-button" data-mode="numbering"><i class="fas fa-list-ol"></i> 自动编号</button>
-                            <button class="mode-button active" data-mode="cleanup"><i class="fas fa-broom"></i> 常用清理</button>
-                            <button class="mode-button" data-mode="regex"><i class="fas fa-code"></i> 高级正则</button>
+                            <button class="mode-button active" data-mode="cleanup"><i class="fas fa-broom"></i> 编号清理</button>
+                            <button class="mode-button" data-mode="regex"><i class="fas fa-code"></i> 编号清理(高级正则模式)</button>
                         </div>
                         <div id="cleanupFields" style="margin-top:16px">
                             <div class="notice" style="margin-top:0">勾选需要清理的常见内容，系统会自动组合处理，无需填写正则表达式。</div>

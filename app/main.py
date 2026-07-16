@@ -26,7 +26,7 @@ HTML_CACHE_HEADERS = {
 }
 LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']+)(?P=quote)')
 RELEASE_NOTES = [
-    "7月16日_上线批量文件改名，支持自动编号、正则替换预览和源目录内副本生成",
+    "7月16日_上线文件名整理，支持编号清理、自动编号、正则预览和源目录内副本生成",
     "7月15日_PDF 工具箱整合合并、拆分、四档压缩和页面处理，提取/删页支持奇偶页快捷选择",
     "6月16日_数字专检新增 PDF 支持",
     "6月30日_新增重复任务校验，批量导出任务支持持久化保留",
@@ -48,7 +48,7 @@ TOOL_NAV_GROUPS = [
         ("/msg-convert", "fa-envelope-open-text", "MSG 转文档", "邮件转 Word / PDF，保留正文与内嵌图片"),
         ("/pdf-tools", "fa-screwdriver-wrench", "PDF 工具箱", "合并、拆分、压缩、提取、删页和旋转"),
         ("/word-count", "fa-calculator", "字数统计", "批量扫描并生成统计报告"),
-        ("/file-rename", "fa-file-signature", "批量文件改名", "自动编号、正则替换并生成安全副本"),
+        ("/file-rename", "fa-file-signature", "文件名整理", "清理序号前缀、自动编号或正则重命名"),
     ]),
     ("检查与校对", "fa-shield-halved", [
         ("/number-check", "fa-check-double", "数字专检", "双语文档数字一致性检查"),

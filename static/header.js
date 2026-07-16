@@ -4,7 +4,7 @@
     const UPLOAD_TIMEOUT_MS = 240000;
     const PAGE_TRANSITION_DELAY_MS = 180;
     const RELEASE_NOTES = [
-        '7月16日_上线批量文件改名，支持自动编号、正则替换预览和源目录内副本生成',
+        '7月16日_上线文件名整理，支持编号清理、自动编号、正则预览和源目录内副本生成',
         '7月15日_PDF 工具箱整合合并、拆分、四档压缩和页面处理，提取/删页支持奇偶页快捷选择',
         '6月16日_数字专检新增 PDF 支持',
         '6月30日_新增重复任务校验，批量导出任务支持持久化保留',
@@ -23,7 +23,7 @@
         { href: '/zhongfanyi', icon: 'fa-spell-check', text: '中翻专检' },
         { href: '/pdf-tools', icon: 'fa-screwdriver-wrench', text: 'PDF 工具箱' },
         { href: '/word-count', icon: 'fa-calculator', text: '\u5b57\u6570\u7edf\u8ba1' },
-        { href: '/file-rename', icon: 'fa-file-signature', text: '批量文件改名' },
+        { href: '/file-rename', icon: 'fa-file-signature', text: '文件名整理' },
     ];
     const navActiveAliases = {
         '/certificate-translation': ['/certificate-translation', '/doc-translate', '/drivers-license', '/business-licence'],
