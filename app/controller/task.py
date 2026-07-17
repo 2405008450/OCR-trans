@@ -41,6 +41,12 @@ from app.service.doc_translate_service import (
     normalize_doc_translate_translation_engine,
 )
 from app.service.drivers_license_service import get_drivers_license_config
+from app.service.english_variant_service import (
+    ALLOWED_EXTENSIONS as ENGLISH_VARIANT_ALLOWED_EXTENSIONS,
+    convert_text as convert_english_variant_text,
+    get_english_variant_config as build_english_variant_config,
+    normalize_target_style,
+)
 from app.service.file_rename_service import (
     build_file_rename_preview,
     discover_file_rename_files,
@@ -106,6 +112,11 @@ class TaskFeedbackBody(BaseModel):
     marked: bool = True
     category: Optional[str] = None
     note: Optional[str] = None
+
+
+class EnglishVariantTextBody(BaseModel):
+    text: str = Field(max_length=2_000_000)
+    target_style: Literal["british", "american"] = "british"
 
 
 class WordCountSubmitBody(BaseModel):
@@ -1149,6 +1160,132 @@ async def submit_business_licence(
 
 @router.get("/business-licence/status/{task_id}")
 async def get_business_licence_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue_task
+
+
+@router.get("/english-variant/config")
+async def get_english_variant_config():
+    config = build_english_variant_config()
+    config.update(
+        {
+            "upload_max_mb": settings.ENGLISH_VARIANT_UPLOAD_MAX_MB,
+            "max_files": 50,
+        }
+    )
+    return config
+
+
+@router.post("/english-variant/text")
+async def run_english_variant_text(body: EnglishVariantTextBody):
+    try:
+        return convert_english_variant_text(body.text, body.target_style)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_english_variant_upload(file: UploadFile) -> None:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ENGLISH_VARIANT_ALLOWED_EXTENSIONS:
+        allowed = ", ".join(ENGLISH_VARIANT_ALLOWED_EXTENSIONS)
+        raise HTTPException(status_code=400, detail=f"不支持的文件格式，允许: {allowed}")
+
+
+@router.post("/english-variant")
+async def submit_english_variant(
+    file: UploadFile = File(...),
+    target_style: str = Query("british"),
+):
+    _validate_english_variant_upload(file)
+    try:
+        style = normalize_target_style(target_style)
+        submit_result = await task_queue_service.submit_english_variant_task(
+            file=file,
+            target_style=style,
+        )
+    except UploadSizeLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.post("/english-variant/batch")
+async def submit_english_variant_batch(
+    files: List[UploadFile] = File(...),
+    target_style: str = Query("british"),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="至少需要一个文件")
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="文件数量不能超过 50 个")
+    try:
+        style = normalize_target_style(target_style)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    max_bytes = max(1, int(settings.ENGLISH_VARIANT_UPLOAD_MAX_MB or 95)) * 1024 * 1024
+    declared_total = sum(_upload_file_size(file) for file in files)
+    if declared_total > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"单次上传总大小不能超过 {settings.ENGLISH_VARIANT_UPLOAD_MAX_MB:g} MB",
+        )
+
+    batch_id = str(uuid.uuid4())
+    batch_name = f"英美式英语转换_{batch_id[:8]}.zip"
+    results = []
+    batch_total = len(files)
+    for index, file in enumerate(files, start=1):
+        try:
+            _validate_english_variant_upload(file)
+            submit_result = await task_queue_service.submit_english_variant_task(
+                file=file,
+                target_style=style,
+                batch_id=batch_id,
+                batch_name=batch_name,
+                batch_index=index,
+                batch_total=batch_total,
+            )
+            results.append(
+                {
+                    "filename": file.filename,
+                    "task_id": submit_result.task_id,
+                    "status": "ACCEPTED",
+                    "deduped": submit_result.deduped,
+                    "batch_id": batch_id,
+                    "batch_index": index,
+                    "batch_total": batch_total,
+                }
+            )
+        except (HTTPException, UploadSizeLimitError, ValueError) as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            results.append(
+                {
+                    "filename": file.filename,
+                    "task_id": None,
+                    "status": "FAILED",
+                    "error": detail,
+                }
+            )
+    return {
+        "status": "ACCEPTED",
+        "tasks": results,
+        "total": len(results),
+        "batch_id": batch_id,
+        "batch_name": batch_name,
+    }
+
+
+@router.get("/english-variant/status/{task_id}")
+async def get_english_variant_status(task_id: str):
     queue_task = task_queue_service.get_task_status(task_id)
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")

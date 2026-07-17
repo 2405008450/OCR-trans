@@ -57,7 +57,10 @@ Thumbs.db
 *.pb
 
 # Runtime data and caches
-data/
+data/*
+!data/english_variant/
+!data/english_variant/dictionary.json
+!data/english_variant/*.xlsx
 Driver's_License/.cache/
 businesslicence/outputs/*
 !businesslicence/outputs/.gitkeep
@@ -73,3 +76,4 @@ tests/*
 tests
 !tests/
 !tests/test_file_rename_service.py
+!tests/test_english_variant_service.py

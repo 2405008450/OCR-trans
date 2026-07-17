@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     PDF_MERGE_MAX_FILE_MB: int = int(os.getenv("PDF_MERGE_MAX_FILE_MB", "500"))
     PDF_MERGE_MAX_TOTAL_MB: int = int(os.getenv("PDF_MERGE_MAX_TOTAL_MB", "2048"))
     MSG_CONVERT_UPLOAD_MAX_MB: int = int(os.getenv("MSG_CONVERT_UPLOAD_MAX_MB", "95"))
+    ENGLISH_VARIANT_UPLOAD_MAX_MB: int = int(os.getenv("ENGLISH_VARIANT_UPLOAD_MAX_MB", "95"))
     WORD_COUNT_FOLLOW_SYMLINKS: str = os.getenv("WORD_COUNT_FOLLOW_SYMLINKS", "False")
     ODA_FILE_CONVERTER_PATH: str = os.getenv("ODA_FILE_CONVERTER_PATH", "")
     WORD_COUNT_CAD_CONVERT_TIMEOUT_SECONDS: int = int(

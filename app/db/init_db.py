@@ -7,6 +7,7 @@ from app.model import entity
 
 
 LABEL_MAP = {
+    'english_variant': '英美式英语转换',
     'number_check': 'Number Check',
     'zhongfanyi': 'Zhongfanyi',
     'alignment': 'Alignment',

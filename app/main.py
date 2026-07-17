@@ -42,6 +42,7 @@ TOOL_NAV_GROUPS = [
     ("翻译与识别", "fa-language", [
         ("/certificate-translation", "fa-id-card", "证件翻译", "驾驶证、营业执照及通用证件"),
         ("/alignment", "fa-object-group", "多语对照", "原译文对齐与语料沉淀"),
+        ("/english-variant", "fa-language", "英美式英语转换", "文本与 Office 文档双向转换"),
     ]),
     ("转换与处理", "fa-shuffle", [
         ("/pdf2docx", "fa-file-word", "文档预处理", "PDF / 图片转可编辑 Word"),
@@ -621,7 +622,7 @@ def _build_app_shell_markup(current_path: str) -> str:
             <nav class="unified-top-nav">
                 {"".join(primary_nav_html)}
                 <details class="tool-menu{' is-active' if tool_menu_active else ''}">
-                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>9</span></summary>
+                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>10</span></summary>
                     <div class="tool-menu-panel">{"".join(tool_groups_html)}</div>
                 </details>
             </nav>
@@ -679,6 +680,11 @@ async def number_check_page():
 @app.get("/alignment", response_class=HTMLResponse)
 async def alignment_page():
     return _render_page("alignment.html", "/alignment")
+
+
+@app.get("/english-variant", response_class=HTMLResponse)
+async def english_variant_page():
+    return _render_page("english_variant.html", "/english-variant")
 
 
 @app.get("/drivers-license", response_class=HTMLResponse)

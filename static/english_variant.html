@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英美式英语转换</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg:#07111f; --panel:rgba(255,255,255,.07); --panel-strong:rgba(15,23,42,.72);
+            --line:rgba(255,255,255,.12); --text:#f8fafc; --muted:rgba(226,232,240,.72);
+            --cyan:#38bdf8; --cyan-soft:rgba(56,189,248,.11); --green:#22c55e;
+        }
+        * { box-sizing:border-box; }
+        body {
+            margin:0; min-height:100vh; color:var(--text); font-family:"Segoe UI","Microsoft YaHei",sans-serif;
+            background:radial-gradient(circle at 15% 5%,rgba(56,189,248,.19),transparent 28%),
+                radial-gradient(circle at 88% 18%,rgba(168,85,247,.14),transparent 26%),
+                linear-gradient(145deg,#050b14,#07111f 50%,#102235);
+        }
+        button,textarea { font:inherit; }
+        .variant-page { width:min(1320px,calc(100% - 32px)); margin:0 auto; padding:24px 0 54px; }
+        .variant-hero { display:flex; justify-content:space-between; gap:24px; align-items:flex-end; margin-bottom:18px; }
+        .variant-hero h1 { margin:0 0 8px; color:var(--text); font-size:30px; }
+        .variant-hero p { margin:0; color:var(--muted); line-height:1.7; }
+        .dictionary-pill { flex:0 0 auto; padding:9px 13px; border:1px solid rgba(56,189,248,.3); border-radius:999px; background:var(--cyan-soft); color:#bae6fd; font-weight:700; font-size:12px; }
+        .variant-card { overflow:hidden; border:1px solid var(--line); border-radius:10px; background:var(--panel); box-shadow:0 18px 44px rgba(0,0,0,.22); }
+        .tabs { display:flex; gap:8px; padding:10px; border-bottom:1px solid var(--line); background:rgba(2,6,23,.25); }
+        .tab-button { flex:1; min-height:44px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--muted); font-weight:800; cursor:pointer; }
+        .tab-button:hover { color:#e0f2fe; background:rgba(56,189,248,.07); }
+        .tab-button.active { color:#082032; border-color:var(--cyan); background:var(--cyan); box-shadow:0 8px 22px rgba(56,189,248,.18); }
+        .tab-panel { display:none; padding:22px; }
+        .tab-panel.active { display:block; }
+        .style-picker { display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+        .style-option { display:flex; align-items:center; gap:9px; min-height:42px; padding:0 15px; border:1px solid var(--line); border-radius:8px; cursor:pointer; font-weight:700; color:var(--muted); background:rgba(15,23,42,.48); }
+        .style-option:hover { border-color:rgba(56,189,248,.42); }
+        .style-option:has(input:checked) { border-color:var(--cyan); color:#e0f2fe; background:var(--cyan-soft); }
+        .style-option input { accent-color:var(--cyan); }
+        .text-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+        .text-box label { display:block; margin-bottom:8px; font-weight:800; color:#e2e8f0; }
+        .text-box textarea { width:100%; min-height:300px; resize:vertical; padding:15px; border:1px solid var(--line); border-radius:8px; outline:none; font:15px/1.65 Consolas,"Microsoft YaHei",monospace; color:var(--text); background:rgba(2,6,23,.52); }
+        .text-box textarea:focus { border-color:rgba(56,189,248,.68); box-shadow:0 0 0 3px rgba(56,189,248,.13); }
+        .text-box textarea[readonly] { color:#dbeafe; background:rgba(15,23,42,.5); }
+        .text-box textarea::placeholder { color:rgba(148,163,184,.68); }
+        .action-row { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; flex-wrap:wrap; }
+        .variant-button { min-height:42px; padding:0 17px; border:1px solid transparent; border-radius:8px; font-weight:800; cursor:pointer; }
+        .variant-button.primary { color:#082032; background:var(--cyan); }
+        .variant-button.primary:hover { background:#7dd3fc; }
+        .variant-button.secondary { color:#e2e8f0; border-color:var(--line); background:rgba(255,255,255,.08); }
+        .variant-button.secondary:hover { background:rgba(255,255,255,.13); }
+        .variant-button:disabled { opacity:.46; cursor:not-allowed; }
+        .summary { margin-top:18px; padding:13px 15px; border:1px solid rgba(56,189,248,.28); border-radius:8px; background:rgba(56,189,248,.08); color:#bae6fd; line-height:1.7; }
+        .summary strong { color:#f8fafc; }
+        .ambiguity-list { margin:8px 0 0; padding-left:20px; }
+        .dropzone { padding:46px 20px; border:1px dashed rgba(56,189,248,.58); border-radius:10px; text-align:center; background:rgba(2,6,23,.36); cursor:pointer; transition:.18s ease; }
+        .dropzone:hover,.dropzone.dragover { border-color:var(--cyan); background:rgba(56,189,248,.09); }
+        .dropzone i { display:block; margin-bottom:12px; color:var(--cyan); font-size:36px; }
+        .file-list, .task-list { display:grid; gap:10px; margin-top:16px; }
+        .file-row, .task-row { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:rgba(15,23,42,.48); }
+        .file-row small, .task-row small { color:var(--muted); }
+        .task-copy { min-width:0; }
+        .task-copy strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .download-link { color:#7dd3fc; font-weight:800; text-decoration:none; white-space:nowrap; }
+        .hint { margin-top:12px; color:var(--muted); font-size:13px; line-height:1.6; }
+        @media (max-width:800px) { .variant-page{width:min(100% - 20px,1320px)} .variant-hero{align-items:flex-start;flex-direction:column}.text-grid{grid-template-columns:1fr}.tab-panel{padding:16px}.file-row,.task-row{align-items:flex-start;flex-direction:column} }
+    </style>
+</head>
+<body>
+<main class="variant-page">
+    <section class="variant-hero">
+        <div><h1>英式 ⇄ 美式英语</h1><p>最长短语优先，保留大小写和 Office 原格式；一词多义规则会安全跳过并提示。</p></div>
+        <div class="dictionary-pill" id="dictionaryInfo">正在加载词库…</div>
+    </section>
+    <section class="variant-card">
+        <div class="tabs">
+            <button class="tab-button active" data-tab="textPanel"><i class="fas fa-align-left"></i> 粘贴文本</button>
+            <button class="tab-button" data-tab="filePanel"><i class="fas fa-file-word"></i> Office 文件</button>
+        </div>
+        <div class="tab-panel active" id="textPanel">
+            <div class="style-picker" data-style-group="text">
+                <label class="style-option"><input type="radio" name="textStyle" value="british" checked> 转为英式英语</label>
+                <label class="style-option"><input type="radio" name="textStyle" value="american"> 转为美式英语</label>
+            </div>
+            <div class="text-grid">
+                <div class="text-box"><label for="sourceText">原文本</label><textarea id="sourceText" placeholder="在此粘贴英文文本…"></textarea></div>
+                <div class="text-box"><label for="resultText">转换结果</label><textarea id="resultText" readonly placeholder="转换结果将显示在这里"></textarea></div>
+            </div>
+            <div class="action-row">
+                <button class="variant-button secondary" id="copyTextButton" type="button"><i class="fas fa-copy"></i> 复制结果</button>
+                <button class="variant-button primary" id="convertTextButton" type="button"><i class="fas fa-wand-magic-sparkles"></i> 开始转换</button>
+            </div>
+            <div class="summary" id="textSummary" hidden></div>
+        </div>
+        <div class="tab-panel" id="filePanel">
+            <div class="style-picker" data-style-group="file">
+                <label class="style-option"><input type="radio" name="fileStyle" value="british" checked> 转为英式英语</label>
+                <label class="style-option"><input type="radio" name="fileStyle" value="american"> 转为美式英语</label>
+            </div>
+            <div class="dropzone" id="dropzone">
+                <i class="fas fa-cloud-arrow-up"></i>
+                <strong>点击选择或拖入 Office 文件</strong>
+                <div class="hint" id="uploadHint">支持 DOCX / DOC / XLSX / XLS / PPTX / PPT，最多 50 个文件</div>
+                <input id="fileInput" type="file" multiple hidden accept=".docx,.doc,.xlsx,.xls,.pptx,.ppt">
+            </div>
+            <div class="file-list" id="fileList"></div>
+            <div class="action-row">
+                <button class="variant-button secondary" id="clearFilesButton" type="button">清空</button>
+                <button class="variant-button primary" id="submitFilesButton" type="button" disabled><i class="fas fa-play"></i> 提交转换</button>
+            </div>
+            <div class="task-list" id="taskList"></div>
+            <div class="action-row"><button class="variant-button secondary" id="batchDownloadButton" type="button" hidden><i class="fas fa-box-archive"></i> 下载全部结果</button></div>
+        </div>
+    </section>
+</main>
+<script src="/static/header.js"></script>
+<script src="/static/english_variant.js"></script>
+</body>
+</html>
