@@ -146,6 +146,31 @@ def test_word_like_counter_exposes_script_buckets_for_quote():
     assert metrics.number_token_count == 1
     assert metrics.billable_chinese_count == 27
     assert metrics.billable_latin_count == 13
+    assert metrics.cjk_char_count_no_spaces == 30
+    assert metrics.cjk_char_count_with_spaces == 34
+    assert 0 < metrics.latin_char_count_no_spaces < metrics.non_space_chars
+    assert metrics.latin_char_count_with_spaces >= metrics.latin_char_count_no_spaces
+
+
+def test_cjk_character_candidates_only_count_cjk_dominant_segments():
+    metrics = word_count_service._count_text("中文 HEPA 30cm\tEnglish text 42")
+
+    assert metrics.non_space_chars == 23
+    assert metrics.raw_chars == 28
+    assert metrics.cjk_char_count_no_spaces == 10
+    assert metrics.cjk_char_count_with_spaces == 12
+    assert metrics.latin_char_count_no_spaces == 13
+    assert metrics.latin_char_count_with_spaces == 15
+
+    english = word_count_service._count_text("English only 42")
+    assert english.cjk_char_count_no_spaces == 0
+    assert english.cjk_char_count_with_spaces == 0
+    assert english.latin_char_count_no_spaces == 13
+    assert english.latin_char_count_with_spaces == 15
+
+    non_latin = word_count_service._count_text("Привет world مرحبا 123")
+    assert non_latin.latin_char_count_no_spaces == 0
+    assert non_latin.latin_char_count_with_spaces == 0
 
 
 def test_word_like_counter_splits_common_language_pairs():
@@ -275,9 +300,16 @@ def test_docx_main_and_extra_counts_are_separated(tmp_path, monkeypatch):
     assert file_result["extra_han_count"] == 2
     assert file_result["char_count_no_spaces"] > 0
     assert file_result["char_count_with_spaces"] >= file_result["char_count_no_spaces"]
+    assert file_result["cjk_char_count_no_spaces"] == file_result["char_count_no_spaces"]
+    assert file_result["cjk_char_count_with_spaces"] >= file_result["cjk_char_count_no_spaces"]
+    assert summary["total_cjk_char_count_no_spaces"] == file_result["cjk_char_count_no_spaces"]
+    assert summary["total_cjk_char_count_with_spaces"] == file_result["cjk_char_count_with_spaces"]
+    assert summary["total_latin_char_count_no_spaces"] == file_result["latin_char_count_no_spaces"]
+    assert summary["total_latin_char_count_with_spaces"] == file_result["latin_char_count_with_spaces"]
     assert file_result["paragraph_count"] >= 3
     assert file_result["image_count"] == 1
     assert file_result["file_type"] == "Word"
+    assert file_result["line_count_method"] == "document_property"
     assert "DOCX" in file_result["stat_method"]
     assert file_result["counted_at"]
     assert Path(tmp_path / result["report_excel"]).exists()
@@ -287,8 +319,12 @@ def test_docx_main_and_extra_counts_are_separated(tmp_path, monkeypatch):
     try:
         headers = [cell.value for cell in next(report["文件明细"].iter_rows(max_row=1))]
         assert "页数" in headers
-        assert "字符数(不计空格)" in headers
+        assert "中日韩候选字符数(不计空格)" in headers
+        assert "中日韩候选字符数(计空格)" in headers
+        assert "拉丁候选字符数(不计空格)" in headers
+        assert "拉丁候选字符数(计空格)" in headers
         assert "图片数量" in headers
+        assert "行数统计方式" in headers
         assert "统计方法" in headers
         assert "中文候选" in headers
         assert "汉字" in headers
@@ -304,6 +340,7 @@ def test_word_count_accepts_single_file_path(tmp_path, monkeypatch):
     doc.add_paragraph("单文件 world 123")
     file_path = tmp_path / "single.docx"
     doc.save(file_path)
+    monkeypatch.setattr(word_count_service, "_read_word_native_line_count", lambda _: 12)
 
     prepared = word_count_service.prepare_word_count_request(directory_path=str(file_path))
     assert prepared["params"]["input_kind"] == "file"
@@ -321,7 +358,10 @@ def test_word_count_accepts_single_file_path(tmp_path, monkeypatch):
     assert result["input_kind"] == "file"
     assert result["summary"]["counted_files"] == 1
     assert result["summary"]["total_main_word_count"] == 5
+    assert result["summary"]["total_line_count"] == 12
     assert result["files"][0]["relative_path"] == "single.docx"
+    assert result["files"][0]["line_count_method"] == "word_native_repagination"
+    assert "Word实时重新分页" in result["files"][0]["stat_method"]
 
 
 def test_office_pdf_txt_and_blank_pdf_statuses(tmp_path, monkeypatch):

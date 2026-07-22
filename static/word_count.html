@@ -459,8 +459,83 @@
             line-height: 1;
         }
 
-        .table-wrap {
+        .word-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .word-metric-grid .metric.primary { grid-column: span 1; }
+
+        .result-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: -2px 0 18px;
+        }
+
+        .result-meta > span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 30px;
+            padding: 0 10px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            color: var(--muted);
+            background: rgba(15, 23, 42, 0.42);
+            font-size: 12px;
+        }
+
+        .result-meta strong { color: var(--text); }
+
+        .language-details {
+            margin: 18px 0;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            background: rgba(2, 6, 23, 0.24);
             overflow: hidden;
+        }
+
+        .language-details > summary {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 54px;
+            padding: 0 16px;
+            cursor: pointer;
+            color: var(--text);
+            font-weight: 800;
+            list-style: none;
+            user-select: none;
+        }
+
+        .language-details > summary::-webkit-details-marker { display: none; }
+
+        .language-details > summary::before {
+            content: "\f054";
+            color: var(--cyan);
+            font-family: "Font Awesome 6 Free";
+            font-size: 12px;
+            font-weight: 900;
+            transition: transform 0.18s ease;
+        }
+
+        .language-details[open] > summary::before { transform: rotate(90deg); }
+
+        .language-details > summary small {
+            margin-left: auto;
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .language-details[open] > summary {
+            border-bottom: 1px solid var(--line);
+            background: rgba(56, 189, 248, 0.06);
+        }
+
+        .language-details-body { padding: 16px; }
+
+        .language-details-body .metric-grid { margin-bottom: 16px; }
+
+        .table-wrap {
+            overflow-x: auto;
             border: 1px solid var(--line);
             border-radius: 8px;
         }
@@ -487,12 +562,12 @@
             font-size: 12px;
         }
 
-        .file-col { width: 35%; }
-        .status-col { width: 8%; }
+        .file-col { width: 25%; }
+        .status-col { width: 7%; }
         .count-col { width: 7%; }
-        .wide-count-col { width: 12%; }
-        .extra-col { width: 9%; }
-        .info-col { width: 10%; }
+        .char-count-col { width: 10%; }
+        .extra-col { width: 8%; }
+        .info-col { width: 11%; }
 
         .column-head {
             display: inline-flex;
@@ -750,23 +825,97 @@
                         <strong id="progressText">0%</strong>
                     </div>
 
-                    <div class="metric-grid">
-                        <div class="metric primary"><small>主字数</small><strong id="mainWords">0</strong></div>
+                    <div class="metric-grid word-metric-grid">
+                        <div class="metric"><small>页数</small><strong id="pageCount">0</strong></div>
+                        <div class="metric primary"><small>字数</small><strong id="mainWords">0</strong></div>
+                        <div class="metric"><small>字符数（不计空格）</small><strong id="charsNoSpaces">0</strong></div>
+                        <div class="metric"><small>字符数（计空格）</small><strong id="charsWithSpaces">0</strong></div>
+                        <div class="metric"><small>段落数</small><strong id="paragraphCount">0</strong></div>
                         <div class="metric">
                             <small>
-                                <span>额外内容字数</span>
-                                <span class="hint-popover" tabindex="0" aria-label="额外字数说明" data-tooltip="额外字数来自 Word 文档中可提取但不并入主字数的区域，例如页眉、页脚、脚注、尾注、批注、图表或图形文字等；正文表格和正文普通文本框仍计入主字数。">
+                                行数
+                                <span
+                                    id="lineCountHint"
+                                    class="hint-popover"
+                                    tabindex="0"
+                                    aria-label="行数统计说明"
+                                    data-tooltip="仅供参考：行数取决于字体、字号、页宽、页边距、表格、文本框和 Word 实时分页结果。单个 Word 文件在本机 Word 可用时会优先重新分页统计；否则读取文档保存的行数属性，或按显式换行近似计算。"
+                                >
                                     <i class="fas fa-circle-info" aria-hidden="true"></i>
                                 </span>
                             </small>
-                            <strong id="extraWords">0</strong>
+                            <strong id="lineCount">0</strong>
                         </div>
-                        <div class="metric"><small>已统计文件</small><strong id="countedFiles">0</strong></div>
-                        <div class="metric"><small>需处理/失败</small><strong id="issueFiles">0</strong></div>
-                        <div class="metric"><small>中日韩语系候选</small><strong id="cjkWords">0</strong></div>
-                        <div class="metric"><small>拉丁系候选</small><strong id="latinWords">0</strong></div>
-                        <div class="metric"><small>纯数字 token</small><strong id="numberTokens">0</strong></div>
                     </div>
+
+                    <div class="result-meta" aria-label="任务统计概况">
+                        <span>已统计文件 <strong id="countedFiles">0</strong></span>
+                        <span>需处理/失败 <strong id="issueFiles">0</strong></span>
+                        <span>
+                            额外内容字数 <strong id="extraWords">0</strong>
+                            <span class="hint-popover" tabindex="0" aria-label="额外字数说明" data-tooltip="额外字数来自 Word 文档中可提取但不并入主字数的区域，例如页眉、页脚、脚注、尾注、批注、图表或图形文字等；正文表格和正文普通文本框仍计入主字数。">
+                                <i class="fas fa-circle-info" aria-hidden="true"></i>
+                            </span>
+                        </span>
+                    </div>
+
+                    <details id="languageDetails" class="language-details">
+                        <summary>
+                            <span><i class="fas fa-language"></i> 语言候选明细</span>
+                            <small>点击展开</small>
+                        </summary>
+                        <div class="language-details-body">
+                            <div class="metric-grid">
+                                <div class="metric"><small>中日韩语系候选 · 字数</small><strong id="cjkWords">0</strong></div>
+                                <div class="metric">
+                                    <small>
+                                        <span>中日韩候选 · 字符数（不计空格）</span>
+                                        <span class="hint-popover" tabindex="0" aria-label="中日韩候选字符数说明" data-tooltip="只统计由中日韩文字主导的文本片段；片段内的型号、数字和拉丁字母会随该片段保留。不计空格会排除空白字符，计空格会保留片段内空格。">
+                                            <i class="fas fa-circle-info" aria-hidden="true"></i>
+                                        </span>
+                                    </small>
+                                    <strong id="cjkCharsNoSpaces">0</strong>
+                                </div>
+                                <div class="metric"><small>中日韩候选 · 字符数（计空格）</small><strong id="cjkCharsWithSpaces">0</strong></div>
+                                <div class="metric"><small>拉丁系候选 · 词数</small><strong id="latinWords">0</strong></div>
+                                <div class="metric">
+                                    <small>
+                                        <span>拉丁候选 · 字符数（不计空格）</span>
+                                        <span class="hint-popover" tabindex="0" aria-label="拉丁候选字符数说明" data-tooltip="只统计由拉丁文字主导的文本片段；片段内的数字、标点和空格会按 Word 字符数口径保留。">
+                                            <i class="fas fa-circle-info" aria-hidden="true"></i>
+                                        </span>
+                                    </small>
+                                    <strong id="latinCharsNoSpaces">0</strong>
+                                </div>
+                                <div class="metric"><small>拉丁候选 · 字符数（计空格）</small><strong id="latinCharsWithSpaces">0</strong></div>
+                                <div class="metric"><small>纯数字 token</small><strong id="numberTokens">0</strong></div>
+                            </div>
+
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th rowspan="2">文件</th>
+                                            <th colspan="3">中日韩语系候选</th>
+                                            <th colspan="3">拉丁系候选</th>
+                                            <th rowspan="2">纯数字</th>
+                                        </tr>
+                                        <tr>
+                                            <th>字数</th>
+                                            <th>字符数<br>（不计空格）</th>
+                                            <th>字符数<br>（计空格）</th>
+                                            <th>词数</th>
+                                            <th>字符数<br>（不计空格）</th>
+                                            <th>字符数<br>（计空格）</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="candidateRows">
+                                        <tr><td colspan="8"><div class="empty">暂无候选明细</div></td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </details>
 
                     <div id="downloadArea" class="button-row" style="display:none"></div>
 
@@ -776,8 +925,10 @@
                                 <col class="file-col">
                                 <col class="status-col">
                                 <col class="count-col">
-                                <col class="wide-count-col">
-                                <col class="wide-count-col">
+                                <col class="count-col">
+                                <col class="char-count-col">
+                                <col class="char-count-col">
+                                <col class="count-col">
                                 <col class="count-col">
                                 <col class="extra-col">
                                 <col class="info-col">
@@ -786,10 +937,12 @@
                                 <tr>
                                     <th>文件</th>
                                     <th>状态</th>
-                                    <th>主字数</th>
-                                    <th>中日韩语系候选</th>
-                                    <th>拉丁系候选</th>
-                                    <th>纯数字</th>
+                                    <th>页数</th>
+                                    <th>字数</th>
+                                    <th>字符数<br>（不计空格）</th>
+                                    <th>字符数<br>（计空格）</th>
+                                    <th>段落数</th>
+                                    <th>行数</th>
                                     <th>
                                         <span class="column-head">
                                             额外字数
@@ -802,7 +955,7 @@
                                 </tr>
                             </thead>
                             <tbody id="fileRows">
-                                <tr><td colspan="8"><div class="empty">暂无结果</div></td></tr>
+                                <tr><td colspan="10"><div class="empty">暂无结果</div></td></tr>
                             </tbody>
                         </table>
                     </div>

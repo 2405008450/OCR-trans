@@ -7,7 +7,7 @@ import argparse
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -39,6 +39,20 @@ def _clean(value: object) -> str:
 
 def _source_ref(sheet: str, row: int, form: str) -> dict[str, Any]:
     return {"sheet": sheet, "row": row, "form": form}
+
+
+def _source_document_timestamp(source: Path) -> str:
+    """读取工作簿内部时间，避免复制文件改变 mtime 后生成不同的 JSON。"""
+    workbook = load_workbook(source, read_only=True, data_only=True)
+    try:
+        timestamp = workbook.properties.modified or workbook.properties.created
+    finally:
+        workbook.close()
+    if timestamp is None:
+        return "1970-01-01T00:00:00+00:00"
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc).isoformat()
 
 
 def _iter_pairs(source: Path) -> Iterable[dict[str, Any]]:
@@ -145,7 +159,7 @@ def compile_dictionary(source: Path = DEFAULT_SOURCE) -> dict[str, Any]:
     source_sha256 = hashlib.sha256(content).hexdigest()
     version_match = re.search(r"(\d{6,8})", source.stem)
     dictionary_version = version_match.group(1) if version_match else source_sha256[:12]
-    generated_at = datetime.fromtimestamp(source.stat().st_mtime, tz=timezone.utc).isoformat()
+    generated_at = _source_document_timestamp(source)
 
     british_to_american = _compile_direction(pairs, "british", "american")
     american_to_british = _compile_direction(pairs, "american", "british")

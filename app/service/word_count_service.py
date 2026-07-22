@@ -137,6 +137,10 @@ class TextMetrics:
     word_count: int
     non_space_chars: int
     raw_chars: int
+    cjk_char_count_no_spaces: int = 0
+    cjk_char_count_with_spaces: int = 0
+    latin_char_count_no_spaces: int = 0
+    latin_char_count_with_spaces: int = 0
     han_count: int = 0
     kana_count: int = 0
     hangul_count: int = 0
@@ -215,6 +219,7 @@ class ExtractedContent:
     page_count: int = 0
     paragraph_count: int = 0
     line_count: int = 0
+    line_count_method: str = "estimated"
     image_count: int = 0
     stat_method: str = ""
     file_type: str = ""
@@ -601,6 +606,7 @@ def run_word_count_task_sync(
             root=relative_root,
             converted_dir=converted_dir,
             max_bytes=max_bytes,
+            use_word_native_line_count=(total == 1),
             ocr_enabled=ocr_enabled,
             ocr_model=normalized_ocr_model,
             ocr_route=ocr_route,
@@ -647,9 +653,11 @@ def run_word_count_task_sync(
             "主统计采用 Word 近似口径，不保证与 Word COM 组件 100% 一致。",
             "脚本分桶采用互斥口径：汉字、假名、韩文、拉丁词、纯数字等分桶合计等于主字数。",
             "报价候选字段用于按源语取列；中文候选与日语候选都可能包含同一批汉字，不能把所有候选列相加。",
+            "中日韩语系候选字符数先按制表符和换行拆分文本片段，再只统计由中日韩文字主导的片段；片段内的型号、数字和拉丁字母会随该片段保留。",
+            "拉丁系候选字符数采用相同片段口径，只统计由拉丁文字主导的片段；纯数字片段不会单独归入拉丁候选。",
             "纯数字 token 默认单独列出，不并入拉丁系候选；如报价规则要求数字计费，可与源语候选相加。",
             "Word 主数计入正文、正文表格和正文文本框；页眉页脚、脚注尾注、图表文字、批注列为额外内容。",
-            "页数和行数采用快速近似口径：Word 优先读取文档属性，PDF/PPT 使用实际页数或幻灯片数，Excel 页数按工作表数近似。",
+            "行数属于排版统计，仅供参考：单个 Word 文件在 Windows 且本机 Word 可用时，文档未保存行数属性会调用 Word 实时重新分页；否则读取文档属性或按显式换行近似。PDF/PPT 使用实际页数或幻灯片数，Excel 页数按工作表数近似。",
             "图片数量统计嵌入图片出现次数，用于后续 OCR 流程线索；含图片的可编辑 Office 文件仍保持已统计。",
             "PPT 主数统计幻灯片可见文本框、表格、组合形状和可提取图表文字；备注文本列为额外内容。",
             "启用 OCR 时，扫描 PDF、混合 PDF 的扫描页和独立图片使用现有 PDF2DOCX 视觉识别能力；Office 内嵌图片不识别。",
@@ -1087,6 +1095,7 @@ def _count_single_file(
     root: Path,
     converted_dir: Path,
     max_bytes: int,
+    use_word_native_line_count: bool = False,
     ocr_enabled: bool = False,
     ocr_model: str = PDF2DOCX_DEFAULT_MODEL,
     ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
@@ -1160,7 +1169,11 @@ def _count_single_file(
                 status_callback=ocr_status_callback,
             )
         else:
-            extracted = _extract_content(file_path, converted_dir)
+            extracted = _extract_content(
+                file_path,
+                converted_dir,
+                use_word_native_line_count=use_word_native_line_count,
+            )
     except CadConverterUnavailableError as exc:
         base.update(
             status=STATUS_NEEDS_CAD_PARSER,
@@ -1231,8 +1244,16 @@ def _count_single_file(
         "extra_word_count": 0,
         "main_non_space_chars": 0,
         "main_raw_chars": 0,
+        "main_cjk_char_count_no_spaces": 0,
+        "main_cjk_char_count_with_spaces": 0,
+        "main_latin_char_count_no_spaces": 0,
+        "main_latin_char_count_with_spaces": 0,
         "extra_non_space_chars": 0,
         "extra_raw_chars": 0,
+        "extra_cjk_char_count_no_spaces": 0,
+        "extra_cjk_char_count_with_spaces": 0,
+        "extra_latin_char_count_no_spaces": 0,
+        "extra_latin_char_count_with_spaces": 0,
     }
     for field in SCRIPT_COUNT_FIELDS:
         totals[f"main_{field}"] = 0
@@ -1244,12 +1265,20 @@ def _count_single_file(
             totals["extra_word_count"] += metrics.word_count
             totals["extra_non_space_chars"] += metrics.non_space_chars
             totals["extra_raw_chars"] += metrics.raw_chars
+            totals["extra_cjk_char_count_no_spaces"] += metrics.cjk_char_count_no_spaces
+            totals["extra_cjk_char_count_with_spaces"] += metrics.cjk_char_count_with_spaces
+            totals["extra_latin_char_count_no_spaces"] += metrics.latin_char_count_no_spaces
+            totals["extra_latin_char_count_with_spaces"] += metrics.latin_char_count_with_spaces
             for field in SCRIPT_COUNT_FIELDS:
                 totals[f"extra_{field}"] += int(getattr(metrics, field, 0))
         else:
             totals["main_word_count"] += metrics.word_count
             totals["main_non_space_chars"] += metrics.non_space_chars
             totals["main_raw_chars"] += metrics.raw_chars
+            totals["main_cjk_char_count_no_spaces"] += metrics.cjk_char_count_no_spaces
+            totals["main_cjk_char_count_with_spaces"] += metrics.cjk_char_count_with_spaces
+            totals["main_latin_char_count_no_spaces"] += metrics.latin_char_count_no_spaces
+            totals["main_latin_char_count_with_spaces"] += metrics.latin_char_count_with_spaces
             for field in SCRIPT_COUNT_FIELDS:
                 totals[f"main_{field}"] += int(getattr(metrics, field, 0))
         source_counter[item.source_type] += 1
@@ -1268,6 +1297,10 @@ def _count_single_file(
                 "raw_chars": metrics.raw_chars,
                 "char_count_no_spaces": metrics.non_space_chars,
                 "char_count_with_spaces": metrics.raw_chars,
+                "cjk_char_count_no_spaces": metrics.cjk_char_count_no_spaces,
+                "cjk_char_count_with_spaces": metrics.cjk_char_count_with_spaces,
+                "latin_char_count_no_spaces": metrics.latin_char_count_no_spaces,
+                "latin_char_count_with_spaces": metrics.latin_char_count_with_spaces,
                 "script_counts": item_script_counts,
                 "quote_counts": item_quote_counts,
                 "script_count_total": metrics.script_count_total,
@@ -1295,6 +1328,10 @@ def _count_single_file(
         extra_word_count=totals["extra_word_count"],
         char_count_no_spaces=totals["main_non_space_chars"],
         char_count_with_spaces=totals["main_raw_chars"],
+        cjk_char_count_no_spaces=totals["main_cjk_char_count_no_spaces"],
+        cjk_char_count_with_spaces=totals["main_cjk_char_count_with_spaces"],
+        latin_char_count_no_spaces=totals["main_latin_char_count_no_spaces"],
+        latin_char_count_with_spaces=totals["main_latin_char_count_with_spaces"],
         non_space_chars=totals["main_non_space_chars"],
         raw_chars=totals["main_raw_chars"],
         extra_non_space_chars=totals["extra_non_space_chars"],
@@ -1308,6 +1345,7 @@ def _count_single_file(
         page_count=extracted.page_count,
         paragraph_count=extracted.paragraph_count,
         line_count=extracted.line_count,
+        line_count_method=extracted.line_count_method,
         image_count=extracted.image_count,
         stat_method=extracted.stat_method,
         file_type=extracted.file_type or base.get("file_type", ""),
@@ -1351,6 +1389,10 @@ def _base_file_result(
         "extra_word_count": 0,
         "char_count_no_spaces": 0,
         "char_count_with_spaces": 0,
+        "cjk_char_count_no_spaces": 0,
+        "cjk_char_count_with_spaces": 0,
+        "latin_char_count_no_spaces": 0,
+        "latin_char_count_with_spaces": 0,
         "non_space_chars": 0,
         "raw_chars": 0,
         "extra_non_space_chars": 0,
@@ -1364,6 +1406,7 @@ def _base_file_result(
         "page_count": 0,
         "paragraph_count": 0,
         "line_count": 0,
+        "line_count_method": "estimated",
         "image_count": 0,
         "stat_method": _stat_method_for_extension(extension),
         "counted_at": _now_iso(),
@@ -1388,7 +1431,12 @@ def _extract_text_items(file_path: Path, converted_dir: Path) -> list[TextItem]:
     return _extract_content(file_path, converted_dir).items
 
 
-def _extract_content(file_path: Path, converted_dir: Path) -> ExtractedContent:
+def _extract_content(
+    file_path: Path,
+    converted_dir: Path,
+    *,
+    use_word_native_line_count: bool = False,
+) -> ExtractedContent:
     ext = file_path.suffix.lower()
     converted_from = ""
     if ext in CAD_EXTENSIONS:
@@ -1433,7 +1481,10 @@ def _extract_content(file_path: Path, converted_dir: Path) -> ExtractedContent:
         ext = ".pptx"
 
     if ext == ".docx":
-        content = _extract_docx_content(file_path)
+        content = _extract_docx_content(
+            file_path,
+            use_word_native_line_count=use_word_native_line_count,
+        )
     if ext == ".xlsx":
         content = _extract_xlsx_content(file_path)
     if ext == ".pptx":
@@ -1450,6 +1501,7 @@ def _extract_content(file_path: Path, converted_dir: Path) -> ExtractedContent:
             page_count=content.page_count,
             paragraph_count=content.paragraph_count,
             line_count=content.line_count,
+            line_count_method=content.line_count_method,
             image_count=content.image_count,
             stat_method=f"{converted_from}+{content.stat_method}",
             file_type=content.file_type,
@@ -1930,19 +1982,40 @@ def _qn(tag: str) -> str:
     return f"{{{NS[prefix]}}}{local}"
 
 
-def _extract_docx_content(path: Path) -> ExtractedContent:
+def _extract_docx_content(
+    path: Path,
+    *,
+    use_word_native_line_count: bool = False,
+) -> ExtractedContent:
     items = _extract_docx_text_items(path)
     app_props = _read_ooxml_app_properties(path)
     page_count = _to_positive_int(app_props.get("Pages"))
     app_line_count = _to_positive_int(app_props.get("Lines"))
     fallback_line_count = sum(item.line_count for item in items)
+    native_line_count = 0
+    if not app_line_count and use_word_native_line_count:
+        native_line_count = _read_word_native_line_count(path)
+    if native_line_count:
+        line_count = native_line_count
+        line_count_method = "word_native_repagination"
+    elif app_line_count:
+        line_count = app_line_count
+        line_count_method = "document_property"
+    else:
+        line_count = fallback_line_count
+        line_count_method = "explicit_line_breaks"
     return ExtractedContent(
         items=items,
         page_count=page_count,
         paragraph_count=sum(item.paragraph_count for item in items),
-        line_count=app_line_count or fallback_line_count,
+        line_count=line_count,
+        line_count_method=line_count_method,
         image_count=_count_ooxml_image_references(path, ("word/",)),
-        stat_method="DOCX XML解析+Word近似计数",
+        stat_method=(
+            "DOCX XML解析+Word实时重新分页"
+            if native_line_count
+            else "DOCX XML解析+Word近似计数"
+        ),
         file_type="Word",
     )
 
@@ -2204,6 +2277,55 @@ def _read_ooxml_app_properties(path: Path) -> dict[str, str]:
     return props
 
 
+def _read_word_native_line_count(path: Path) -> int:
+    """在 Windows 单文件任务中调用 Word 重新分页，获得接近界面“行数”的统计值。"""
+    if os.name != "nt":
+        return 0
+
+    word = None
+    document = None
+    initialized = False
+    try:
+        import pythoncom
+        import win32com.client
+
+        pythoncom.CoInitialize()
+        initialized = True
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
+        document = word.Documents.Open(
+            FileName=str(path.resolve(strict=True)),
+            ConfirmConversions=False,
+            ReadOnly=True,
+            AddToRecentFiles=False,
+            Revert=False,
+            Visible=False,
+            OpenAndRepair=False,
+            NoEncodingDialog=True,
+        )
+        document.Repaginate()
+        return _to_positive_int(document.ComputeStatistics(1))
+    except Exception:
+        return 0
+    finally:
+        if document is not None:
+            try:
+                document.Close(False)
+            except Exception:
+                pass
+        if word is not None:
+            try:
+                word.Quit()
+            except Exception:
+                pass
+        if initialized:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
+
+
 def _count_ooxml_image_references(path: Path, prefixes: tuple[str, ...]) -> int:
     count = 0
     try:
@@ -2329,12 +2451,99 @@ def _count_text(text: str) -> TextMetrics:
             continue
         index += 1
     word_count = sum(counts.values())
+    cjk_char_count_no_spaces, cjk_char_count_with_spaces = _count_cjk_candidate_characters(content)
+    latin_char_count_no_spaces, latin_char_count_with_spaces = _count_latin_candidate_characters(content)
     return TextMetrics(
         word_count=word_count,
         non_space_chars=sum(1 for char in text or "" if not char.isspace()),
         raw_chars=len(text or ""),
+        cjk_char_count_no_spaces=cjk_char_count_no_spaces,
+        cjk_char_count_with_spaces=cjk_char_count_with_spaces,
+        latin_char_count_no_spaces=latin_char_count_no_spaces,
+        latin_char_count_with_spaces=latin_char_count_with_spaces,
         **counts,
     )
+
+
+def _count_cjk_candidate_characters(text: str) -> tuple[int, int]:
+    """只统计中日韩主导文本片段的字符数，避免把整篇拉丁文本并入候选值。"""
+    return _count_candidate_characters(text, _is_cjk_dominant_segment)
+
+
+def _count_latin_candidate_characters(text: str) -> tuple[int, int]:
+    """只统计拉丁文字主导文本片段的字符数。"""
+    return _count_candidate_characters(text, _is_latin_dominant_segment)
+
+
+def _count_candidate_characters(
+    text: str,
+    is_selected_segment: Callable[[str], bool],
+) -> tuple[int, int]:
+    parts = re.split(r"([\t\r\n]+)", text or "")
+    segments = parts[::2]
+    separators = parts[1::2]
+    selected = [is_selected_segment(segment) for segment in segments]
+
+    no_spaces = sum(
+        sum(1 for char in segment if not char.isspace())
+        for segment, is_selected in zip(segments, selected)
+        if is_selected
+    )
+    with_spaces = sum(
+        len(segment)
+        for segment, is_selected in zip(segments, selected)
+        if is_selected
+    )
+    # 只有分隔符两侧都属于同一候选语系时，才把制表符或换行计入“计空格”。
+    with_spaces += sum(
+        len(separator)
+        for index, separator in enumerate(separators)
+        if selected[index] and selected[index + 1]
+    )
+    return no_spaces, with_spaces
+
+
+def _is_cjk_dominant_segment(text: str) -> bool:
+    cjk_count = sum(1 for char in text if _is_cjk(char))
+    if cjk_count == 0:
+        return False
+
+    non_cjk_word_count = 0
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if _is_cjk(char):
+            index += 1
+            continue
+        if _is_token_char(char):
+            token, index = _consume_word_like_token(text, index)
+            if _token_count_field(token) != "number_token_count":
+                non_cjk_word_count += 1
+            continue
+        index += 1
+    return cjk_count >= non_cjk_word_count
+
+
+def _is_latin_dominant_segment(text: str) -> bool:
+    latin_word_count = 0
+    other_language_count = sum(1 for char in text if _is_cjk(char))
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if _is_cjk(char):
+            index += 1
+            continue
+        if _is_token_char(char):
+            token, index = _consume_word_like_token(text, index)
+            field = _token_count_field(token)
+            if field in {"latin_word_count", "mixed_latin_number_count"}:
+                latin_word_count += 1
+            elif field != "number_token_count":
+                other_language_count += 1
+            continue
+        index += 1
+    # 平票的混合片段归入中日韩候选，避免同一片段在两个字符候选中重复出现。
+    return latin_word_count > other_language_count
 
 
 def _quote_counts_from_script_counts(script_counts: dict[str, int]) -> dict[str, int]:
@@ -2515,6 +2724,22 @@ def _build_summary(file_results: list[dict[str, Any]], *, truncated: bool, start
         "total_extra_word_count": sum(int(item.get("extra_word_count") or 0) for item in file_results),
         "total_char_count_no_spaces": sum(int(item.get("char_count_no_spaces") or 0) for item in file_results),
         "total_char_count_with_spaces": sum(int(item.get("char_count_with_spaces") or 0) for item in file_results),
+        "total_cjk_char_count_no_spaces": sum(
+            int(item.get("cjk_char_count_no_spaces") or 0)
+            for item in file_results
+        ),
+        "total_cjk_char_count_with_spaces": sum(
+            int(item.get("cjk_char_count_with_spaces") or 0)
+            for item in file_results
+        ),
+        "total_latin_char_count_no_spaces": sum(
+            int(item.get("latin_char_count_no_spaces") or 0)
+            for item in file_results
+        ),
+        "total_latin_char_count_with_spaces": sum(
+            int(item.get("latin_char_count_with_spaces") or 0)
+            for item in file_results
+        ),
         "total_non_space_chars": sum(int(item.get("char_count_no_spaces") or item.get("non_space_chars") or 0) for item in file_results),
         "total_raw_chars": sum(int(item.get("char_count_with_spaces") or item.get("raw_chars") or 0) for item in file_results),
         "total_page_count": sum(int(item.get("page_count") or 0) for item in file_results),
@@ -2604,8 +2829,10 @@ def _write_summary_sheet(sheet, payload: dict[str, Any]) -> None:
         ("拉丁系候选词数", summary.get("total_billable_latin_count", 0)),
         ("纯数字 token", summary.get("total_number_token_count", 0)),
         ("脚本桶合计", summary.get("script_count_total", 0)),
-        ("字符数(不计空格)合计", summary.get("total_char_count_no_spaces", summary.get("total_non_space_chars", 0))),
-        ("字符数(计空格)合计", summary.get("total_char_count_with_spaces", summary.get("total_raw_chars", 0))),
+        ("中日韩语系候选字符数(不计空格)", summary.get("total_cjk_char_count_no_spaces", 0)),
+        ("中日韩语系候选字符数(计空格)", summary.get("total_cjk_char_count_with_spaces", 0)),
+        ("拉丁系候选字符数(不计空格)", summary.get("total_latin_char_count_no_spaces", 0)),
+        ("拉丁系候选字符数(计空格)", summary.get("total_latin_char_count_with_spaces", 0)),
         ("页数合计", summary.get("total_page_count", 0)),
         ("段落数合计", summary.get("total_paragraph_count", 0)),
         ("行数合计", summary.get("total_line_count", 0)),
@@ -2647,10 +2874,13 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
         "拉丁系候选",
         "纯数字",
         "脚本桶合计",
-        "字符数(不计空格)",
-        "字符数(计空格)",
+        "中日韩候选字符数(不计空格)",
+        "中日韩候选字符数(计空格)",
+        "拉丁候选字符数(不计空格)",
+        "拉丁候选字符数(计空格)",
         "段落数",
         "行数",
+        "行数统计方式",
         "图片数量",
         "是否使用 OCR",
         "OCR 页数",
@@ -2684,10 +2914,13 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
                 item.get("billable_latin_count", 0),
                 item.get("number_token_count", 0),
                 item.get("script_count_total", 0),
-                item.get("char_count_no_spaces", item.get("non_space_chars", 0)),
-                item.get("char_count_with_spaces", item.get("raw_chars", 0)),
+                item.get("cjk_char_count_no_spaces", 0),
+                item.get("cjk_char_count_with_spaces", 0),
+                item.get("latin_char_count_no_spaces", 0),
+                item.get("latin_char_count_with_spaces", 0),
                 item.get("paragraph_count", 0),
                 item.get("line_count", 0),
+                item.get("line_count_method", "estimated"),
                 item.get("image_count", 0),
                 "是" if item.get("ocr_used") else "否",
                 item.get("ocr_page_count", 0),
@@ -2726,8 +2959,10 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
         "拉丁系候选",
         "纯数字",
         "脚本桶合计",
-        "字符数(不计空格)",
-        "字符数(计空格)",
+        "中日韩候选字符数(不计空格)",
+        "中日韩候选字符数(计空格)",
+        "拉丁候选字符数(不计空格)",
+        "拉丁候选字符数(计空格)",
         "段落数",
         "行数",
         "图片数量",
@@ -2750,8 +2985,10 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
                 row.get("billable_latin_count", 0),
                 row.get("number_token_count", 0),
                 row.get("script_count_total", 0),
-                row.get("char_count_no_spaces", row.get("non_space_chars", 0)),
-                row.get("char_count_with_spaces", row.get("raw_chars", 0)),
+                row.get("cjk_char_count_no_spaces", 0),
+                row.get("cjk_char_count_with_spaces", 0),
+                row.get("latin_char_count_no_spaces", 0),
+                row.get("latin_char_count_with_spaces", 0),
                 row.get("paragraph_count", 0),
                 row.get("line_count", 0),
                 row.get("image_count", 0),

@@ -365,10 +365,27 @@ function renderResult(result, task) {
   }
   const summary = result.summary || {};
   document.getElementById('mainWords').textContent = formatNumber(summary.total_main_word_count);
+  document.getElementById('pageCount').textContent = formatNumber(summary.total_page_count);
+  document.getElementById('charsNoSpaces').textContent = formatNumber(summary.total_char_count_no_spaces);
+  document.getElementById('charsWithSpaces').textContent = formatNumber(summary.total_char_count_with_spaces);
+  document.getElementById('paragraphCount').textContent = formatNumber(summary.total_paragraph_count);
+  document.getElementById('lineCount').textContent = formatNumber(summary.total_line_count);
   document.getElementById('extraWords').textContent = formatNumber(summary.total_extra_word_count);
   document.getElementById('countedFiles').textContent = formatNumber(summary.counted_files);
   document.getElementById('cjkWords').textContent = formatNumber(cjkCandidateCount(summary));
+  document.getElementById('cjkCharsNoSpaces').textContent = formatNumber(
+    summary.total_cjk_char_count_no_spaces,
+  );
+  document.getElementById('cjkCharsWithSpaces').textContent = formatNumber(
+    summary.total_cjk_char_count_with_spaces,
+  );
   document.getElementById('latinWords').textContent = formatNumber(summary.total_billable_latin_count);
+  document.getElementById('latinCharsNoSpaces').textContent = formatNumber(
+    summary.total_latin_char_count_no_spaces,
+  );
+  document.getElementById('latinCharsWithSpaces').textContent = formatNumber(
+    summary.total_latin_char_count_with_spaces,
+  );
   document.getElementById('numberTokens').textContent = formatNumber(summary.total_number_token_count);
   const issueCount = Number(summary.failed_files || 0)
     + Number(summary.skipped_files || 0)
@@ -398,8 +415,10 @@ function renderDownloads(result, task) {
 
 function renderFiles(files) {
   const tbody = document.getElementById('fileRows');
+  const candidateBody = document.getElementById('candidateRows');
   if (!files.length) {
-    tbody.innerHTML = '<tr><td colspan="8"><div class="empty">暂无文件明细</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10"><div class="empty">暂无文件明细</div></td></tr>';
+    candidateBody.innerHTML = '<tr><td colspan="8"><div class="empty">暂无候选明细</div></td></tr>';
     return;
   }
   const visible = files.slice(0, 200);
@@ -420,14 +439,27 @@ function renderFiles(files) {
     return `<tr>
       <td title="${escAttr(item.file_path || '')}">${escHtml(item.relative_path || item.filename || '-')}</td>
       <td><span class="badge ${escAttr(status)}">${escHtml(statusLabel)}</span></td>
+      <td>${formatNumber(item.page_count)}</td>
       <td>${formatNumber(item.main_word_count)}</td>
-      <td>${formatNumber(cjkCandidateCount(item))}</td>
-      <td>${formatNumber(item.billable_latin_count)}</td>
-      <td>${formatNumber(item.number_token_count)}</td>
+      <td>${formatNumber(item.char_count_no_spaces)}</td>
+      <td>${formatNumber(item.char_count_with_spaces)}</td>
+      <td>${formatNumber(item.paragraph_count)}</td>
+      <td>${formatNumber(item.line_count)}</td>
       <td>${formatNumber(item.extra_word_count)}</td>
       <td>${escHtml(message)}</td>
     </tr>`;
   }).join('');
+
+  candidateBody.innerHTML = visible.map((item) => `<tr>
+    <td title="${escAttr(item.file_path || '')}">${escHtml(item.relative_path || item.filename || '-')}</td>
+    <td>${formatNumber(cjkCandidateCount(item))}</td>
+    <td>${formatNumber(item.cjk_char_count_no_spaces)}</td>
+    <td>${formatNumber(item.cjk_char_count_with_spaces)}</td>
+    <td>${formatNumber(item.billable_latin_count)}</td>
+    <td>${formatNumber(item.latin_char_count_no_spaces)}</td>
+    <td>${formatNumber(item.latin_char_count_with_spaces)}</td>
+    <td>${formatNumber(item.number_token_count)}</td>
+  </tr>`).join('');
 }
 
 function downloadUrl(taskId, filePath, name) {
@@ -454,13 +486,24 @@ function resetPage() {
   updateInputSource();
   document.getElementById('taskIdText').textContent = '';
   document.getElementById('downloadArea').style.display = 'none';
-  document.getElementById('fileRows').innerHTML = '<tr><td colspan="8"><div class="empty">暂无结果</div></td></tr>';
+  document.getElementById('fileRows').innerHTML = '<tr><td colspan="10"><div class="empty">暂无结果</div></td></tr>';
+  document.getElementById('candidateRows').innerHTML = '<tr><td colspan="8"><div class="empty">暂无候选明细</div></td></tr>';
+  document.getElementById('languageDetails').open = false;
   document.getElementById('mainWords').textContent = '0';
+  document.getElementById('pageCount').textContent = '0';
+  document.getElementById('charsNoSpaces').textContent = '0';
+  document.getElementById('charsWithSpaces').textContent = '0';
+  document.getElementById('paragraphCount').textContent = '0';
+  document.getElementById('lineCount').textContent = '0';
   document.getElementById('extraWords').textContent = '0';
   document.getElementById('countedFiles').textContent = '0';
   document.getElementById('issueFiles').textContent = '0';
   document.getElementById('cjkWords').textContent = '0';
+  document.getElementById('cjkCharsNoSpaces').textContent = '0';
+  document.getElementById('cjkCharsWithSpaces').textContent = '0';
   document.getElementById('latinWords').textContent = '0';
+  document.getElementById('latinCharsNoSpaces').textContent = '0';
+  document.getElementById('latinCharsWithSpaces').textContent = '0';
   document.getElementById('numberTokens').textContent = '0';
   updateSubmitAvailability();
   setStatus({ status: '', progress: 0, message: '等待提交' });

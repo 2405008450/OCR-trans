@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -36,6 +38,13 @@ def test_dictionary_compiler_matches_committed_runtime_dictionary() -> None:
         "american_to_british_ambiguous": 30,
     }
     assert build_dictionary(DEFAULT_SOURCE, DEFAULT_OUTPUT, check=True)
+
+
+def test_dictionary_output_does_not_depend_on_filesystem_mtime(tmp_path: Path) -> None:
+    copied_source = tmp_path / DEFAULT_SOURCE.name
+    shutil.copyfile(DEFAULT_SOURCE, copied_source)
+    os.utime(copied_source, (946684800, 946684800))
+    assert compile_dictionary(copied_source) == compile_dictionary(DEFAULT_SOURCE)
 
 
 def test_converter_handles_phrases_case_boundaries_and_ambiguity() -> None:
