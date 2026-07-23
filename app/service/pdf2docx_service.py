@@ -50,6 +50,14 @@ PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
         "label": "新模型",
         "description": "OpenRouter 新模型，适合常规 PDF / 图片转 Word 场景。",
     },
+    "google/gemini-3.6-flash": {
+        "label": "Gemini 3.6 Flash",
+        "description": "更高效的 Flash 模型，适合常规 PDF / 图片转 Word 场景。",
+    },
+    "google/gemini-3.5-flash-lite": {
+        "label": "极速版V3",
+        "description": "更快更轻量的 OCR 模型，适合高吞吐 PDF / 图片转 Word 场景。",
+    },
     "google/gemini-3.1-pro-preview": {
         "label": "Google Gemini 3.1 Pro Preview",
         "description": "更强的复杂版面与细节理解能力，适合高难度文档。",
@@ -63,6 +71,8 @@ PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
 PDF2DOCX_MODEL_ALIASES = {
     "gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
     "google/gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
+    "gemini-3.6-flash": "google/gemini-3.6-flash",
+    "gemini-3.5-flash-lite": "google/gemini-3.5-flash-lite",
 }
 
 

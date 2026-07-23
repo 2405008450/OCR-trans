@@ -73,6 +73,16 @@ AVAILABLE_MODELS = {
         "description": "新模型，适合通过 OpenRouter 处理常规对齐任务",
         "max_output": 65536,
     },
+    "Google: google/gemini-3.6-flash": {
+        "id": "google/gemini-3.6-flash",
+        "description": "Gemini 3.6 Flash，更高效的 Flash 模型，适合常规对齐任务",
+        "max_output": 65536,
+    },
+    "Google: google/gemini-3.5-flash-lite": {
+        "id": "google/gemini-3.5-flash-lite",
+        "description": "Gemini 3.5 Flash-Lite，更快更轻量，适合高吞吐对齐场景",
+        "max_output": 65536,
+    },
     "Google Gemini 2.5 Pro": {
         "id": "google/gemini-2.5-pro",
         "description": "PPT推荐-增强，速度稍慢，100万上下文，65K输出",

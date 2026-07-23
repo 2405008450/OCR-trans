@@ -137,6 +137,8 @@ const MODEL_DISPLAY_NAMES = {
     'Google Gemini 2.5 Pro': '增强版V1',
     'Google gemini-3-flash-preview': '快速版V2',
     'Google: google/gemini-3.5-flash': '新模型',
+    'Google: google/gemini-3.6-flash': 'Gemini 3.6 Flash',
+    'Google: google/gemini-3.5-flash-lite': '极速版V3',
     'Google: google/gemini-3.1-pro-preview': '增强版V2',
     'DeepSeek-V4-Pro': 'DeepSeek-V4-Pro',
 };
@@ -221,6 +223,8 @@ function populateDefaults() {
     modelSelect.innerHTML = '';
     modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option(getModelDisplayName('Google: google/gemini-3.5-flash'), 'Google: google/gemini-3.5-flash'));
+    modelSelect.add(new Option(getModelDisplayName('Google: google/gemini-3.6-flash'), 'Google: google/gemini-3.6-flash'));
+    modelSelect.add(new Option(getModelDisplayName('Google: google/gemini-3.5-flash-lite'), 'Google: google/gemini-3.5-flash-lite'));
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.add(new Option(getModelDisplayName('DeepSeek-V4-Pro'), 'DeepSeek-V4-Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;

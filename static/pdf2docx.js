@@ -19,10 +19,14 @@ const MODEL_DISPLAY_NAMES = {
     'google/gemini-3.1-flash-lite-preview': '极速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
     'google/gemini-3.5-flash': '新模型',
+    'google/gemini-3.6-flash': 'Gemini 3.6 Flash',
+    'google/gemini-3.5-flash-lite': '极速版V3',
     'google/gemini-3.1-pro-preview': '增强版V2',
     'anthropic/claude-sonnet-5': 'Claude Sonnet 5',
     'Google Gemini 3 Flash Preview': '快速版V2',
     '新模型': '新模型',
+    'Gemini 3.6 Flash': 'Gemini 3.6 Flash',
+    '极速版V3': '极速版V3',
     'Google Gemini 3.1 Pro Preview': '增强版V2',
     'Claude Sonnet 5': 'Claude Sonnet 5',
 };
@@ -187,6 +191,8 @@ async function loadConfig() {
             'google/gemini-3.1-flash-lite': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规场景。' },
             'google/gemini-3.5-flash': { label: '新模型', description: 'OpenRouter 新模型，适合常规场景。' },
+            'google/gemini-3.6-flash': { label: 'Gemini 3.6 Flash', description: '更高效的 Flash 模型，适合常规场景。' },
+            'google/gemini-3.5-flash-lite': { label: '极速版V3', description: '更快更轻量的 OCR 模型，适合高吞吐场景。' },
             'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '更强的复杂版面理解能力。' },
             'anthropic/claude-sonnet-5': { label: 'Claude Sonnet 5', description: '适合对比测试截图布局和网页重要图片定位效果。' },
         };
