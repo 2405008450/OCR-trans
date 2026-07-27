@@ -35,6 +35,274 @@
             border-color: var(--primary-color);
             box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
         }
+        .language-panel {
+            grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+            align-items: start;
+            gap: 0.9rem;
+            overflow: visible;
+        }
+        .language-picker {
+            position: relative;
+            min-width: 0;
+        }
+        .language-picker-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-color);
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+        .language-picker-label span {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+        }
+        .language-picker-label small {
+            color: var(--text-secondary);
+            font-size: 0.72rem;
+            font-weight: 500;
+        }
+        .language-picker-trigger {
+            display: grid;
+            grid-template-columns: 42px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 0.75rem;
+            width: 100%;
+            min-height: 66px;
+            padding: 0.65rem 0.8rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 0.75rem;
+            background: #fff;
+            color: var(--text-color);
+            text-align: left;
+            cursor: pointer;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+        }
+        .language-picker-trigger:hover {
+            border-color: #7dd3fc;
+            transform: translateY(-1px);
+        }
+        .language-picker-trigger:focus-visible,
+        .language-picker.open .language-picker-trigger {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.14);
+        }
+        .language-picker-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 11px;
+            background: linear-gradient(135deg, #e0f2fe, #dbeafe);
+            color: #0284c7;
+            font-size: 1rem;
+        }
+        .language-picker-value {
+            min-width: 0;
+        }
+        .language-picker-value strong,
+        .language-picker-value span {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .language-picker-value strong {
+            font-size: 0.98rem;
+        }
+        .language-picker-value span {
+            margin-top: 0.16rem;
+            color: var(--text-secondary);
+            font-size: 0.78rem;
+        }
+        .language-picker-chevron {
+            color: #64748b;
+            font-size: 0.78rem;
+            transition: transform 0.18s ease;
+        }
+        .language-picker.open .language-picker-chevron {
+            transform: rotate(180deg);
+        }
+        .language-picker-menu {
+            position: absolute;
+            z-index: 30;
+            top: calc(100% + 8px);
+            left: 0;
+            width: min(430px, calc(100vw - 48px));
+            padding: 0.75rem;
+            border: 1px solid #dbe4ee;
+            border-radius: 0.85rem;
+            background: #fff;
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.16);
+        }
+        .language-picker[data-side="target"] .language-picker-menu {
+            right: 0;
+            left: auto;
+        }
+        .language-search-wrap {
+            position: relative;
+            margin-bottom: 0.65rem;
+        }
+        .language-search-wrap i {
+            position: absolute;
+            top: 50%;
+            left: 0.75rem;
+            color: #94a3b8;
+            transform: translateY(-50%);
+        }
+        .language-search-wrap input {
+            width: 100%;
+            height: 40px;
+            padding: 0 0.75rem 0 2.25rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 0.65rem;
+            background: #f8fafc;
+            font-size: 0.88rem;
+        }
+        .language-search-wrap input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.11);
+        }
+        .language-quick-title {
+            margin: 0.1rem 0 0.45rem;
+            color: #64748b;
+            font-size: 0.72rem;
+            font-weight: 700;
+        }
+        .language-options {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.4rem;
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 1px;
+        }
+        .language-option {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 0.5rem;
+            min-height: 48px;
+            padding: 0.48rem 0.6rem;
+            border: 1px solid transparent;
+            border-radius: 0.6rem;
+            background: #f8fafc;
+            color: var(--text-color);
+            text-align: left;
+            cursor: pointer;
+        }
+        .language-option:hover {
+            border-color: #bae6fd;
+            background: #f0f9ff;
+        }
+        .language-option.selected {
+            border-color: #7dd3fc;
+            background: #e0f2fe;
+            color: #075985;
+        }
+        .language-option:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .language-option-text {
+            min-width: 0;
+        }
+        .language-option strong,
+        .language-option small {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .language-option strong {
+            font-size: 0.84rem;
+        }
+        .language-option small {
+            margin-top: 0.08rem;
+            color: #64748b;
+            font-size: 0.7rem;
+        }
+        .language-option-status {
+            color: #0284c7;
+            font-size: 0.72rem;
+        }
+        .language-empty-state {
+            grid-column: 1 / -1;
+            padding: 1rem;
+            border: 1px dashed #cbd5e1;
+            border-radius: 0.65rem;
+            color: var(--text-secondary);
+            text-align: center;
+            font-size: 0.82rem;
+        }
+        .language-native-select {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            margin: -1px !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            border: 0 !important;
+        }
+        .language-swap-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding-top: 2.25rem;
+        }
+        .language-swap-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            border: 1px solid #bae6fd;
+            border-radius: 999px;
+            background: #fff;
+            color: #0284c7;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.12);
+            transition: transform 0.18s ease, background 0.18s ease;
+        }
+        .language-swap-btn:hover {
+            background: #e0f2fe;
+            transform: rotate(180deg);
+        }
+        .language-summary {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.7rem 0.85rem;
+            border: 1px solid #dbeafe;
+            border-radius: 0.65rem;
+            background: linear-gradient(90deg, #eff6ff, #f0fdfa);
+        }
+        .language-route {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.55rem;
+            color: #0f4c81;
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+        .language-route i {
+            color: #0ea5e9;
+        }
+        .language-summary .hint-text {
+            margin: 0;
+            color: #475569;
+            text-align: right;
+        }
         .checkbox-inline {
             display: flex; align-items: center; gap: 0.5rem;
             font-size: 0.95rem; cursor: pointer;
@@ -170,6 +438,38 @@
         .download-btn-sm:hover { opacity: 0.85; }
         .download-btn-sm.btn-excel { background: #10b981; }
         .download-btn-sm.btn-word { background: #3b82f6; }
+        @media (max-width: 760px) {
+            .language-panel {
+                grid-template-columns: 1fr;
+            }
+            .language-swap-wrap {
+                padding: 0;
+            }
+            .language-swap-btn {
+                transform: rotate(90deg);
+            }
+            .language-swap-btn:hover {
+                transform: rotate(270deg);
+            }
+            .language-picker-menu,
+            .language-picker[data-side="target"] .language-picker-menu {
+                right: auto;
+                left: 0;
+                width: 100%;
+            }
+            .language-summary {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+            .language-summary .hint-text {
+                text-align: left;
+            }
+        }
+        @media (max-width: 440px) {
+            .language-options {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -196,14 +496,62 @@
                     <p class="upload-desc">支持 DOCX / DOC / PPTX / XLSX / XLS，需同时上传原文和译文</p>
 
                     <!-- 语言设置 -->
-                    <div class="options-panel">
-                        <div class="option-group">
-                            <label><i class="fas fa-globe"></i> 原文语言:</label>
-                            <select id="sourceLang"></select>
+                    <div class="options-panel language-panel">
+                        <div class="language-picker" id="sourceLangPicker" data-side="source">
+                            <div class="language-picker-label">
+                                <span><i class="fas fa-file-lines"></i> 原文语言</span>
+                                <small>文档实际使用的语言</small>
+                            </div>
+                            <button type="button" class="language-picker-trigger" aria-haspopup="listbox"
+                                    aria-expanded="false" aria-controls="sourceLangMenu">
+                                <span class="language-picker-icon"><i class="fas fa-language"></i></span>
+                                <span class="language-picker-value">
+                                    <strong>正在加载...</strong>
+                                    <span>请选择原文语言</span>
+                                </span>
+                                <i class="fas fa-chevron-down language-picker-chevron"></i>
+                            </button>
+                            <div class="language-picker-menu" id="sourceLangMenu" hidden>
+                                <div class="language-search-wrap">
+                                    <i class="fas fa-search"></i>
+                                    <input type="search" autocomplete="off" aria-label="搜索原文语言"
+                                           placeholder="搜索中文名、本地语名或代码">
+                                </div>
+                                <div class="language-quick-title">全部可用语言</div>
+                                <div class="language-options" role="listbox" aria-label="原文语言选项"></div>
+                            </div>
+                            <select id="sourceLang" class="language-native-select" tabindex="-1" aria-hidden="true"></select>
                         </div>
-                        <div class="option-group">
-                            <label><i class="fas fa-globe-americas"></i> 译文语言:</label>
-                            <select id="targetLang"></select>
+                        <div class="language-swap-wrap">
+                            <button type="button" class="language-swap-btn" id="swapLanguages"
+                                    title="交换原文与译文语言" aria-label="交换原文与译文语言">
+                                <i class="fas fa-right-left"></i>
+                            </button>
+                        </div>
+                        <div class="language-picker" id="targetLangPicker" data-side="target">
+                            <div class="language-picker-label">
+                                <span><i class="fas fa-file-export"></i> 译文语言</span>
+                                <small>希望对齐的译文语言</small>
+                            </div>
+                            <button type="button" class="language-picker-trigger" aria-haspopup="listbox"
+                                    aria-expanded="false" aria-controls="targetLangMenu">
+                                <span class="language-picker-icon"><i class="fas fa-globe-americas"></i></span>
+                                <span class="language-picker-value">
+                                    <strong>正在加载...</strong>
+                                    <span>请选择译文语言</span>
+                                </span>
+                                <i class="fas fa-chevron-down language-picker-chevron"></i>
+                            </button>
+                            <div class="language-picker-menu" id="targetLangMenu" hidden>
+                                <div class="language-search-wrap">
+                                    <i class="fas fa-search"></i>
+                                    <input type="search" autocomplete="off" aria-label="搜索译文语言"
+                                           placeholder="搜索中文名、本地语名或代码">
+                                </div>
+                                <div class="language-quick-title">全部可用语言</div>
+                                <div class="language-options" role="listbox" aria-label="译文语言选项"></div>
+                            </div>
+                            <select id="targetLang" class="language-native-select" tabindex="-1" aria-hidden="true"></select>
                         </div>
                         <div class="option-group full-width" style="display:flex;align-items:center;gap:1.5rem;">
                             <label class="checkbox-inline">
@@ -211,9 +559,12 @@
                                 <span>启用后处理细粒度分句（中文按 。！？，英文自动排除缩写）</span>
                             </label>
                         </div>
-                        <div class="option-group full-width hint-text" id="langHint">
-                            <i class="fas fa-info-circle"></i>
-                            <span id="langHintText">LLM 对齐后会按源语言再次检查并拆分多句原文键</span>
+                        <div class="language-summary" id="langHint">
+                            <span class="language-route" id="languageRoute">
+                                <i class="fas fa-arrow-right-arrow-left"></i>
+                                <span>正在加载语言配置...</span>
+                            </span>
+                            <span class="hint-text" id="langHintText">LLM 对齐后会按源语言再次检查并拆分多句原文键</span>
                         </div>
                     </div>
 
@@ -362,7 +713,7 @@
         }
     }
     </script>
-    <script src="/static/alignment.js"></script>
+    <script src="/static/alignment.js?feature=language-picker-v2"></script>
     <script src="/static/header.js"></script>
 </body>
 </html>

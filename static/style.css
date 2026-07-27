@@ -407,17 +407,44 @@ body.embedded-shell .result-item {
 }
 
 .field-wrap {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 10px;
     min-height: 52px;
-    padding: 0 14px;
+    padding: 0 40px 0 14px;
     border-radius: 14px;
     border: 1px solid rgba(88, 112, 138, 0.16);
     background: #fff;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.field-wrap i {
+.field-wrap:has(select)::after {
+    content: "\f078";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-soft);
+    font-size: 12px;
+    pointer-events: none;
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.field-wrap:hover,
+.field-wrap:focus-within {
+    border-color: rgba(14, 165, 233, 0.45);
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+.field-wrap:hover:has(select)::after,
+.field-wrap:focus-within:has(select)::after {
+    color: var(--primary-color);
+}
+
+.field-wrap > i {
     color: var(--primary-color);
 }
 
@@ -430,6 +457,14 @@ body.embedded-shell .result-item {
     background: transparent;
     color: var(--text-primary);
     font-size: 15px;
+}
+
+.option-group select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    cursor: pointer;
+    height: 52px;
 }
 
 .checkbox-card {

@@ -19,10 +19,146 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
             gap: 8px;
-            max-height: 268px;
+            max-height: 384px;
             overflow-y: auto;
             padding: 4px 2px 6px;
             scrollbar-width: thin;
+        }
+
+        /* 折叠分组：标题改为可点击按钮 */
+        .language-group-title {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            margin: 10px 0 0;
+            padding: 7px 10px;
+            border: 1px solid rgba(88, 112, 138, 0.14);
+            border-radius: 10px;
+            background: linear-gradient(180deg, #f3f8fd, #eaf2fa);
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background 0.18s ease, border-color 0.18s ease;
+            user-select: none;
+        }
+
+        .language-group-title:hover {
+            border-color: rgba(14, 165, 233, 0.3);
+            background: linear-gradient(180deg, #eaf4fc, #e3eff8);
+        }
+
+        .language-group-title .group-caret {
+            display: inline-flex;
+            width: 14px;
+            color: var(--primary-color);
+            font-size: 10px;
+            transition: transform 0.2s ease;
+        }
+
+        .language-group-title.collapsed .group-caret {
+            transform: rotate(-90deg);
+        }
+
+        .language-group-title .group-name {
+            flex: 1 1 auto;
+            text-align: left;
+        }
+
+        .language-group-title .group-count {
+            flex: 0 0 auto;
+            padding: 1px 8px;
+            border-radius: 999px;
+            background: rgba(14, 165, 233, 0.12);
+            color: var(--primary-color);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        .language-group-title.collapsed .group-count {
+            background: rgba(88, 112, 138, 0.14);
+            color: var(--text-secondary);
+        }
+
+        .language-empty {
+            grid-column: 1 / -1;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px dashed rgba(88, 112, 138, 0.24);
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.62);
+            font-size: 13px;
+        }
+
+        .lang-group-body {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+            gap: 8px;
+            padding-top: 4px;
+        }
+
+        .lang-group-body.is-hidden {
+            display: none;
+        }
+
+        /* 快捷预设条 */
+        .preset-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            border-radius: 14px;
+            border: 1px dashed rgba(14, 165, 233, 0.28);
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.06), rgba(99, 102, 241, 0.05));
+        }
+
+        .preset-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--primary-color);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+
+        .preset-list {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .preset-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 32px;
+            padding: 0 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(14, 165, 233, 0.22);
+            background: #fff;
+            color: var(--text-primary);
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.18s ease;
+        }
+
+        .preset-chip:hover {
+            border-color: var(--primary-color);
+            background: rgba(14, 165, 233, 0.08);
+            color: var(--primary-color);
+            transform: translateY(-1px);
         }
 
         .lang-chip {
@@ -116,6 +252,7 @@
         .model-picker-card,
         .engine-picker-card,
         .translate-mode-card,
+        .word-layout-card,
         .prompt-rules-card {
             overflow: visible;
         }
@@ -357,18 +494,21 @@
             text-align: center;
         }
 
-        .translate-mode-card .lang-selector {
+        .translate-mode-card .lang-selector,
+        .word-layout-card .lang-selector {
             gap: 10px;
         }
 
-        .translate-mode-card .lang-checkbox-group {
+        .translate-mode-card .lang-checkbox-group,
+        .word-layout-card .lang-checkbox-group {
             grid-template-columns: repeat(2, minmax(0, 1fr));
             max-height: none;
             gap: 10px;
             padding: 0;
         }
 
-        .translate-mode-card .mode-chip {
+        .translate-mode-card .mode-chip,
+        .word-layout-card .mode-chip {
             min-height: 76px;
             align-items: flex-start;
             padding: 12px;
@@ -396,6 +536,30 @@
 
         .language-panel {
             grid-column: 1 / -1;
+        }
+
+        .language-panels {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+            margin-bottom: 22px;
+            align-items: start;
+        }
+
+        .language-panels .language-panel {
+            grid-column: auto;
+            margin: 0;
+        }
+
+        .language-panels > .preset-bar {
+            grid-column: 1 / -1;
+            margin-bottom: 0;
+        }
+
+        @media (max-width: 980px) {
+            .language-panels {
+                grid-template-columns: 1fr;
+            }
         }
 
         .language-panel .lang-selector {
@@ -518,26 +682,16 @@
             line-height: 1;
         }
 
-        .language-group-title {
+        .lang-group-body {
             grid-column: 1 / -1;
-            margin: 8px 0 0;
-            padding-top: 8px;
-            border-top: 1px solid rgba(88, 112, 138, 0.12);
-            color: var(--text-secondary);
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+            gap: 8px;
+            padding-top: 4px;
         }
 
-        .language-empty {
-            grid-column: 1 / -1;
-            padding: 16px;
-            border-radius: 12px;
-            border: 1px dashed rgba(88, 112, 138, 0.24);
-            color: var(--text-secondary);
-            background: rgba(255, 255, 255, 0.62);
-            font-size: 13px;
+        .lang-group-body.is-hidden {
+            display: none;
         }
 
         .lang-selector .selector-label {
@@ -597,7 +751,8 @@
 
         @media (max-width: 720px) {
             .upload-card .options-panel,
-            .translate-mode-card .lang-checkbox-group {
+            .translate-mode-card .lang-checkbox-group,
+            .word-layout-card .lang-checkbox-group {
                 grid-template-columns: 1fr;
             }
 
@@ -766,6 +921,22 @@
                                 </div>
                             </div>
 
+                            <div class="option-group option-card word-layout-card">
+                                <div class="lang-selector">
+                                    <div class="config-card-head">
+                                        <h4><i class="fas fa-file-word"></i> Word 排版方式</h4>
+                                        <span>PDF / 图片输出</span>
+                                    </div>
+                                    <div class="lang-checkbox-group" id="wordLayoutModeGroup">
+                                        <!-- JS 动态填充 -->
+                                    </div>
+                                    <div class="selector-label">
+                                        <i class="fas fa-info-circle"></i>
+                                        <span>高保真模式适合直接交付；易编辑模式使用传统表格，适合后期人工调整。</span>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="option-group option-card prompt-rules-card">
                                 <div class="prompt-rules-head">
                                     <label for="translationRulesInput"><i class="fas fa-pen-nib"></i> 翻译规则</label>
@@ -782,6 +953,19 @@
                             </div>
                         </div>
 
+                        <div class="language-panels">
+                        <div class="preset-bar" id="presetBar">
+                            <span class="preset-label"><i class="fas fa-bolt"></i> 常用组合</span>
+                            <div class="preset-list" id="presetList">
+                                <button type="button" class="preset-chip" data-source="zh" data-targets="en">中 → 英</button>
+                                <button type="button" class="preset-chip" data-source="en" data-targets="zh">英 → 中</button>
+                                <button type="button" class="preset-chip" data-source="zh" data-targets="ja">中 → 日</button>
+                                <button type="button" class="preset-chip" data-source="zh" data-targets="ko">中 → 韩</button>
+                                <button type="button" class="preset-chip" data-source="zh" data-targets="zh-TW">中 → 繁</button>
+                                <button type="button" class="preset-chip" data-source="zh" data-targets="en,ja,ko">中 → 英日韩</button>
+                                <button type="button" class="preset-chip" data-source="zh" data-targets="en,fr,de,es">中 → 英法德西</button>
+                            </div>
+                        </div>
                         <div class="option-group option-card language-panel">
                             <div class="lang-selector">
                                 <div class="language-head">
@@ -807,7 +991,7 @@
                             </div>
                         </div>
 
-                        <div class="option-group option-card language-panel" style="margin-top: 16px;">
+                        <div class="option-group option-card language-panel">
                             <div class="lang-selector">
                                 <div class="language-head">
                                     <h4><i class="fas fa-globe"></i> 目标翻译语言（可多选）</h4>
@@ -830,6 +1014,7 @@
                                     <span>选中的每种语言都会生成一份独立的 Word 文档；已选源语言会自动从目标列表中排除。</span>
                                 </div>
                             </div>
+                        </div>
                         </div>
 
                         <button class="btn-primary" id="btnProcess" disabled>

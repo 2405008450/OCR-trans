@@ -18,6 +18,7 @@ def resolve_libreoffice_path(configured_path: str | None = None) -> str:
     for candidate in [
         configured_path,
         os.getenv("LIBREOFFICE_PATH", "").strip(),
+        r"C:\Program Files\LibreOffice\program\soffice.com",
         r"C:\Program Files\LibreOffice\program\soffice.exe",
         "/usr/bin/soffice",
         "/usr/bin/libreoffice",

@@ -16,6 +16,7 @@ const modelSmartSelect = document.getElementById('modelSmartSelect');
 const translationEngineSmartSelect = document.getElementById('translationEngineSmartSelect');
 let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 const translateModeGroup = document.getElementById('translateModeGroup');
+const wordLayoutModeGroup = document.getElementById('wordLayoutModeGroup');
 const sourceLangGroup = document.getElementById('sourceLangGroup');
 const targetLangGroup = document.getElementById('targetLangGroup');
 const sourceLangSearch = document.getElementById('sourceLangSearch');
@@ -52,11 +53,13 @@ let modelConfig = {};
 let translationEngineConfig = {};
 let languageConfig = {};
 let translateModeConfig = {};
+let wordLayoutModeConfig = {};
 let routeConfig = {};
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultTranslationEngine = 'google/gemini-3-flash-preview';
 let defaultRoute = 'openrouter';
 let defaultTranslateMode = 'standard';
+let defaultWordLayoutMode = 'fixed';
 let allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tif', '.tiff', '.doc', '.docx'];
 let selectedSourceLangs = new Set(['zh']);
 let selectedTargetLangs = new Set(['en']);
@@ -221,6 +224,23 @@ function bindEvents() {
         renderTargetLanguages();
         updateProcessButton();
     });
+    document.querySelectorAll('#presetList .preset-chip').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const src = btn.dataset.source;
+            const tgtCodes = String(btn.dataset.targets || '').split(',').map((s) => s.trim()).filter(Boolean);
+            if (!src || tgtCodes.length === 0) return;
+            if (btnClearSourceLangs) delete btnClearSourceLangs.dataset.userCleared;
+            selectedSourceLangs = new Set(getExistingLanguageCodes([src]));
+            selectedTargetLangs = new Set(getExistingLanguageCodes(tgtCodes).filter((code) => !selectedSourceLangs.has(code)));
+            ensureTargetFallback();
+            // 清空搜索框，便于看到选中结果
+            if (sourceLangSearch) sourceLangSearch.value = '';
+            if (targetLangSearch) targetLangSearch.value = '';
+            renderSourceLanguages();
+            renderTargetLanguages();
+            updateProcessButton();
+        });
+    });
     updateTranslationRulesCount();
 }
 
@@ -236,6 +256,8 @@ async function loadConfig() {
         languageConfig = data.languages || {};
         translateModeConfig = data.translate_modes || {};
         defaultTranslateMode = data.default_translate_mode || defaultTranslateMode;
+        wordLayoutModeConfig = data.word_layout_modes || {};
+        defaultWordLayoutMode = data.default_word_layout_mode || defaultWordLayoutMode;
         routeConfig = data.routes || {};
         defaultRoute = data.default_route || defaultRoute;
         if (Array.isArray(data.allowed_extensions) && data.allowed_extensions.length > 0) {
@@ -273,12 +295,17 @@ async function loadConfig() {
             standard: { label: '标准翻译', description: '仅输出目标语言译文' },
             bilingual: { label: '双语对照', description: '按原文和译文换行对照输出' },
         };
+        wordLayoutModeConfig = {
+            fixed: { label: '高保真固定布局', description: '绝对定位文本框，优先保持排版' },
+            editable: { label: '易编辑表格布局', description: '传统表格转换，方便人工调整' },
+        };
     }
     renderModels();
     renderTranslationEngines();
     renderRoutes();
     renderSourceLanguages();
     renderTranslateModes();
+    renderWordLayoutModes();
     renderTargetLanguages();
 }
 
@@ -545,18 +572,80 @@ function renderTranslateModes() {
         translateModeGroup.appendChild(chip);
     });
 }
-// 语言分组配置（按地区）
+function renderWordLayoutModes() {
+    if (!wordLayoutModeGroup) return;
+    if (!wordLayoutModeConfig || Object.keys(wordLayoutModeConfig).length === 0) {
+        wordLayoutModeConfig = {
+            fixed: { label: '高保真固定布局', description: '绝对定位文本框，优先保持排版' },
+            editable: { label: '易编辑表格布局', description: '传统表格转换，方便人工调整' },
+        };
+    }
+    const availableModes = Object.keys(wordLayoutModeConfig);
+    const currentValue = getSelectedWordLayoutMode();
+    const selectedValue = wordLayoutModeConfig[currentValue]
+        ? currentValue
+        : (wordLayoutModeConfig[defaultWordLayoutMode] ? defaultWordLayoutMode : availableModes[0]);
+    wordLayoutModeGroup.innerHTML = '';
+    Object.entries(wordLayoutModeConfig).forEach(([value, info]) => {
+        const chip = document.createElement('label');
+        chip.className = 'lang-chip mode-chip';
+        if (info.description) chip.title = info.description;
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'wordLayoutMode';
+        radio.value = value;
+        radio.checked = value === selectedValue;
+        const checkIcon = document.createElement('span');
+        checkIcon.className = 'chip-check';
+        checkIcon.innerHTML = '<i class="fas fa-check"></i>';
+        const copy = document.createElement('span');
+        copy.className = 'mode-chip-copy';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'mode-chip-title';
+        nameSpan.textContent = info.label || value;
+        const descSpan = document.createElement('span');
+        descSpan.className = 'mode-chip-desc';
+        descSpan.textContent = info.description || '';
+        copy.appendChild(nameSpan);
+        copy.appendChild(descSpan);
+        chip.appendChild(radio);
+        chip.appendChild(checkIcon);
+        chip.appendChild(copy);
+        chip.classList.toggle('active', radio.checked);
+        chip.addEventListener('click', (event) => {
+            event.preventDefault();
+            selectWordLayoutMode(value);
+        });
+        wordLayoutModeGroup.appendChild(chip);
+    });
+}
+// 语言分组配置（按地区），defaultOpen 控制初始是否展开
 const LANG_GROUPS = [
-    { label: '东亚', codes: ['zh', 'zh-TW', 'ja', 'ko'] },
-    { label: '东南亚', codes: ['th', 'vi', 'id', 'ms', 'fil', 'my', 'km', 'lo'] },
-    { label: '南亚', codes: ['hi', 'bn', 'ur', 'ta', 'te', 'ml', 'si', 'ne'] },
-    { label: '西亚 / 中东', codes: ['ar', 'fa', 'he', 'tr', 'az', 'ka', 'am'] },
-    { label: '中亚', codes: ['kk', 'uz', 'ky', 'tg', 'tk', 'mn'] },
-    { label: '西欧', codes: ['en', 'fr', 'de', 'es', 'pt', 'it', 'nl', 'sv', 'no', 'da', 'fi', 'is', 'ga', 'cy', 'eu', 'ca', 'gl'] },
-    { label: '东欧', codes: ['ru', 'pl', 'uk', 'cs', 'sk', 'hu', 'ro', 'bg', 'hr', 'sr', 'sl', 'bs', 'mk', 'sq', 'el', 'lt', 'lv', 'et', 'be'] },
-    { label: '非洲', codes: ['sw', 'yo', 'ig', 'ha', 'zu', 'so'] },
-    { label: '美洲', codes: ['pt-BR', 'es-419', 'qu', 'ht'] },
+    { label: '东亚', codes: ['zh', 'zh-TW', 'ja', 'ko'], defaultOpen: true },
+    { label: '东南亚', codes: ['th', 'vi', 'id', 'ms', 'fil', 'my', 'km', 'lo'], defaultOpen: false },
+    { label: '南亚', codes: ['hi', 'bn', 'ur', 'ta', 'te', 'ml', 'si', 'ne'], defaultOpen: false },
+    { label: '西亚 / 中东', codes: ['ar', 'fa', 'he', 'tr', 'az', 'ka', 'am'], defaultOpen: false },
+    { label: '中亚', codes: ['kk', 'uz', 'ky', 'tg', 'tk', 'mn'], defaultOpen: false },
+    { label: '西欧', codes: ['en', 'fr', 'de', 'es', 'pt', 'it', 'nl', 'sv', 'no', 'da', 'fi', 'is', 'ga', 'cy', 'eu', 'ca', 'gl'], defaultOpen: true },
+    { label: '东欧', codes: ['ru', 'pl', 'uk', 'cs', 'sk', 'hu', 'ro', 'bg', 'hr', 'sr', 'sl', 'bs', 'mk', 'sq', 'el', 'lt', 'lv', 'et', 'be'], defaultOpen: false },
+    { label: '非洲', codes: ['sw', 'yo', 'ig', 'ha', 'zu', 'so'], defaultOpen: false },
+    { label: '美洲', codes: ['pt-BR', 'es-419', 'qu', 'ht'], defaultOpen: false },
 ];
+
+// 分组折叠状态：仅记录用户手动切换过的分组；未记录的取 defaultOpen
+const groupCollapseState = {};
+
+function isGroupCollapsed(label) {
+    if (Object.prototype.hasOwnProperty.call(groupCollapseState, label)) {
+        return groupCollapseState[label];
+    }
+    const group = LANG_GROUPS.find((g) => g.label === label);
+    return group ? !group.defaultOpen : false;
+}
+
+function toggleGroupCollapse(label) {
+    groupCollapseState[label] = !isGroupCollapsed(label);
+}
 
 function getExistingLanguageCodes(codes) {
     return codes.filter((code) => languageConfig[code]);
@@ -601,17 +690,31 @@ function makeChip(code, info, type) {
     return chip;
 }
 
-function appendLanguageGroupTitle(container, label) {
-    const groupLabel = document.createElement('div');
-    groupLabel.className = 'language-group-title';
-    groupLabel.textContent = label;
-    container.appendChild(groupLabel);
+function appendLanguageGroupTitle(container, label, count, collapsed) {
+    const groupEl = document.createElement('button');
+    groupEl.type = 'button';
+    groupEl.className = 'language-group-title' + (collapsed ? ' collapsed' : '');
+    groupEl.innerHTML =
+        '<span class="group-caret"><i class="fas fa-chevron-down"></i></span>' +
+        '<span class="group-name"></span>' +
+        `<span class="group-count">${count}</span>`;
+    groupEl.querySelector('.group-name').textContent = label;
+    container.appendChild(groupEl);
+    return groupEl;
 }
 
 function renderLanguageGroup({ container, selectedSet, searchText, type, excludedSet, emptyText }) {
     container.innerHTML = '';
+    const query = String(searchText || '').trim().toLowerCase();
+    const isSearching = query.length > 0;
     const rendered = new Set();
     let visibleCount = 0;
+
+    const sortSelectedFirst = (codes) => codes.slice().sort((a, b) => {
+        const sa = selectedSet.has(a) ? 0 : 1;
+        const sb = selectedSet.has(b) ? 0 : 1;
+        return sa - sb;
+    });
 
     LANG_GROUPS.forEach((group) => {
         const codesInGroup = group.codes.filter((code) => {
@@ -620,25 +723,45 @@ function renderLanguageGroup({ container, selectedSet, searchText, type, exclude
         });
         if (codesInGroup.length === 0) return;
 
-        appendLanguageGroupTitle(container, group.label);
-        codesInGroup.forEach((code) => {
-            rendered.add(code);
-            visibleCount += 1;
-            container.appendChild(makeChip(code, languageConfig[code], type));
+        codesInGroup.forEach((code) => rendered.add(code));
+        visibleCount += codesInGroup.length;
+
+        // 搜索态下强制展开；否则按折叠状态
+        const collapsed = isSearching ? false : isGroupCollapsed(group.label);
+        const groupEl = appendLanguageGroupTitle(container, group.label, codesInGroup.length, collapsed);
+
+        const body = document.createElement('div');
+        body.className = 'lang-group-body' + (collapsed ? ' is-hidden' : '');
+        sortSelectedFirst(codesInGroup).forEach((code) => body.appendChild(makeChip(code, languageConfig[code], type)));
+
+        groupEl.addEventListener('click', () => {
+            toggleGroupCollapse(group.label);
+            // 保留搜索态，整体重渲染
+            renderLanguageGroup({ container, selectedSet, searchText, type, excludedSet, emptyText });
         });
+
+        container.appendChild(groupEl);
+        container.appendChild(body);
     });
 
-    const extras = Object.keys(languageConfig).filter((code) => (
+    const extras = sortSelectedFirst(Object.keys(languageConfig).filter((code) => (
         !rendered.has(code)
         && !excludedSet.has(code)
         && languageMatchesSearch(code, languageConfig[code], searchText)
-    ));
+    )));
     if (extras.length > 0) {
-        appendLanguageGroupTitle(container, '其他');
-        extras.forEach((code) => {
-            visibleCount += 1;
-            container.appendChild(makeChip(code, languageConfig[code], type));
+        visibleCount += extras.length;
+        const collapsed = isSearching ? false : isGroupCollapsed('其他');
+        const groupEl = appendLanguageGroupTitle(container, '其他', extras.length, collapsed);
+        const body = document.createElement('div');
+        body.className = 'lang-group-body' + (collapsed ? ' is-hidden' : '');
+        extras.forEach((code) => body.appendChild(makeChip(code, languageConfig[code], type)));
+        groupEl.addEventListener('click', () => {
+            toggleGroupCollapse('其他');
+            renderLanguageGroup({ container, selectedSet, searchText, type, excludedSet, emptyText });
         });
+        container.appendChild(groupEl);
+        container.appendChild(body);
     }
 
     if (visibleCount === 0) {
@@ -772,6 +895,19 @@ function selectTranslateMode(mode) {
         chip.classList.toggle('active', isActive);
     });
 }
+function getSelectedWordLayoutMode() {
+    const checked = wordLayoutModeGroup?.querySelector('input[type="radio"]:checked');
+    return checked?.value || defaultWordLayoutMode;
+}
+function selectWordLayoutMode(mode) {
+    if (!wordLayoutModeGroup) return;
+    wordLayoutModeGroup.querySelectorAll('.lang-chip').forEach((chip) => {
+        const radio = chip.querySelector('input[type="radio"]');
+        const isActive = radio?.value === mode;
+        if (radio) radio.checked = isActive;
+        chip.classList.toggle('active', isActive);
+    });
+}
 function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); uploadArea.style.borderColor = 'var(--primary-color)'; }
 function handleDrop(e) {
     e.preventDefault(); e.stopPropagation();
@@ -857,7 +993,7 @@ async function processSingleFile(sourceLangs, targetLangs) {
         const formData = new FormData();
         formData.append('file', selectedFiles[0]);
         formData.append('translation_rules', getTranslationRules());
-        const params = new URLSearchParams({ source_lang: sourceLangs.join(','), target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, translation_engine: translationEngineSelect?.value || defaultTranslationEngine });
+        const params = new URLSearchParams({ source_lang: sourceLangs.join(','), target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), word_layout_mode: getSelectedWordLayoutMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, translation_engine: translationEngineSelect?.value || defaultTranslationEngine });
         const response = await fetch(`/task/doc-translate?${params.toString()}`, { method: 'POST', body: formData });
         if (!response.ok) { const t = await safeReadError(response); throw new Error(t || `提交失败: ${response.status}`); }
         const data = await response.json();
@@ -871,7 +1007,7 @@ async function processBatchFiles(sourceLangs, targetLangs) {
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
 
-    const params = new URLSearchParams({ source_lang: sourceLangs.join(','), target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, translation_engine: translationEngineSelect?.value || defaultTranslationEngine });
+    const params = new URLSearchParams({ source_lang: sourceLangs.join(','), target_langs: targetLangs.join(','), translate_mode: getSelectedTranslateMode(), word_layout_mode: getSelectedWordLayoutMode(), ocr_model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, translation_engine: translationEngineSelect?.value || defaultTranslationEngine });
     const formData = new FormData();
     formData.append('translation_rules', getTranslationRules());
     selectedFiles.forEach((file) => formData.append('files', file));
@@ -1095,7 +1231,8 @@ function showResult(result) {
         html += `<div class="translation-result-item"><div style="display:flex;align-items:center;gap:12px;"><span class="lang-badge"><i class="fas fa-file-lines"></i> 原始文本</span><span style="color:var(--text-secondary);font-size:13px;">OCR 识别结果</span></div><div class="download-actions"><a href="/${result.raw_output_txt}" download class="download-btn"><i class="fas fa-download"></i> 下载 TXT</a></div></div>`;
     }
     Object.entries(translations).forEach(([langCode, langResult]) => {
-        html += `<div class="translation-result-item"><div style="display:flex;align-items:center;gap:12px;"><span class="lang-badge"><i class="fas fa-language"></i> ${escapeHtml(langResult.lang_name || langCode)}</span></div><div class="download-actions"><a href="/${langResult.output_docx}" download class="download-btn"><i class="fas fa-file-word"></i> 下载 Word</a><a href="/${langResult.translated_txt}" download class="download-btn"><i class="fas fa-file-lines"></i> 下载译文文本</a></div></div>`;
+        const layoutLabel = getWordLayoutDisplayName(langResult.word_layout_mode);
+        html += `<div class="translation-result-item"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><span class="lang-badge"><i class="fas fa-language"></i> ${escapeHtml(langResult.lang_name || langCode)}</span>${layoutLabel ? `<span style="color:var(--text-secondary);font-size:12px;"><i class="fas fa-file-word"></i> ${escapeHtml(layoutLabel)}</span>` : ''}</div><div class="download-actions"><a href="/${langResult.output_docx}" download class="download-btn"><i class="fas fa-file-word"></i> 下载 Word</a><a href="/${langResult.translated_txt}" download class="download-btn"><i class="fas fa-file-lines"></i> 下载译文文本</a></div></div>`;
     });
     translationResults.innerHTML = html;
 }
@@ -1120,3 +1257,8 @@ async function safeReadError(response) { try { const p = await response.json(); 
 function formatFileSize(size) { if (size < 1024) return `${size} B`; if (size < 1024*1024) return `${(size/1024).toFixed(1)} KB`; return `${(size/1024/1024).toFixed(1)} MB`; }
 function escapeHtml(v) { return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;'); }
 function getModelDisplayName(name) { return MODEL_DISPLAY_NAMES[name] || name; }
+function getWordLayoutDisplayName(mode) {
+    if (mode === 'source_format') return '保留 Word 原格式';
+    if (mode === 'editable_fallback') return '易编辑表格布局（固定布局已回退）';
+    return wordLayoutModeConfig?.[mode]?.label || '';
+}

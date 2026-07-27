@@ -25,9 +25,15 @@ from PIL import Image, UnidentifiedImageError
 
 from app.core.config import settings
 from app.core.file_naming import build_user_visible_filename, ensure_unique_path
+from app.service.docx_structured_translation import (
+    StructuredTranslationError,
+    extract_docx_sentences,
+    translate_docx_preserving_format,
+)
+from app.service.fixed_layout_docx_service import convert_html_to_fixed_layout_docx
 from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured, generate_text
 from app.service.libreoffice_service import convert_doc_to_docx_via_libreoffice
-from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
+from pdf2docx import convert_text_to_word_via_libreoffice, normalize_to_word_html, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 
@@ -288,6 +294,17 @@ DOC_TRANSLATE_TRANSLATION_ENGINES: Dict[str, Dict[str, Any]] = {
         "max_tokens": 8192,
     },
 }
+DOC_TRANSLATE_DEFAULT_WORD_LAYOUT_MODE = "fixed"
+DOC_TRANSLATE_WORD_LAYOUT_MODES: Dict[str, Dict[str, str]] = {
+    "fixed": {
+        "label": "高保真固定布局",
+        "description": "按浏览器实际坐标生成可编辑文本框，优先保持与 HTML 一致的排版。",
+    },
+    "editable": {
+        "label": "易编辑表格布局",
+        "description": "使用传统 HTML 表格转换，排版还原度略低，但更方便后期人工调整。",
+    },
+}
 DOC_TRANSLATE_TRANSLATION_ENGINE_ALIASES = {
     "deepseek": "deepseek-v4-flash",
     "default": DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
@@ -366,6 +383,10 @@ def get_doc_translate_modes() -> Dict[str, Dict[str, str]]:
     return DOC_TRANSLATE_TRANSLATE_MODES
 
 
+def get_doc_translate_word_layout_modes() -> Dict[str, Dict[str, str]]:
+    return DOC_TRANSLATE_WORD_LAYOUT_MODES
+
+
 def get_doc_translate_translation_engines() -> Dict[str, Dict[str, Any]]:
     return DOC_TRANSLATE_TRANSLATION_ENGINES
 
@@ -378,6 +399,15 @@ def normalize_doc_translate_mode(translate_mode: Optional[str]) -> str:
     normalized = str(translate_mode or DOC_TRANSLATE_DEFAULT_MODE).strip().lower()
     if normalized not in DOC_TRANSLATE_TRANSLATE_MODES:
         raise ValueError(f"不支持的翻译模式: {translate_mode}")
+    return normalized
+
+
+def normalize_doc_translate_word_layout_mode(word_layout_mode: Optional[str]) -> str:
+    normalized = str(
+        word_layout_mode or DOC_TRANSLATE_DEFAULT_WORD_LAYOUT_MODE
+    ).strip().lower()
+    if normalized not in DOC_TRANSLATE_WORD_LAYOUT_MODES:
+        raise ValueError(f"不支持的 Word 排版方式: {word_layout_mode}")
     return normalized
 
 
@@ -795,6 +825,67 @@ def _get_translation_engine_max_tokens(engine_config: Dict[str, Any]) -> int:
     )
 
 
+def _build_structured_translation_callback(
+    *,
+    translation_engine: str,
+    gemini_route: str,
+) -> Callable[[List[Dict[str, str]], bool], str]:
+    """把现有模型路由适配成 DOCX 句段翻译所需的 JSON 调用接口。"""
+    resolved_engine = normalize_doc_translate_translation_engine(translation_engine)
+    engine_config = DOC_TRANSLATE_TRANSLATION_ENGINES[resolved_engine]
+    engine_provider = str(engine_config.get("provider") or "deepseek")
+    engine_model = str(engine_config.get("model") or resolved_engine)
+    max_tokens = _get_translation_engine_max_tokens(engine_config)
+    deepseek_client = None
+    if engine_provider == "deepseek":
+        deepseek_client = OpenAI(
+            api_key=settings.DEEPSEEK_API_KEY,
+            base_url=settings.DEEPSEEK_BASE_URL,
+        )
+
+    def call_llm(messages: List[Dict[str, str]], require_json: bool) -> str:
+        if engine_provider == "deepseek":
+            if deepseek_client is None:
+                raise RuntimeError("DeepSeek 客户端未初始化")
+            request_args: Dict[str, Any] = {
+                "model": engine_model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.0,
+            }
+            if require_json:
+                request_args["response_format"] = {"type": "json_object"}
+            response = deepseek_client.chat.completions.create(**request_args)
+            return response.choices[0].message.content or ""
+
+        system_prompt = "\n\n".join(
+            item.get("content", "")
+            for item in messages
+            if item.get("role") == "system"
+        )
+        user_prompt = "\n\n".join(
+            item.get("content", "")
+            for item in messages
+            if item.get("role") != "system"
+        )
+        if engine_provider == "gemini":
+            route = gemini_route
+        elif engine_provider == "openrouter":
+            route = GEMINI_ROUTE_OPENROUTER
+        else:
+            raise RuntimeError(f"不支持的翻译引擎类型: {engine_provider}")
+        return generate_text(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=engine_model,
+            route=route,
+            temperature=0.0,
+            max_output_tokens=max_tokens,
+        )
+
+    return call_llm
+
+
 def _translate_text_with_llm(
     raw_text: str,
     source_lang: str,
@@ -941,6 +1032,7 @@ async def execute_doc_translate_task(
     source_lang: str = "zh",
     target_langs: List[str],
     translate_mode: str = DOC_TRANSLATE_DEFAULT_MODE,
+    word_layout_mode: str = DOC_TRANSLATE_DEFAULT_WORD_LAYOUT_MODE,
     ocr_model: str = DOC_TRANSLATE_DEFAULT_MODEL,
     gemini_route: str = DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE,
     translation_engine: str = DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
@@ -958,6 +1050,7 @@ async def execute_doc_translate_task(
         original_filename: 原始文件名
         source_lang: 源语言代码
         target_langs: 目标语言代码列表（支持多个）
+        word_layout_mode: Word 输出排版方式（fixed / editable）
         ocr_model: OCR 模型
         translation_engine: 文本翻译引擎
         translation_rules: 用户自定义翻译规则
@@ -967,6 +1060,7 @@ async def execute_doc_translate_task(
     if ocr_model not in DOC_TRANSLATE_MODELS:
         raise ValueError(f"不支持的 OCR 模型: {ocr_model}")
     translate_mode = normalize_doc_translate_mode(translate_mode)
+    word_layout_mode = normalize_doc_translate_word_layout_mode(word_layout_mode)
     translation_engine = normalize_doc_translate_translation_engine(translation_engine)
     translation_rules = normalize_doc_translate_translation_rules(translation_rules)
     translation_engine_config = DOC_TRANSLATE_TRANSLATION_ENGINES[translation_engine]
@@ -989,6 +1083,8 @@ async def execute_doc_translate_task(
     raw_part_paths: List[str] = []
     processing_warnings: List[str] = []
     source_segment_label = "页"
+    prepared_word_path: Optional[Path] = None
+    structured_word_sentence_count = 0
 
     if _is_word_file(input_file):
         source_segment_label = "Word 片段"
@@ -1002,6 +1098,16 @@ async def execute_doc_translate_task(
             executor,
             lambda: _prepare_word_input_for_ocr(input_file, word_asset_dir),
         )
+        try:
+            structured_word_sentences = await loop.run_in_executor(
+                executor,
+                lambda: extract_docx_sentences(prepared_word_path),
+            )
+            structured_word_sentence_count = len(structured_word_sentences)
+        except (OSError, zipfile.BadZipFile, StructuredTranslationError) as exc:
+            processing_warnings.append(
+                f"Word 句段级解析失败，将使用兼容模式生成译文文档: {exc}"
+            )
         await _maybe_report(progress_callback, 10, "正在提取 Word 正文和图片...")
         word_segments, extracted_images, word_warnings = await loop.run_in_executor(
             executor,
@@ -1011,6 +1117,10 @@ async def execute_doc_translate_task(
 
         text_segment_count = sum(1 for segment in word_segments if segment.get("type") == "text")
         total_images = len(extracted_images)
+        if structured_word_sentence_count > 0 and total_images:
+            processing_warnings.append(
+                "标准 Word 原格式模式会保留文档内嵌图片原样；图片中的 OCR 文字不会覆盖回图片。"
+            )
 
         if not word_segments:
             detail = f"；{processing_warnings[0]}" if processing_warnings else ""
@@ -1105,8 +1215,51 @@ async def execute_doc_translate_task(
         lang_name = SUPPORTED_LANGUAGES.get(lang, {}).get("name", lang)
         lang_progress_base = 35 + int((idx / max(total_langs, 1)) * 55)
         translated_part_paths: List[str] = []
+        structured_docx_path: Optional[Path] = None
+        fixed_layout_used = False
 
-        if len(ocr_segments) > 1:
+        if (
+            prepared_word_path is not None
+            and structured_word_sentence_count > 0
+            and translate_mode == "standard"
+        ):
+            await _maybe_report(
+                progress_callback,
+                lang_progress_base,
+                (
+                    f"正在按 {structured_word_sentence_count} 个 Word 句段翻译为"
+                    f"{lang_name}并保留原格式... ({idx + 1}/{total_langs})"
+                ),
+            )
+            structured_docx_path = task_output_dir / f"{stem}_{lang}_structured.docx"
+            structured_result = await loop.run_in_executor(
+                executor,
+                lambda source=prepared_word_path, output=structured_docx_path, l=lang: (
+                    translate_docx_preserving_format(
+                        source,
+                        output,
+                        source_language=_format_language_names(source_lang),
+                        target_language=_format_language_names(l),
+                        call_llm=_build_structured_translation_callback(
+                            translation_engine=translation_engine,
+                            gemini_route=gemini_route,
+                        ),
+                        translation_rules=translation_rules,
+                    )
+                ),
+            )
+            translated_text = structured_result.translated_text
+            translated_part_paths = [
+                _normalize_path(path)
+                for path in _write_text_segments(
+                    task_output_dir / f"{stem}_{lang}_parts",
+                    [
+                        structured_result.translations[sentence.sentence_id]
+                        for sentence in structured_result.source_sentences
+                    ],
+                )
+            ]
+        elif len(ocr_segments) > 1:
             total_segments = len(ocr_segments)
             translated_segments: List[str] = []
             segment_label = source_segment_label
@@ -1165,16 +1318,55 @@ async def execute_doc_translate_task(
         )
 
         html_path = task_output_dir / f"{stem}_{lang}.html"
-        docx_path = task_output_dir / f"{stem}_{lang}.docx"
-        await loop.run_in_executor(
-            executor,
-            lambda txt=translated_text, out=str(docx_path), html=str(html_path): convert_text_to_word_via_libreoffice(
-                txt,
-                out,
-                html_output_path=html,
-                title=f"{stem}_{lang}",
-            ),
-        )
+        if structured_docx_path is not None:
+            docx_path = structured_docx_path
+        else:
+            docx_path = task_output_dir / f"{stem}_{lang}.docx"
+            # PDF/图片证件优先复用浏览器已经排好的 HTML。坐标来自 DOM 实测，
+            # 不再让视觉模型额外猜测 bbox；失败时保留原 LibreOffice 兼容路径。
+            if prepared_word_path is None and word_layout_mode == "fixed":
+                fixed_html = normalize_to_word_html(
+                    translated_text,
+                    title=f"{stem}_{lang}",
+                )
+                try:
+                    await _maybe_report(
+                        progress_callback,
+                        lang_progress_base + int(30 / max(total_langs, 1)),
+                        f"正在按浏览器实际排版生成{lang_name} Word 文档...",
+                    )
+                    await loop.run_in_executor(
+                        executor,
+                        lambda html_text=fixed_html, out=str(docx_path), html=str(html_path): (
+                            convert_html_to_fixed_layout_docx(
+                                html_text,
+                                out,
+                                html_output_path=html,
+                                debug_layout_path=str(
+                                    task_output_dir / f"{stem}_{lang}_dom_layout.json"
+                                ),
+                            )
+                        ),
+                    )
+                    fixed_layout_used = True
+                except Exception as exc:
+                    warning = (
+                        "浏览器固定布局 Word 生成失败，已回退到 LibreOffice 兼容模式: "
+                        f"{exc}"
+                    )
+                    processing_warnings.append(warning)
+                    await _maybe_report(progress_callback, 88, warning)
+
+            if not fixed_layout_used:
+                await loop.run_in_executor(
+                    executor,
+                    lambda txt=translated_text, out=str(docx_path), html=str(html_path): convert_text_to_word_via_libreoffice(
+                        txt,
+                        out,
+                        html_output_path=html,
+                        title=f"{stem}_{lang}",
+                    ),
+                )
 
         final_docx_path = ensure_unique_path(
             task_output_dir / build_user_visible_filename(original_filename, suffix=lang, ext=".docx"),
@@ -1189,8 +1381,23 @@ async def execute_doc_translate_task(
             "lang_name": lang_name,
             "translated_txt": _normalize_path(translated_txt_path),
             "translated_parts": translated_part_paths,
-            "output_html": _normalize_path(html_path),
+            "output_html": _normalize_path(html_path) if html_path.exists() else None,
             "output_docx": _normalize_path(docx_path),
+            "preserved_word_format": structured_docx_path is not None,
+            "fixed_layout_rendered": fixed_layout_used,
+            "word_layout_mode": (
+                "source_format"
+                if structured_docx_path is not None
+                else (
+                    "fixed"
+                    if fixed_layout_used
+                    else (
+                        "editable_fallback"
+                        if word_layout_mode == "fixed"
+                        else "editable"
+                    )
+                )
+            ),
         }
 
     await _maybe_report(progress_callback, 95, "正在整理输出结果...")
@@ -1204,6 +1411,7 @@ async def execute_doc_translate_task(
         "gemini_route": gemini_route,
         "source_lang": source_lang,
         "translate_mode": translate_mode,
+        "word_layout_mode": word_layout_mode,
         "has_translation_rules": bool(translation_rules),
         "raw_output_txt": _normalize_path(raw_output_path),
         "raw_parts": raw_part_paths,

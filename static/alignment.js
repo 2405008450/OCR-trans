@@ -14,6 +14,10 @@ const btnReset = document.getElementById('btnReset');
 const origFileLabel = document.getElementById('origFileLabel');
 const transFileLabel = document.getElementById('transFileLabel');
 const langHintText = document.getElementById('langHintText');
+const languageRoute = document.getElementById('languageRoute');
+const swapLanguagesBtn = document.getElementById('swapLanguages');
+const sourceLangPicker = document.getElementById('sourceLangPicker');
+const targetLangPicker = document.getElementById('targetLangPicker');
 
 const uploadSection = document.getElementById('uploadSection');
 const processingSection = document.getElementById('processingSection');
@@ -142,6 +146,20 @@ const MODEL_DISPLAY_NAMES = {
     'Google: google/gemini-3.1-pro-preview': '增强版V2',
     'DeepSeek-V4-Pro': 'DeepSeek-V4-Pro',
 };
+const LANGUAGE_ALIASES = {
+    '中文': 'zh chinese mandarin 简体 繁体',
+    '英语': 'en english',
+    '西班牙语': 'es spanish espanol español',
+    '葡语': 'pt portuguese portugues português 葡萄牙语',
+    '日语': 'ja japanese 日本語',
+    '俄语': 'ru russian русский',
+    '韩语': 'ko korean 한국어',
+    '阿语': 'ar arabic العربية 阿拉伯语',
+    '法语': 'fr french francais français',
+    '波兰语': 'pl polish polski',
+    '意大利语': 'it italian italiano',
+    '德语': 'de german deutsch',
+};
 
 (async function init() {
     ensureGeminiRouteSelect();
@@ -177,6 +195,7 @@ function populateSelects() {
     }
     sourceLangSelect.value = '中文';
     targetLangSelect.value = '英语';
+    renderLanguagePickers();
 
     modelSelect.innerHTML = '';
     for (const name of Object.keys(models)) {
@@ -219,6 +238,7 @@ function populateDefaults() {
     }
     sourceLangSelect.value = '中文';
     targetLangSelect.value = '英语';
+    renderLanguagePickers();
 
     modelSelect.innerHTML = '';
     modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
@@ -232,6 +252,7 @@ function populateDefaults() {
     geminiRouteSelect.value = "openrouter";
     updateRouteInfo();
     updateModelInfo();
+    updateLangLabels();
 }
 
 function updateModelInfo() {
@@ -256,7 +277,145 @@ function updateLangLabels() {
 
     const srcDesc = configData?.languages?.[src] || src;
     const tgtDesc = configData?.languages?.[tgt] || tgt;
+    if (languageRoute) {
+        languageRoute.innerHTML = `<i class="fas fa-arrow-right-arrow-left"></i><span>${escapeLanguageHtml(src)} <b>→</b> ${escapeLanguageHtml(tgt)}</span>`;
+    }
     langHintText.textContent = `${srcDesc} → ${tgtDesc}；LLM 对齐后会按源语言再次检查并拆分多句原文键`;
+    updateLanguagePickerTrigger(sourceLangPicker, sourceLangSelect);
+    updateLanguagePickerTrigger(targetLangPicker, targetLangSelect);
+}
+
+function escapeLanguageHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function getLanguageDescription(name) {
+    return configData?.languages?.[name] || name;
+}
+
+function getLanguageSearchText(name) {
+    return `${name} ${getLanguageDescription(name)} ${LANGUAGE_ALIASES[name] || ''}`.toLocaleLowerCase();
+}
+
+function updateLanguagePickerTrigger(picker, select) {
+    if (!picker || !select) return;
+    const value = select.value;
+    const strong = picker.querySelector('.language-picker-value strong');
+    const detail = picker.querySelector('.language-picker-value span');
+    if (strong) strong.textContent = value || '请选择语言';
+    if (detail) detail.textContent = value ? getLanguageDescription(value) : '尚未选择';
+}
+
+function renderLanguagePickerOptions(picker, select, oppositeSelect) {
+    if (!picker || !select) return;
+    const container = picker.querySelector('.language-options');
+    const search = picker.querySelector('input[type="search"]');
+    if (!container) return;
+
+    const query = (search?.value || '').trim().toLocaleLowerCase();
+    const names = Array.from(select.options)
+        .map((option) => option.value)
+        .filter((name) => !query || getLanguageSearchText(name).includes(query));
+
+    container.innerHTML = '';
+    if (!names.length) {
+        const empty = document.createElement('div');
+        empty.className = 'language-empty-state';
+        empty.innerHTML = '<i class="fas fa-magnifying-glass"></i> 没有找到匹配的语言';
+        container.appendChild(empty);
+        return;
+    }
+
+    names.forEach((name) => {
+        const isSelected = name === select.value;
+        const isOpposite = name === oppositeSelect?.value && !isSelected;
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = `language-option${isSelected ? ' selected' : ''}`;
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', String(isSelected));
+        option.disabled = isOpposite;
+        option.title = isOpposite ? '原文和译文语言不能相同' : `${name} · ${getLanguageDescription(name)}`;
+
+        const text = document.createElement('span');
+        text.className = 'language-option-text';
+        const title = document.createElement('strong');
+        title.textContent = name;
+        const desc = document.createElement('small');
+        desc.textContent = isOpposite ? '已用于另一侧' : getLanguageDescription(name);
+        text.append(title, desc);
+
+        const status = document.createElement('i');
+        status.className = `language-option-status fas ${isSelected ? 'fa-check' : 'fa-chevron-right'}`;
+        option.append(text, status);
+        option.addEventListener('click', () => {
+            select.value = name;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            closeLanguagePicker(picker);
+        });
+        container.appendChild(option);
+    });
+}
+
+function closeLanguagePicker(picker) {
+    if (!picker) return;
+    const trigger = picker.querySelector('.language-picker-trigger');
+    const menu = picker.querySelector('.language-picker-menu');
+    picker.classList.remove('open');
+    trigger?.setAttribute('aria-expanded', 'false');
+    if (menu) menu.hidden = true;
+}
+
+function openLanguagePicker(picker, select, oppositeSelect) {
+    [sourceLangPicker, targetLangPicker].forEach((item) => {
+        if (item !== picker) closeLanguagePicker(item);
+    });
+    const trigger = picker?.querySelector('.language-picker-trigger');
+    const menu = picker?.querySelector('.language-picker-menu');
+    const search = picker?.querySelector('input[type="search"]');
+    if (!picker || !trigger || !menu) return;
+    picker.classList.add('open');
+    trigger.setAttribute('aria-expanded', 'true');
+    menu.hidden = false;
+    if (search) search.value = '';
+    renderLanguagePickerOptions(picker, select, oppositeSelect);
+    window.requestAnimationFrame(() => search?.focus());
+}
+
+function setupLanguagePicker(picker, select, oppositeSelect) {
+    if (!picker || !select) return;
+    const trigger = picker.querySelector('.language-picker-trigger');
+    const search = picker.querySelector('input[type="search"]');
+    trigger?.addEventListener('click', () => {
+        if (picker.classList.contains('open')) {
+            closeLanguagePicker(picker);
+        } else {
+            openLanguagePicker(picker, select, oppositeSelect);
+        }
+    });
+    search?.addEventListener('input', () => renderLanguagePickerOptions(picker, select, oppositeSelect));
+    search?.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeLanguagePicker(picker);
+            trigger?.focus();
+        }
+    });
+}
+
+function renderLanguagePickers() {
+    updateLanguagePickerTrigger(sourceLangPicker, sourceLangSelect);
+    updateLanguagePickerTrigger(targetLangPicker, targetLangSelect);
+    if (sourceLangPicker?.classList.contains('open')) {
+        renderLanguagePickerOptions(sourceLangPicker, sourceLangSelect, targetLangSelect);
+    }
+    if (targetLangPicker?.classList.contains('open')) {
+        renderLanguagePickerOptions(targetLangPicker, targetLangSelect, sourceLangSelect);
+    }
 }
 
 function updateRouteInfo() {
@@ -298,6 +457,26 @@ modelSelect.addEventListener('change', updateModelInfo);
 geminiRouteSelect?.addEventListener('change', updateRouteInfo);
 sourceLangSelect.addEventListener('change', updateLangLabels);
 targetLangSelect.addEventListener('change', updateLangLabels);
+setupLanguagePicker(sourceLangPicker, sourceLangSelect, targetLangSelect);
+setupLanguagePicker(targetLangPicker, targetLangSelect, sourceLangSelect);
+swapLanguagesBtn?.addEventListener('click', () => {
+    const previousSource = sourceLangSelect.value;
+    sourceLangSelect.value = targetLangSelect.value;
+    targetLangSelect.value = previousSource;
+    updateLangLabels();
+    renderLanguagePickers();
+});
+document.addEventListener('click', (event) => {
+    [sourceLangPicker, targetLangPicker].forEach((picker) => {
+        if (picker && !picker.contains(event.target)) closeLanguagePicker(picker);
+    });
+});
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+        closeLanguagePicker(sourceLangPicker);
+        closeLanguagePicker(targetLangPicker);
+    }
+});
 btnStart.addEventListener('click', startAlignment);
 btnReset.addEventListener('click', resetPage);
 
