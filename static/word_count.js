@@ -409,6 +409,16 @@ function renderDownloads(result, task) {
   if (result.ocr_text_archive) {
     links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.ocr_text_archive, 'OCR识别文本.zip')}" download><i class="fas fa-file-zipper"></i> 下载 OCR 文本</a>`);
   }
+  const languageExports = Array.isArray(result.language_exports) ? result.language_exports : [];
+  languageExports.forEach((item) => {
+    if (!item || !item.path) return;
+    const label = item.label || item.language || '分语系';
+    const filename = item.filename || `${label}.docx`;
+    links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, item.path, filename)}" download><i class="fas fa-file-word"></i> 下载 ${escHtml(label)} Word</a>`);
+  });
+  if (result.language_export_archive) {
+    links.push(`<a class="download-link secondary" href="${downloadUrl(task.task_id, result.language_export_archive, '分语系Word文档.zip')}" download><i class="fas fa-file-zipper"></i> 下载全部语系 Word</a>`);
+  }
   area.innerHTML = links.join('');
   area.style.display = links.length ? 'flex' : 'none';
 }

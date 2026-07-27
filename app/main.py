@@ -55,6 +55,7 @@ TOOL_NAV_GROUPS = [
     ("检查与校对", "fa-shield-halved", [
         ("/number-check", "fa-check-double", "数字专检", "双语文档数字一致性检查"),
         ("/zhongfanyi", "fa-spell-check", "中翻专检", "规则与 AI 联合审校"),
+        ("/audio-check", "fa-wave-square", "音频质量检查", "原始音频多模态质量检查"),
     ]),
 ]
 NAV_ACTIVE_ALIASES = {
@@ -609,6 +610,7 @@ def _build_app_shell_markup(current_path: str) -> str:
         )
 
     release_note_items = "".join(f"<li>{item}</li>" for item in RELEASE_NOTES)
+    tool_count = sum(len(items) for _, _, items in TOOL_NAV_GROUPS)
 
     return f"""
 <div id="appShellSlot" class="app-shell-slot">
@@ -623,7 +625,7 @@ def _build_app_shell_markup(current_path: str) -> str:
             <nav class="unified-top-nav">
                 {"".join(primary_nav_html)}
                 <details class="tool-menu{' is-active' if tool_menu_active else ''}">
-                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>10</span></summary>
+                    <summary><i class="fas fa-border-all"></i> 工具中心 <span>{tool_count}</span></summary>
                     <div class="tool-menu-panel">{"".join(tool_groups_html)}</div>
                 </details>
             </nav>
@@ -711,6 +713,11 @@ async def business_licence_page():
 @app.get("/zhongfanyi", response_class=HTMLResponse)
 async def zhongfanyi_page():
     return _render_page("zhongfanyi.html", "/zhongfanyi")
+
+
+@app.get("/audio-check", response_class=HTMLResponse)
+async def audio_check_page():
+    return _render_page("audio_check.html", "/audio-check")
 
 
 @app.get("/pdf2docx", response_class=HTMLResponse)

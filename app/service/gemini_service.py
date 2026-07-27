@@ -327,6 +327,59 @@ def _generate_openrouter_vision(
     return (response.choices[0].message.content or "").strip()
 
 
+def _generate_openrouter_audio(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    audio_bytes: bytes,
+    audio_format: str,
+    model: str,
+    temperature: float,
+    max_output_tokens: int,
+    timeout: float,
+    log_callback: GeminiLogCallback = None,
+) -> str:
+    client = OpenAI(
+        base_url=settings.OPENROUTER_BASE_URL,
+        api_key=settings.OPENROUTER_API_KEY,
+        timeout=timeout,
+        default_headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        },
+    )
+    audio_b64 = base64.standard_b64encode(audio_bytes).decode("ascii")
+    if log_callback:
+        log_callback("[openrouter-audio] 正在提交音频并等待模型分析...")
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {
+                        "type": "input_audio",
+                        "input_audio": {
+                            "data": audio_b64,
+                            "format": audio_format,
+                        },
+                    },
+                ],
+            },
+        ],
+        temperature=temperature,
+        max_tokens=max_output_tokens,
+        extra_headers={"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
+        stream=False,
+    )
+    full_text = (response.choices[0].message.content or "").strip()
+    if log_callback:
+        log_callback(f"[openrouter-audio] 分析完成，共 {len(full_text)} 个字符")
+    return full_text
+
+
 def generate_text(
     *,
     system_prompt: str,
@@ -467,4 +520,86 @@ def generate_vision_html(
         temperature=temperature,
         max_output_tokens=max_output_tokens,
         timeout=timeout,
+    )
+
+
+def generate_audio_analysis(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    audio_bytes: bytes,
+    mime_type: str,
+    audio_format: str,
+    model: str,
+    route: Optional[str] = None,
+    temperature: float = 0.1,
+    max_output_tokens: int = 32768,
+    timeout: float = DEFAULT_GEMINI_TIMEOUT_SECONDS,
+    log_callback: GeminiLogCallback = None,
+) -> str:
+    normalized = ensure_gemini_route_configured(route)
+    resolved_model = resolve_model_for_route(model, normalized)
+    if log_callback:
+        log_callback(
+            f"[gemini-audio] route={normalized}, model={resolved_model}, "
+            f"mime={mime_type}, bytes={len(audio_bytes)}"
+        )
+
+    config_kwargs = {
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+    }
+    if (system_prompt or "").strip():
+        config_kwargs["system_instruction"] = system_prompt
+
+    parts = [
+        types.Part.from_text(text=user_prompt),
+        types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+    ]
+    if normalized in {GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_AISTUDIO}:
+        route_name = "vertex" if normalized == GEMINI_ROUTE_GOOGLE else "aistudio"
+        client_factory = _get_vertex_client if normalized == GEMINI_ROUTE_GOOGLE else _get_aistudio_client
+        try:
+            text_result = _generate_google_with_retry(
+                route_name=route_name,
+                client_factory=client_factory,
+                model=resolved_model,
+                contents=[types.Content(role="user", parts=parts)],
+                config=types.GenerateContentConfig(**config_kwargs),
+                timeout=timeout,
+                log_callback=log_callback,
+                stream=normalized != GEMINI_ROUTE_AISTUDIO,
+            )
+            return (text_result or "").strip()
+        except Exception as exc:
+            if not _should_fallback_to_openrouter(normalized):
+                raise
+            fallback_model = resolve_model_for_route(model, GEMINI_ROUTE_OPENROUTER)
+            if log_callback:
+                log_callback(
+                    f"[gemini-audio] {route_name} 失败，回退到 OpenRouter: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            return _generate_openrouter_audio(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                audio_bytes=audio_bytes,
+                audio_format=audio_format,
+                model=fallback_model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                timeout=timeout,
+                log_callback=log_callback,
+            )
+
+    return _generate_openrouter_audio(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        audio_bytes=audio_bytes,
+        audio_format=audio_format,
+        model=resolved_model,
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+        timeout=timeout,
+        log_callback=log_callback,
     )

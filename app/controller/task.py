@@ -19,6 +19,16 @@ from app.core.file_naming import build_user_visible_filename
 from app.core.task_model_display import build_task_model_info
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
+from app.service.audio_check_service import (
+    AUDIO_CHECK_DEFAULT_MAX_OUTPUT_TOKENS,
+    AUDIO_CHECK_DEFAULT_MODEL,
+    AUDIO_CHECK_DEFAULT_SYSTEM_PROMPT,
+    AUDIO_CHECK_DEFAULT_TEMPERATURE,
+    AUDIO_CHECK_DEFAULT_USER_PROMPT,
+    get_audio_check_config,
+    normalize_audio_check_options,
+    validate_audio_filename,
+)
 from app.service.business_licence_service import (
     BUSINESS_LICENCE_DEFAULT_MODEL,
     BUSINESS_LICENCE_DEFAULT_ROUTE,
@@ -635,6 +645,71 @@ async def get_number_check_status(task_id: str):
         return queue_task
     if progress and queue_task.get("status") != "queued":
         return _merge_queue_timestamps(progress, queue_task)
+    return queue_task
+
+
+@router.get("/audio-check/config")
+async def get_audio_check_module_config():
+    config = get_audio_check_config()
+    routes = get_gemini_routes()
+    configured_routes = {}
+    for route_name, route_info in routes.items():
+        configured = (
+            (route_name == "google" and bool(settings.VERTEX_PROJECT_ID))
+            or (route_name == "aistudio" and bool(settings.GOOGLE_API_KEY))
+            or (route_name == "openrouter" and bool(settings.OPENROUTER_API_KEY))
+        )
+        if configured:
+            configured_routes[route_name] = {**route_info, "configured": True}
+    config["routes"] = configured_routes
+    preferred = settings.GEMINI_DEFAULT_ROUTE
+    config["default_route"] = preferred if preferred in configured_routes else next(iter(configured_routes), preferred)
+    return config
+
+
+@router.post("/audio-check")
+async def run_audio_check(
+    file: UploadFile = File(...),
+    system_prompt: str = Form(AUDIO_CHECK_DEFAULT_SYSTEM_PROMPT),
+    user_prompt: str = Form(AUDIO_CHECK_DEFAULT_USER_PROMPT),
+    model_name: str = Form(AUDIO_CHECK_DEFAULT_MODEL),
+    gemini_route: str = Form("google"),
+    temperature: float = Form(AUDIO_CHECK_DEFAULT_TEMPERATURE),
+    max_output_tokens: int = Form(AUDIO_CHECK_DEFAULT_MAX_OUTPUT_TOKENS),
+    timeout_seconds: int = Form(120),
+):
+    try:
+        validate_audio_filename(file.filename or "")
+        content_type = (file.content_type or "").lower()
+        if content_type and content_type != "application/octet-stream" and not content_type.startswith("audio/"):
+            raise ValueError("上传内容不是音频文件")
+        params = normalize_audio_check_options(
+            model_name=model_name,
+            gemini_route=gemini_route,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+        submit_result = await task_queue_service.submit_audio_check_task(file=file, params=params)
+    except UploadSizeLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.get("/audio-check/status/{task_id}")
+async def get_audio_check_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
     return queue_task
 
 

@@ -16,6 +16,12 @@ from lxml import etree
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
 
 from app.core.config import settings
 from app.service.cad_text_service import (
@@ -118,6 +124,79 @@ QUOTE_COUNT_LABELS = {
     "billable_greek_count": "希腊语候选",
     "billable_hebrew_count": "希伯来语候选",
     "billable_thai_count": "泰语候选",
+}
+
+LANGUAGE_EXPORT_CONFIG = {
+    "chinese": {
+        "label": "中文",
+        "filename_suffix": "中文",
+        "font": "Microsoft YaHei",
+        "language_tag": "zh-CN",
+        "rtl": False,
+    },
+    "japanese": {
+        "label": "日文",
+        "filename_suffix": "日文",
+        "font": "Yu Gothic",
+        "language_tag": "ja-JP",
+        "rtl": False,
+    },
+    "korean": {
+        "label": "韩文",
+        "filename_suffix": "韩文",
+        "font": "Malgun Gothic",
+        "language_tag": "ko-KR",
+        "rtl": False,
+    },
+    "latin": {
+        "label": "英文/拉丁系",
+        "filename_suffix": "英文拉丁系",
+        "font": "Calibri",
+        "language_tag": "en-US",
+        "rtl": False,
+    },
+    "cyrillic": {
+        "label": "西里尔文",
+        "filename_suffix": "西里尔文",
+        "font": "Calibri",
+        "language_tag": "ru-RU",
+        "rtl": False,
+    },
+    "arabic": {
+        "label": "阿拉伯文",
+        "filename_suffix": "阿拉伯文",
+        "font": "Arial",
+        "language_tag": "ar-SA",
+        "rtl": True,
+    },
+    "greek": {
+        "label": "希腊文",
+        "filename_suffix": "希腊文",
+        "font": "Calibri",
+        "language_tag": "el-GR",
+        "rtl": False,
+    },
+    "hebrew": {
+        "label": "希伯来文",
+        "filename_suffix": "希伯来文",
+        "font": "Arial",
+        "language_tag": "he-IL",
+        "rtl": True,
+    },
+    "thai": {
+        "label": "泰文",
+        "filename_suffix": "泰文",
+        "font": "Tahoma",
+        "language_tag": "th-TH",
+        "rtl": False,
+    },
+    "other": {
+        "label": "数字及其他",
+        "filename_suffix": "数字及其他",
+        "font": "Calibri",
+        "language_tag": "und",
+        "rtl": False,
+    },
 }
 
 NS = {
@@ -591,6 +670,7 @@ def run_word_count_task_sync(
 
     file_results: list[dict[str, Any]] = []
     source_rows: list[dict[str, Any]] = []
+    language_fragments: list[dict[str, Any]] = []
     ocr_text_files: list[Path] = []
     total = len(candidates)
     max_bytes = max(1, int(settings.WORD_COUNT_MAX_FILE_MB or 200)) * 1024 * 1024
@@ -619,6 +699,7 @@ def run_word_count_task_sync(
                 if normalized_input_source == "upload" and input_kind == "file"
                 else None
             ),
+            language_fragments=language_fragments,
         )
         file_results.append(result)
         source_rows.extend(rows)
@@ -626,6 +707,15 @@ def run_word_count_task_sync(
             ocr_text_files.append(ocr_text_path)
 
     ocr_archive_path = _write_ocr_text_archive(output_dir, ocr_text_dir, ocr_text_files)
+    _report(progress_callback, 82, "正在生成分语系 Word 文档...")
+    language_exports = _write_language_exports(
+        output_dir=output_dir,
+        fragments=language_fragments,
+        input_path=input_path,
+        input_kind=input_kind,
+        original_filename=original_filename,
+    )
+    language_export_archive = _write_language_export_archive(output_dir, language_exports)
 
     summary = _build_summary(file_results, truncated=truncated, started_at=started_at)
     report_payload = {
@@ -645,6 +735,10 @@ def run_word_count_task_sync(
         "ocr_route": ocr_route,
         "selected_relative_paths": normalized_relative_paths,
         "ocr_text_archive": _output_web_path(ocr_archive_path) if ocr_archive_path else "",
+        "language_exports": language_exports,
+        "language_export_archive": (
+            _output_web_path(language_export_archive) if language_export_archive else ""
+        ),
         "summary": summary,
         "files": file_results,
         "source_details": source_rows,
@@ -665,6 +759,8 @@ def run_word_count_task_sync(
             "OCR 任一必要页面失败时，整个文件不计入总字数；已识别文本仍保留用于复核。",
             "CAD 按模型空间、图纸空间和实际插入块中的可提取文字实例统计；外部参照不自动追踪。",
             "DWG/DWS/DWT 依赖 ODA File Converter 转为 DXF；工具缺失时标记为需要 CAD 解析。",
+            "分语系 Word 属于内容型导出：保留文件顺序和文本来源层级，不复刻原文档版面；数字、空格和标点按相邻文字语系归属。",
+            "纯汉字段落默认归入中文；含假名的同一文本片段中的汉字归入日文。英文、法文等使用拉丁字母的语言统一归入英文/拉丁系。",
         ],
     }
 
@@ -1102,6 +1198,7 @@ def _count_single_file(
     ocr_text_dir: Optional[Path] = None,
     ocr_status_callback: Optional[Callable[[str], None]] = None,
     display_relative_path: Optional[str] = None,
+    language_fragments: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], Optional[Path]]:
     now_status = STATUS_COUNTED
     ext = file_path.suffix.lower()
@@ -1261,6 +1358,19 @@ def _count_single_file(
     source_counter: Counter[str] = Counter()
     for item in items:
         metrics = _count_text(item.text)
+        if language_fragments is not None:
+            for language, separated_text in _split_text_by_language(item.text).items():
+                if separated_text.strip():
+                    language_fragments.append(
+                        {
+                            "language": language,
+                            "relative_path": relative_path,
+                            "source_type": item.source_type,
+                            "source_label": item.source_label,
+                            "is_extra": item.is_extra,
+                            "text": separated_text,
+                        }
+                    )
         if item.is_extra:
             totals["extra_word_count"] += metrics.word_count
             totals["extra_non_space_chars"] += metrics.non_space_chars
@@ -2668,6 +2778,73 @@ def _token_count_field(token: str) -> str:
     return "other_count"
 
 
+def _split_text_by_language(text: str) -> dict[str, str]:
+    """按文字体系拆分文本，并让空格、标点和数字跟随相邻语系。"""
+    content = text or ""
+    if not content:
+        return {}
+
+    metrics = _count_text(content)
+    if metrics.kana_count:
+        han_language = "japanese"
+    elif metrics.hangul_count and not metrics.kana_count:
+        han_language = "korean"
+    else:
+        han_language = "chinese"
+
+    classified: list[tuple[str, Optional[str]]] = []
+    index = 0
+    token_language_map = {
+        "latin_word_count": "latin",
+        "mixed_latin_number_count": "latin",
+        "cyrillic_word_count": "cyrillic",
+        "arabic_word_count": "arabic",
+        "greek_word_count": "greek",
+        "hebrew_word_count": "hebrew",
+        "thai_word_count": "thai",
+        "other_count": "other",
+    }
+    while index < len(content):
+        char = content[index]
+        if _is_han(char):
+            classified.append((char, han_language))
+            index += 1
+            continue
+        if _is_kana(char):
+            classified.append((char, "japanese"))
+            index += 1
+            continue
+        if _is_hangul(char):
+            classified.append((char, "korean"))
+            index += 1
+            continue
+        if _is_token_char(char):
+            token, next_index = _consume_word_like_token(content, index)
+            field = _token_count_field(token)
+            classified.append((token, token_language_map.get(field)))
+            index = next_index
+            continue
+        classified.append((char, None))
+        index += 1
+
+    # 中性片段优先跟随左侧语系；开头的引号、括号等跟随右侧语系。
+    next_languages: list[Optional[str]] = [None] * len(classified)
+    next_language: Optional[str] = None
+    for position in range(len(classified) - 1, -1, -1):
+        if classified[position][1] is not None:
+            next_language = classified[position][1]
+        next_languages[position] = next_language
+
+    grouped: dict[str, list[str]] = defaultdict(list)
+    previous_language: Optional[str] = None
+    for position, (part, language) in enumerate(classified):
+        resolved_language = language or previous_language or next_languages[position] or "other"
+        grouped[resolved_language].append(part)
+        if language is not None:
+            previous_language = language
+    return {language: "".join(parts) for language, parts in grouped.items()}
+
+
 def _letter_script(char: str) -> str:
     code = ord(char)
     name = unicodedata.name(char, "")
@@ -3070,6 +3247,253 @@ def _write_ocr_text_archive(output_dir: Path, ocr_text_dir: Path, files: list[Pa
             except ValueError:
                 archive_name = file_path.name
             archive.write(file_path, arcname=archive_name)
+    return archive_path
+
+
+def _write_language_exports(
+    *,
+    output_dir: Path,
+    fragments: list[dict[str, Any]],
+    input_path: Path,
+    input_kind: str,
+    original_filename: Optional[str],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for fragment in fragments:
+        language = str(fragment.get("language") or "other")
+        if language in LANGUAGE_EXPORT_CONFIG and str(fragment.get("text") or "").strip():
+            grouped[language].append(fragment)
+
+    if original_filename:
+        base_name = Path(original_filename).stem
+    elif input_kind == "file":
+        base_name = input_path.stem
+    else:
+        base_name = input_path.name or "字数统计"
+    safe_base_name = _safe_stem(Path(base_name))
+
+    exports: list[dict[str, Any]] = []
+    for language, config in LANGUAGE_EXPORT_CONFIG.items():
+        language_items = grouped.get(language) or []
+        if not language_items:
+            continue
+        output_path = output_dir / f"{safe_base_name}_{config['filename_suffix']}.docx"
+        _write_language_docx(
+            output_path,
+            config=config,
+            fragments=language_items,
+            source_name=base_name,
+        )
+        combined_text = "\n".join(str(item.get("text") or "") for item in language_items)
+        exports.append(
+            {
+                "language": language,
+                "label": config["label"],
+                "filename": output_path.name,
+                "path": _output_web_path(output_path),
+                "word_count": _count_text(combined_text).word_count,
+                "fragment_count": len(language_items),
+                "rtl": bool(config["rtl"]),
+            }
+        )
+    return exports
+
+
+def _write_language_docx(
+    path: Path,
+    *,
+    config: dict[str, Any],
+    fragments: list[dict[str, Any]],
+    source_name: str,
+) -> None:
+    """使用 standard_business_brief 样式生成内容型分语系 Word。"""
+    document = Document()
+    section = document.sections[0]
+    section.page_width = Inches(8.5)
+    section.page_height = Inches(11)
+    section.top_margin = Inches(1)
+    section.right_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin = Inches(1)
+    section.header_distance = Inches(0.492)
+    section.footer_distance = Inches(0.492)
+
+    font_name = str(config["font"])
+    normal = document.styles["Normal"]
+    _configure_docx_style(
+        normal,
+        font_name=font_name,
+        size=11,
+        color="000000",
+        before=0,
+        after=6,
+        line_spacing=1.1,
+    )
+    for style_name, size, color, before, after in (
+        ("Heading 1", 16, "2E74B5", 16, 8),
+        ("Heading 2", 13, "2E74B5", 12, 6),
+        ("Heading 3", 12, "1F4D78", 8, 4),
+    ):
+        _configure_docx_style(
+            document.styles[style_name],
+            font_name=font_name,
+            size=size,
+            color=color,
+            before=before,
+            after=after,
+            line_spacing=1.1,
+        )
+
+    title_style = document.styles.add_style("Language Export Title", WD_STYLE_TYPE.PARAGRAPH)
+    _configure_docx_style(
+        title_style,
+        font_name=font_name,
+        size=20,
+        color="1F4E78",
+        before=0,
+        after=12,
+        line_spacing=1.0,
+        bold=True,
+    )
+    subtitle_style = document.styles.add_style("Language Export Subtitle", WD_STYLE_TYPE.PARAGRAPH)
+    _configure_docx_style(
+        subtitle_style,
+        font_name=font_name,
+        size=9,
+        color="666666",
+        before=0,
+        after=12,
+        line_spacing=1.0,
+    )
+
+    title = document.add_paragraph(style=title_style)
+    title.add_run(f"{source_name} - {config['label']}文本")
+    subtitle = document.add_paragraph(style=subtitle_style)
+    subtitle.add_run("由字数统计模块按文字体系自动拆分生成；数字、空格和标点按相邻文字归属。")
+
+    file_count = len({str(item.get("relative_path") or "") for item in fragments})
+    current_file = None
+    current_source = None
+    for fragment in fragments:
+        relative_path = str(fragment.get("relative_path") or "")
+        source_label = str(fragment.get("source_label") or "正文")
+        is_extra = bool(fragment.get("is_extra"))
+        if relative_path != current_file:
+            current_file = relative_path
+            current_source = None
+            heading = document.add_paragraph(
+                relative_path or source_name,
+                style="Heading 1" if file_count > 1 else "Heading 2",
+            )
+            heading.paragraph_format.keep_with_next = True
+        source_key = (source_label, is_extra)
+        if source_key != current_source:
+            current_source = source_key
+            source_heading = document.add_paragraph(
+                f"{source_label}{'（额外内容）' if is_extra else ''}",
+                style="Heading 2" if file_count > 1 else "Heading 3",
+            )
+            source_heading.paragraph_format.keep_with_next = True
+
+        paragraph = document.add_paragraph()
+        paragraph.paragraph_format.keep_together = False
+        run = paragraph.add_run(str(fragment.get("text") or ""))
+        _set_run_font(run, font_name, str(config["language_tag"]), rtl=bool(config["rtl"]))
+        if config["rtl"]:
+            _set_paragraph_rtl(paragraph)
+
+    _apply_language_to_styles(
+        document,
+        font_name=font_name,
+        language_tag=str(config["language_tag"]),
+    )
+    document.core_properties.title = f"{source_name} - {config['label']}文本"
+    document.core_properties.subject = "字数统计分语系导出"
+    document.core_properties.comments = "内容型导出，不复刻原文档版面。"
+    document.save(path)
+
+
+def _configure_docx_style(
+    style,
+    *,
+    font_name: str,
+    size: int,
+    color: str,
+    before: int,
+    after: int,
+    line_spacing: float,
+    bold: bool = False,
+) -> None:
+    style.font.name = font_name
+    style.font.size = Pt(size)
+    style.font.bold = bold
+    style.font.color.rgb = RGBColor.from_string(color)
+    style.paragraph_format.space_before = Pt(before)
+    style.paragraph_format.space_after = Pt(after)
+    style.paragraph_format.line_spacing = line_spacing
+    rpr = style.element.get_or_add_rPr()
+    rfonts = rpr.get_or_add_rFonts()
+    for attribute in ("ascii", "hAnsi", "eastAsia", "cs"):
+        rfonts.set(qn(f"w:{attribute}"), font_name)
+
+
+def _set_run_font(run, font_name: str, language_tag: str, *, rtl: bool) -> None:
+    run.font.name = font_name
+    run.font.size = Pt(11)
+    rpr = run._element.get_or_add_rPr()
+    rfonts = rpr.get_or_add_rFonts()
+    for attribute in ("ascii", "hAnsi", "eastAsia", "cs"):
+        rfonts.set(qn(f"w:{attribute}"), font_name)
+    lang = rpr.find(qn("w:lang"))
+    if lang is None:
+        lang = OxmlElement("w:lang")
+        rpr.append(lang)
+    lang.set(qn("w:val"), language_tag)
+    lang.set(qn("w:eastAsia"), language_tag)
+    lang.set(qn("w:bidi"), language_tag)
+    if rtl and rpr.find(qn("w:rtl")) is None:
+        rpr.append(OxmlElement("w:rtl"))
+
+
+def _set_paragraph_rtl(paragraph) -> None:
+    # Word 在启用 w:bidi 后会镜像 left/right；这里写入 left，实际显示为右对齐。
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    ppr = paragraph._p.get_or_add_pPr()
+    if ppr.find(qn("w:bidi")) is None:
+        # w:bidi 在 OOXML 段落属性中的顺序必须早于 w:jc；
+        # 直接 append 会被部分 Word 版本忽略，从而看似仍为左对齐。
+        ppr.insert_element_before(OxmlElement("w:bidi"), "w:jc")
+
+
+def _apply_language_to_styles(
+    document,
+    *,
+    font_name: str,
+    language_tag: str,
+) -> None:
+    for paragraph in document.paragraphs:
+        for run in paragraph.runs:
+            # 标题、来源标签等界面元数据可能包含中文或拉丁文字，不强制 RTL；
+            # 阿拉伯文/希伯来文正文在创建段落时已单独写入 bidi 与 rtl 属性。
+            _set_run_font(run, font_name, language_tag, rtl=False)
+
+
+def _write_language_export_archive(
+    output_dir: Path,
+    exports: list[dict[str, Any]],
+) -> Optional[Path]:
+    existing_paths = [
+        output_dir / str(item.get("filename") or "")
+        for item in exports
+        if item.get("filename")
+    ]
+    existing_paths = [path for path in existing_paths if path.exists() and path.is_file()]
+    if not existing_paths:
+        return None
+    archive_path = output_dir / "分语系Word文档.zip"
+    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+        for file_path in existing_paths:
+            archive.write(file_path, arcname=file_path.name)
     return archive_path
 
 

@@ -9,6 +9,7 @@ TASK_MODEL_FIELDS: dict[str, tuple[str, ...]] = {
     "number_check": ("model_name",),
     "pdf2docx": ("model",),
     "zhongfanyi": ("model_name",),
+    "audio_check": ("model_name",),
 }
 
 _MODEL_ALIASES = {

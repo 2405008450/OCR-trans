@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频质量检查</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .audio-layout { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(300px,.9fr); gap:22px; }
+        .audio-card { background:var(--card-bg, #fff); border:1px solid var(--border-color, #e5e7eb); border-radius:18px; padding:22px; box-shadow:0 10px 30px rgba(15,23,42,.06); }
+        .audio-card h2 { margin:0 0 8px; font-size:20px; }
+        .audio-muted { color:var(--text-secondary, #64748b); font-size:13px; line-height:1.6; }
+        .drop-zone { border:2px dashed #94a3b8; border-radius:16px; padding:28px 20px; text-align:center; cursor:pointer; transition:.2s; background:rgba(14,165,233,.04); }
+        .drop-zone:hover,.drop-zone.dragging { border-color:#0ea5e9; background:rgba(14,165,233,.09); }
+        .drop-zone i { display:block; font-size:34px; color:#0ea5e9; margin-bottom:10px; }
+        .file-summary { display:none; margin-top:14px; padding:12px 14px; border-radius:12px; background:rgba(15,23,42,.05); }
+        .file-summary strong { display:block; word-break:break-all; }
+        #audioPreview { width:100%; margin-top:12px; display:none; }
+        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:18px; }
+        .field.full { grid-column:1 / -1; }
+        .field label { display:block; margin-bottom:7px; font-size:13px; font-weight:700; color:var(--text-primary, #334155); }
+        .field input,.field select,.field textarea { width:100%; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:10px; padding:10px 12px; color:#0f172a; background:#fff; font:inherit; }
+        .field textarea { min-height:180px; resize:vertical; line-height:1.6; }
+        .field input:focus,.field select:focus,.field textarea:focus { outline:2px solid rgba(14,165,233,.18); border-color:#0ea5e9; }
+        .prompt-head { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+        .link-button { border:0; background:none; color:#0284c7; cursor:pointer; font-weight:700; padding:4px; }
+        details.advanced { grid-column:1 / -1; border:1px solid #e2e8f0; border-radius:12px; padding:10px 14px; }
+        details.advanced summary { cursor:pointer; font-weight:700; color:#475569; }
+        .advanced-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px; }
+        .actions { display:flex; gap:12px; margin-top:20px; }
+        .actions button { flex:1; }
+        .progress-panel,.result-panel { display:none; margin-top:22px; }
+        .progress-track { height:12px; overflow:hidden; border-radius:999px; background:#e2e8f0; margin:14px 0 8px; }
+        .progress-fill { width:0; height:100%; background:linear-gradient(90deg,#06b6d4,#2563eb); transition:width .3s; }
+        .status-row { display:flex; justify-content:space-between; gap:12px; font-size:13px; color:#64748b; }
+        .markdown-body { padding:22px; border-radius:14px; background:#fff; border:1px solid #e2e8f0; color:#1e293b; line-height:1.75; overflow:auto; }
+        .markdown-body h1,.markdown-body h2,.markdown-body h3 { color:#0f172a; margin-top:1.25em; }
+        .markdown-body table { border-collapse:collapse; width:100%; }
+        .markdown-body th,.markdown-body td { border:1px solid #cbd5e1; padding:8px; text-align:left; }
+        .error-box { display:none; margin-top:16px; padding:13px 15px; border-radius:12px; background:#fff1f2; color:#be123c; border:1px solid #fecdd3; white-space:pre-wrap; }
+        .result-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+        .download-link { display:inline-flex; align-items:center; gap:7px; text-decoration:none; padding:9px 14px; border-radius:10px; background:#0f766e; color:#fff; font-weight:700; }
+        @media (max-width:900px) { .audio-layout{grid-template-columns:1fr} }
+        @media (max-width:560px) { .form-grid,.advanced-grid{grid-template-columns:1fr}.field.full{grid-column:auto} }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo"><i class="fas fa-wave-square"></i><h1>音频质量检查</h1></div>
+            <p class="subtitle">原始音频不转码、不降噪，直接使用多模态模型进行音质检查</p>
+            <nav class="header-nav">
+                <a href="/"><i class="fas fa-home"></i> 首页</a>
+                <a href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a>
+            </nav>
+        </header>
+
+        <main class="main-content">
+            <div class="audio-layout">
+                <section class="audio-card">
+                    <h2>上传待检查音频</h2>
+                    <p class="audio-muted" id="formatHint">支持 WAV、MP3、AIFF、AAC、OGG、FLAC，单文件不超过 20MB。</p>
+                    <div class="drop-zone" id="dropZone" tabindex="0">
+                        <i class="fas fa-cloud-arrow-up"></i>
+                        <strong>点击选择或拖入一个音频文件</strong>
+                        <div class="audio-muted">文件只用于本次质检任务</div>
+                        <input id="audioFile" type="file" hidden>
+                    </div>
+                    <div class="file-summary" id="fileSummary">
+                        <strong id="fileName"></strong>
+                        <span class="audio-muted" id="fileMeta"></span>
+                    </div>
+                    <audio id="audioPreview" controls preload="metadata"></audio>
+
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="modelSelect"><i class="fas fa-robot"></i> 分析模型</label>
+                            <select id="modelSelect"></select>
+                            <div class="audio-muted" id="modelDescription"></div>
+                        </div>
+                        <div class="field">
+                            <label for="routeSelect"><i class="fas fa-route"></i> 调用线路</label>
+                            <select id="routeSelect"></select>
+                            <div class="audio-muted" id="routeDescription"></div>
+                        </div>
+                        <div class="field full">
+                            <label for="temperature">温度：<span id="temperatureValue">0.1</span></label>
+                            <input id="temperature" type="range" min="0" max="2" step="0.1" value="0.1">
+                        </div>
+                        <details class="advanced">
+                            <summary><i class="fas fa-sliders"></i> 高级设置</summary>
+                            <div class="advanced-grid">
+                                <div class="field">
+                                    <label for="maxTokens">最大输出 token</label>
+                                    <input id="maxTokens" type="number" min="1024" max="65536" step="1024" value="32768">
+                                </div>
+                                <div class="field">
+                                    <label for="timeoutSeconds">请求超时（秒）</label>
+                                    <input id="timeoutSeconds" type="number" min="30" max="600" value="120">
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                </section>
+
+                <section class="audio-card">
+                    <div class="prompt-head">
+                        <div><h2>检查提示词</h2><p class="audio-muted">修改内容会保存在当前浏览器。</p></div>
+                        <button class="link-button" id="resetPrompts" type="button"><i class="fas fa-rotate-left"></i> 恢复默认</button>
+                    </div>
+                    <div class="field">
+                        <label for="systemPrompt">系统提示词</label>
+                        <textarea id="systemPrompt" maxlength="20000"></textarea>
+                    </div>
+                    <div class="field" style="margin-top:14px">
+                        <label for="userPrompt">本次检查要求</label>
+                        <textarea id="userPrompt" maxlength="10000"></textarea>
+                    </div>
+                    <div class="actions">
+                        <button class="btn-secondary" id="cancelTask" type="button" style="display:none"><i class="fas fa-ban"></i> 取消任务</button>
+                        <button class="btn-primary" id="runCheck" type="button"><i class="fas fa-play"></i> 开始质检</button>
+                    </div>
+                    <div class="error-box" id="errorBox"></div>
+                    <div class="progress-panel" id="progressPanel">
+                        <strong id="progressTitle">正在提交任务...</strong>
+                        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+                        <div class="status-row"><span id="progressMessage">初始化</span><span id="progressPercent">0%</span></div>
+                    </div>
+                </section>
+            </div>
+
+            <section class="audio-card result-panel" id="resultPanel">
+                <div class="result-head">
+                    <div><h2><i class="fas fa-circle-check"></i> 音频检查完成</h2><p class="audio-muted">以下结论由多模态模型直接分析用户上传的原始音频。</p></div>
+                    <a class="download-link" id="downloadReport" href="#"><i class="fas fa-download"></i> 下载 Markdown 报告</a>
+                </div>
+                <div class="markdown-body" id="markdownResult"></div>
+            </section>
+        </main>
+    </div>
+    <script src="/static/audio_check.js"></script>
+    <script src="/static/header.js"></script>
+</body>
+</html>

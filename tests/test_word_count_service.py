@@ -8,6 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import anyio
 import pytest
 from docx import Document
+from lxml import etree
 from openpyxl import Workbook, load_workbook
 from pptx import Presentation
 from sqlalchemy import create_engine, text
@@ -197,6 +198,23 @@ def test_word_like_counter_splits_common_language_pairs():
     assert russian_arabic.number_token_count == 1
 
 
+def test_language_export_split_keeps_neutral_text_with_nearby_language():
+    separated = word_count_service._split_text_by_language(
+        "中文 123 / English 45، مرحبا بالعالم"
+    )
+
+    assert "中文 123 / " in separated["chinese"]
+    assert "English 45، " in separated["latin"]
+    assert "مرحبا بالعالم" in separated["arabic"]
+
+
+def test_language_export_treats_han_as_japanese_when_kana_exists():
+    separated = word_count_service._split_text_by_language("日本語テスト English")
+
+    assert "日本語テスト " in separated["japanese"]
+    assert separated["latin"] == "English"
+
+
 def test_word_like_counter_matches_word_stats_sample():
     sample = Path("data/word/2. Blog Post 42 - ENG - Red Notice removal from INTERPOL, and when NOT to apply - word_translated.docx")
     if not sample.exists():
@@ -314,6 +332,15 @@ def test_docx_main_and_extra_counts_are_separated(tmp_path, monkeypatch):
     assert file_result["counted_at"]
     assert Path(tmp_path / result["report_excel"]).exists()
     assert Path(tmp_path / result["report_json"]).exists()
+    assert result["language_export_archive"]
+    exports = {item["language"]: item for item in result["language_exports"]}
+    assert {"chinese", "latin"} <= set(exports)
+    chinese_export = tmp_path / exports["chinese"]["path"]
+    latin_export = tmp_path / exports["latin"]["path"]
+    assert chinese_export.exists()
+    assert latin_export.exists()
+    assert "你好" in "\n".join(p.text for p in Document(chinese_export).paragraphs)
+    assert "world" in "\n".join(p.text for p in Document(latin_export).paragraphs)
 
     report = load_workbook(tmp_path / result["report_excel"], read_only=True)
     try:
@@ -330,6 +357,48 @@ def test_docx_main_and_extra_counts_are_separated(tmp_path, monkeypatch):
         assert "汉字" in headers
     finally:
         report.close()
+
+
+def test_arabic_language_export_uses_rtl_word_properties(tmp_path):
+    path = tmp_path / "arabic.docx"
+    fragments = [
+        {
+            "language": "arabic",
+            "relative_path": "mixed.txt",
+            "source_type": "body",
+            "source_label": "正文",
+            "is_extra": False,
+            "text": "مرحبا بالعالم",
+        }
+    ]
+
+    word_count_service._write_language_docx(
+        path,
+        config=word_count_service.LANGUAGE_EXPORT_CONFIG["arabic"],
+        fragments=fragments,
+        source_name="mixed",
+    )
+
+    with ZipFile(path) as archive:
+        document_xml = archive.read("word/document.xml")
+    assert "مرحبا بالعالم" in "\n".join(p.text for p in Document(path).paragraphs)
+    assert b"<w:bidi" in document_xml
+    assert b"<w:rtl" in document_xml
+    root = etree.fromstring(document_xml)
+    namespace = {"w": word_count_service.NS["w"]}
+    rtl_ppr = root.xpath("//w:p[w:r/w:rPr/w:rtl]/w:pPr", namespaces=namespace)[0]
+    property_names = [etree.QName(child).localname for child in rtl_ppr]
+    assert property_names.index("bidi") < property_names.index("jc")
+
+
+def test_word_count_page_renders_language_word_downloads():
+    javascript = (Path(__file__).resolve().parents[1] / "static" / "word_count.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "result.language_exports" in javascript
+    assert "result.language_export_archive" in javascript
+    assert "下载全部语系 Word" in javascript
 
 
 def test_word_count_accepts_single_file_path(tmp_path, monkeypatch):

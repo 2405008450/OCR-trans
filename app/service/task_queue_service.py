@@ -18,6 +18,7 @@ from app.core.request_context import get_client_ip
 from app.db.session import SessionLocal
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
+from app.service.audio_check_service import execute_audio_check_task
 from app.service.business_licence_service import (
     BUSINESS_LICENCE_DEFAULT_MODEL,
     BUSINESS_LICENCE_DEFAULT_ROUTE,
@@ -99,6 +100,7 @@ class TaskQueueService:
         'msg_convert': 1,
         'file_rename': 1,
         'english_variant': 1,
+        'audio_check': 1,
     }
     SHARED_TASK_GROUPS: Dict[str, str] = {
         'number_check': 'specialist_text',
@@ -586,6 +588,57 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
+    async def submit_audio_check_task(
+        self,
+        *,
+        file: UploadFile,
+        params: Dict[str, Any],
+    ) -> TaskSubmitResult:
+        max_bytes = max(1, int(settings.AUDIO_CHECK_MAX_MB or 20)) * 1024 * 1024
+        try:
+            staged_uploads = await self._stage_uploads(
+                'audio_check',
+                [('input', file, 'input.mp3')],
+                max_bytes=max_bytes,
+            )
+        except UploadSizeLimitError as exc:
+            raise UploadSizeLimitError(
+                f"音频文件超过上传限制 {settings.AUDIO_CHECK_MAX_MB:g} MB"
+            ) from exc
+        if not staged_uploads or staged_uploads[0].size <= 0:
+            self._cleanup_staged_uploads(staged_uploads)
+            raise ValueError("音频文件不能为空")
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='audio_check',
+                filename=file.filename or 'input.mp3',
+                params=params,
+                staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            item = staged_uploads[0]
+            input_path = self._move_staged_upload(
+                item,
+                Path(settings.UPLOAD_DIR) / 'audio_check' / reserved_task.display_no,
+                reserved_task.display_no,
+                reserved_task.task_id,
+            )
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {'input_path': input_path, 'original_filename': item.original_filename},
+            )
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
     async def submit_business_licence_task(
         self,
         *,
@@ -1026,7 +1079,7 @@ class TaskQueueService:
         return None
 
     def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
-        if task_type in {'doc_translate', 'business_licence', 'pdf2docx', 'msg_convert', 'english_variant'}:
+        if task_type in {'doc_translate', 'business_licence', 'pdf2docx', 'msg_convert', 'english_variant', 'audio_check'}:
             return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
 
         if task_type == 'word_count':
@@ -1281,6 +1334,9 @@ class TaskQueueService:
             elif task_type == 'english_variant':
                 result = await self._execute_english_variant(task_id, display_no, input_files, params, update)
                 output_path = result.get('output_file') if result else None
+            elif task_type == 'audio_check':
+                result = await self._execute_audio_check(task_id, display_no, input_files, params, update)
+                output_path = result.get('report_markdown') if result else None
             else:
                 raise ValueError(f'unsupported task type: {task_type}')
             output_files = self._extract_output_files(task_type, result, output_path, filename)
@@ -1432,6 +1488,17 @@ class TaskQueueService:
             target_style=params.get('target_style', 'british'),
             progress_callback=update,
             executor=self._task_executor,
+        )
+
+    async def _execute_audio_check(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        return await execute_audio_check_task(
+            display_no=display_no,
+            input_path=input_files['input_path'],
+            original_filename=input_files.get('original_filename') or 'input.mp3',
+            params=params,
+            progress_callback=update,
+            executor=self._task_executor,
+            log_callback=lambda message: self._append_task_log(task_id, message),
         )
 
     async def _execute_pdf2docx(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
@@ -1605,6 +1672,8 @@ class TaskQueueService:
             add_result('output_pdf')
         elif task_type == 'english_variant':
             add_result('output_file')
+        elif task_type == 'audio_check':
+            add_result('report_markdown', ftype='report')
         if not files and output_path:
             files.append({'name': friendly(output_path, original_filename, 'output'), 'path': output_path, 'type': 'output'})
 

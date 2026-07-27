@@ -77,3 +77,4 @@ tests
 !tests/
 !tests/test_file_rename_service.py
 !tests/test_english_variant_service.py
+!tests/test_audio_check_service.py
