@@ -340,7 +340,7 @@ def _ocr_single_image(
     img_b64: str,
     mime_type: str,
     model: str,
-    gemini_route: str = GEMINI_ROUTE_GOOGLE,
+    gemini_route: str = GEMINI_ROUTE_OPENROUTER,
     retries: int = 3,
     status_callback=None,
 ) -> str:
@@ -477,7 +477,7 @@ def ocr_file(
     file_path: str,
     api_key: str = "",
     model: str = "google/gemini-3.1-pro-preview",
-    gemini_route: str = GEMINI_ROUTE_GOOGLE,
+    gemini_route: str = GEMINI_ROUTE_OPENROUTER,
     page_progress_callback=None,
     return_metadata: bool = False,
     ocr_status_callback=None,

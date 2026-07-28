@@ -588,7 +588,7 @@ function renderWordLayoutModes() {
     wordLayoutModeGroup.innerHTML = '';
     Object.entries(wordLayoutModeConfig).forEach(([value, info]) => {
         const chip = document.createElement('label');
-        chip.className = 'lang-chip mode-chip';
+        chip.className = `lang-chip mode-chip mode-chip--${value}`;
         if (info.description) chip.title = info.description;
         const radio = document.createElement('input');
         radio.type = 'radio';

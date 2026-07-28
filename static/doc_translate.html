@@ -706,6 +706,66 @@
             grid-column: 1 / -1;
         }
 
+        /* 新功能徽章 */
+        .new-badge {
+            display: inline-flex;
+            align-items: center;
+            margin-left: 8px;
+            padding: 2px 9px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #f59e0b, #ef4444);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            line-height: 1.5;
+            vertical-align: middle;
+            box-shadow: 0 4px 10px rgba(239, 68, 68, 0.28);
+        }
+
+        /* Word 排版方式：两种布局用不同强调色区分 */
+        .word-layout-card .mode-chip {
+            border-left: 3px solid transparent;
+        }
+
+        .word-layout-card .mode-chip--fixed {
+            border-left-color: rgba(14, 165, 233, 0.55);
+        }
+
+        .word-layout-card .mode-chip--editable {
+            border-left-color: rgba(124, 58, 237, 0.55);
+        }
+
+        .word-layout-card .mode-chip--fixed.active {
+            border-color: rgba(14, 165, 233, 0.5);
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.14), rgba(56, 189, 248, 0.16));
+            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.12);
+        }
+
+        .word-layout-card .mode-chip--fixed.active .chip-check {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .word-layout-card .mode-chip--fixed.active .mode-chip-title {
+            color: var(--primary-color);
+        }
+
+        .word-layout-card .mode-chip--editable.active {
+            border-color: rgba(124, 58, 237, 0.5);
+            background: linear-gradient(135deg, rgba(124, 58, 237, 0.14), rgba(139, 92, 246, 0.16));
+            box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.12);
+        }
+
+        .word-layout-card .mode-chip--editable.active .chip-check {
+            background: #7c3aed;
+            border-color: #7c3aed;
+        }
+
+        .word-layout-card .mode-chip--editable.active .mode-chip-title {
+            color: #7c3aed;
+        }
+
         .prompt-rules-head {
             display: flex;
             align-items: center;
@@ -924,7 +984,7 @@
                             <div class="option-group option-card word-layout-card">
                                 <div class="lang-selector">
                                     <div class="config-card-head">
-                                        <h4><i class="fas fa-file-word"></i> Word 排版方式</h4>
+                                        <h4><i class="fas fa-file-word"></i> Word 排版方式 <span class="new-badge">新</span></h4>
                                         <span>PDF / 图片输出</span>
                                     </div>
                                     <div class="lang-checkbox-group" id="wordLayoutModeGroup">
