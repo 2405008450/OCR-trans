@@ -67,12 +67,13 @@ from app.service.file_rename_service import (
 )
 from app.service.gemini_service import get_gemini_routes
 from app.service.msg_convert_service import (
+    EML_HEADER_SCAN_BYTES,
     MSG_CONVERT_ALLOWED_EXTENSIONS,
     MSG_CONVERT_DEFAULT_OUTPUT_FORMAT,
     MSG_CONVERT_MAX_FILES,
-    OLE_COMPOUND_FILE_SIGNATURE,
     get_msg_convert_config as build_msg_convert_config,
     normalize_msg_output_format,
+    validate_email_content_header,
 )
 from app.service.number_check_service import (
     ALIGNMENT_EXTENSIONS,
@@ -211,13 +212,15 @@ def _upload_file_size(file: UploadFile) -> int:
 async def _validate_msg_upload(file: UploadFile) -> int:
     filename = file.filename or ""
     if Path(filename).suffix.lower() not in MSG_CONVERT_ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"仅支持 .msg 文件：{filename or '未命名文件'}")
+        raise HTTPException(status_code=400, detail=f"仅支持 .msg、.eml 文件：{filename or '未命名文件'}")
     size = _upload_file_size(file)
     await file.seek(0)
-    signature = await file.read(len(OLE_COMPOUND_FILE_SIGNATURE))
+    header_bytes = await file.read(EML_HEADER_SCAN_BYTES)
     await file.seek(0)
-    if signature != OLE_COMPOUND_FILE_SIGNATURE:
-        raise HTTPException(status_code=400, detail=f"文件不是有效的 Outlook MSG：{filename}")
+    try:
+        validate_email_content_header(filename, header_bytes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{exc}：{filename}") from exc
     return size
 
 
@@ -1462,7 +1465,7 @@ async def run_msg_convert(
     if size > max_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"MSG 文件超过 {settings.MSG_CONVERT_UPLOAD_MAX_MB:g} MB 上传限制",
+            detail=f"邮件文件超过 {settings.MSG_CONVERT_UPLOAD_MAX_MB:g} MB 上传限制",
         )
     try:
         submit_result = await task_queue_service.submit_msg_convert_task(
@@ -1487,9 +1490,9 @@ async def run_msg_convert_batch(
     output_format: str = Query(MSG_CONVERT_DEFAULT_OUTPUT_FORMAT),
 ):
     if not files:
-        raise HTTPException(status_code=400, detail="至少需要上传一个 MSG 文件")
+        raise HTTPException(status_code=400, detail="至少需要上传一个 MSG 或 EML 文件")
     if len(files) > MSG_CONVERT_MAX_FILES:
-        raise HTTPException(status_code=400, detail=f"单次最多上传 {MSG_CONVERT_MAX_FILES} 个 MSG 文件")
+        raise HTTPException(status_code=400, detail=f"单次最多上传 {MSG_CONVERT_MAX_FILES} 个邮件文件")
     try:
         normalized_format = normalize_msg_output_format(output_format)
     except ValueError as exc:
@@ -1508,7 +1511,7 @@ async def run_msg_convert_batch(
         )
 
     batch_id = str(uuid.uuid4())
-    batch_name = f"MSG转文档批量结果_{batch_id[:8]}.zip"
+    batch_name = f"邮件转文档批量结果_{batch_id[:8]}.zip"
     batch_total = len(files)
     results = []
     for index, file in enumerate(files, start=1):

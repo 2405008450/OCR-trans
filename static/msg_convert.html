@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MSG 转文档</title>
+    <title>邮件转文档</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <style>
@@ -121,8 +121,8 @@
         <div class="logo">
             <div class="logo-mark"><i class="fas fa-envelope-open-text"></i></div>
             <div>
-                <h1>MSG 转文档</h1>
-                <p class="subtitle">将 Outlook 邮件转换为可编辑 Word 或可选择文本的 PDF，保留回复链、表格、超链接与正文内嵌图片。</p>
+                <h1>邮件转文档</h1>
+                <p class="subtitle">将 MSG、EML 邮件转换为可编辑 Word 或可选择文本的 PDF，保留回复链、表格、超链接与正文内嵌图片。</p>
             </div>
         </div>
         <nav class="header-nav"><a href="/"><i class="fas fa-home"></i> 首页</a><a href="/dashboard"><i class="fas fa-gauge-high"></i> 任务工作台</a></nav>
@@ -132,7 +132,7 @@
         <div>
             <span class="section-kicker">Local conversion</span>
             <h2>邮件原貌尽量保留，输出格式按需选择</h2>
-            <p>转换完全在服务器本地进行，不调用大模型、不要求安装 Outlook，也不会访问邮件中的外部图片地址。普通附件与嵌套 MSG 不会被导出。</p>
+            <p>转换完全在服务器本地进行，不调用大模型、不要求安装 Outlook，也不会访问邮件中的外部图片地址。普通附件与嵌套邮件不会被导出。</p>
         </div>
         <div class="hero-metrics">
             <div class="metric-card"><strong>HTML → RTF → 纯文本</strong><span>三级正文回退</span></div>
@@ -143,7 +143,7 @@
     <main class="msg-workspace">
         <section class="msg-card">
             <div class="section-title">
-                <div><h2>选择 MSG 文件</h2><p>支持拖拽或多选，提交前可逐个删除。</p></div>
+                <div><h2>选择 MSG / EML 文件</h2><p>支持混合拖拽或多选，提交前可逐个删除。</p></div>
                 <span class="section-chip"><i class="fas fa-shield-halved"></i> 本地处理</span>
             </div>
             <div class="format-row">
@@ -160,11 +160,11 @@
                     <div class="format-note"><i class="fas fa-paperclip"></i> 仅正文与内嵌图片</div>
                 </div>
             </div>
-            <input id="fileInput" type="file" accept=".msg,application/vnd.ms-outlook" multiple hidden>
-            <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="选择 MSG 文件">
+            <input id="fileInput" type="file" accept=".msg,.eml,application/vnd.ms-outlook,message/rfc822" multiple hidden>
+            <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="选择 MSG 或 EML 文件">
                 <div>
                     <div class="drop-icon"><i class="fas fa-cloud-arrow-up"></i></div>
-                    <strong>拖入 MSG 文件，或点击选择</strong>
+                    <strong>拖入 MSG / EML 文件，或点击选择</strong>
                     <span>最多 50 个文件，单次总大小不超过 95 MB</span>
                 </div>
             </div>
@@ -183,7 +183,7 @@
                 <div class="privacy-item"><i class="fas fa-ban"></i><div><strong>不访问外部图片</strong><p>HTTP/HTTPS 图片只保留替代文本或链接，避免跟踪与 SSRF。</p></div></div>
                 <div class="privacy-item"><i class="fas fa-images"></i><div><strong>保留正文内嵌图片</strong><p>CID、Content-Location 与 data URI 图片会嵌入文档。</p></div></div>
                 <div class="privacy-item"><i class="fas fa-file-shield"></i><div><strong>清理危险 HTML</strong><p>移除脚本、iframe、表单、事件属性等可执行内容。</p></div></div>
-                <div class="privacy-item"><i class="fas fa-paperclip"></i><div><strong>不提取普通附件</strong><p>未被正文引用的附件和嵌套 MSG 不进入输出目录。</p></div></div>
+                <div class="privacy-item"><i class="fas fa-paperclip"></i><div><strong>不提取普通附件</strong><p>未被正文引用的附件和嵌套邮件不进入输出目录。</p></div></div>
             </div>
         </aside>
     </main>

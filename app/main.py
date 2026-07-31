@@ -26,6 +26,7 @@ HTML_CACHE_HEADERS = {
 }
 LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']+)(?P=quote)')
 RELEASE_NOTES = [
+    "7月31日_邮件转文档新增 EML 支持，可与 MSG 混合批量转换并保留正文内嵌图片",
     "7月22日_字数统计对齐 Word 核心指标，中日韩与拉丁候选明细支持折叠查看并补齐字符数；单文件 Word 行数优先实时重新分页，页面同步增加仅供参考提示",
     "7月16日_上线文件名整理，支持编号清理、自动编号、正则预览和源目录内副本生成",
     "7月15日_PDF 工具箱整合合并、拆分、四档压缩和页面处理，提取/删页支持奇偶页快捷选择",
@@ -47,7 +48,7 @@ TOOL_NAV_GROUPS = [
     ]),
     ("转换与处理", "fa-shuffle", [
         ("/pdf2docx", "fa-file-word", "文档预处理", "PDF / 图片转可编辑 Word"),
-        ("/msg-convert", "fa-envelope-open-text", "MSG 转文档", "邮件转 Word / PDF，保留正文与内嵌图片"),
+        ("/msg-convert", "fa-envelope-open-text", "邮件转文档", "MSG / EML 转 Word / PDF，保留正文与内嵌图片"),
         ("/pdf-tools", "fa-screwdriver-wrench", "PDF 工具箱", "合并、拆分、压缩、提取、删页和旋转"),
         ("/word-count", "fa-calculator", "字数统计", "批量扫描并生成统计报告"),
         ("/file-rename", "fa-file-signature", "文件名整理", "清理序号前缀、自动编号或正则重命名"),

@@ -5,11 +5,18 @@ import hashlib
 import html
 import re
 import shutil
+import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
+from email import policy
+from email.message import Message
+from email.parser import BytesHeaderParser, BytesParser
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import unquote, unquote_to_bytes, urlsplit
+from xml.etree import ElementTree
 
 import extract_msg
 from bs4 import BeautifulSoup, Comment, UnicodeDammit
@@ -23,11 +30,12 @@ from app.service.libreoffice_service import (
 )
 
 
-MSG_CONVERT_ALLOWED_EXTENSIONS = {".msg"}
+MSG_CONVERT_ALLOWED_EXTENSIONS = {".msg", ".eml"}
 MSG_CONVERT_OUTPUT_FORMATS = {"word", "pdf", "both"}
 MSG_CONVERT_DEFAULT_OUTPUT_FORMAT = "word"
 MSG_CONVERT_MAX_FILES = 50
 OLE_COMPOUND_FILE_SIGNATURE = bytes.fromhex("D0CF11E0A1B11AE1")
+EML_HEADER_SCAN_BYTES = 512 * 1024
 MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024
 
 _DANGEROUS_TAGS = {
@@ -83,6 +91,18 @@ _MIME_EXTENSION_MAP = {
     "image/wmf": ".wmf",
     "image/x-wmf": ".wmf",
 }
+_EXTENSION_MIME_MAP = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".ico": "image/x-icon",
+    ".emf": "image/emf",
+    ".wmf": "image/wmf",
+}
 _CSS_URL_RE = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE | re.DOTALL)
 _CSS_IMPORT_RE = re.compile(r"@import\s+(?:url\([^)]*\)|['\"][^'\"]*['\"])[^;]*;?", re.IGNORECASE)
 _CSS_DANGEROUS_RE = re.compile(r"(?:expression\s*\(|javascript\s*:|vbscript\s*:|behavior\s*:|-moz-binding\s*:)", re.IGNORECASE)
@@ -102,6 +122,103 @@ class AttachmentImage:
     filename: str
     mimetype: str
     inline_marked: bool
+
+
+class EmlAttachmentAdapter:
+    """将标准 MIME 邮件部件适配为 MSG 附件读取接口。"""
+
+    def __init__(self, part: Message):
+        self._part = part
+        self.cid = str(part.get("Content-ID") or "")
+        self.contentId = self.cid
+        self.contentLocation = str(part.get("Content-Location") or "")
+        self.longFilename = str(part.get_filename() or "inline-image")
+        self.shortFilename = self.longFilename
+        self.name = self.longFilename
+        self.mimetype = part.get_content_type()
+        self.hidden = part.get_content_disposition() == "inline"
+        self.renderingPosition = 0 if self.hidden else 0xFFFFFFFF
+        self.type = "AttachmentType.DATA"
+
+    @property
+    def data(self) -> bytes:
+        return self._part.get_payload(decode=True) or b""
+
+    def getStringStream(self, name: str) -> str | None:
+        return self.contentLocation if name == "__substg1.0_3713" else None
+
+
+class EmlMessageAdapter:
+    """让 EML 与现有 MSG 的正文清理、图片解析及文档生成流程共用实现。"""
+
+    def __init__(self, message: Message):
+        self._message = message
+        self._html_part = self._get_body_part("html")
+        self._plain_part = self._get_body_part("plain")
+        self.rtfBody = None
+        self.attachments = [
+            EmlAttachmentAdapter(part)
+            for part in message.walk()
+            if not part.is_multipart()
+            and part not in {self._html_part, self._plain_part}
+        ]
+        self.subject = self._header("Subject")
+        self.sender = self._header("From")
+        self.to = self._header("To")
+        self.cc = self._header("Cc")
+        self.bcc = self._header("Bcc")
+        self.date = self._date()
+
+    def _get_body_part(self, subtype: str) -> Message | None:
+        if not self._message.is_multipart():
+            return self._message if self._message.get_content_type() == f"text/{subtype}" else None
+        getter = getattr(self._message, "get_body", None)
+        if callable(getter):
+            try:
+                return getter(preferencelist=(subtype,))
+            except Exception:
+                pass
+        for part in self._message.walk():
+            if part.get_content_type() == f"text/{subtype}" and part.get_content_disposition() != "attachment":
+                return part
+        return None
+
+    def _header(self, name: str) -> str:
+        return ", ".join(str(value) for value in (self._message.get_all(name, []) or []))
+
+    def _date(self) -> datetime | str:
+        raw_date = self._header("Date")
+        if not raw_date:
+            return ""
+        try:
+            return parsedate_to_datetime(raw_date)
+        except (TypeError, ValueError):
+            return raw_date
+
+    @staticmethod
+    def _part_text(part: Message | None) -> str | None:
+        if part is None:
+            return None
+        try:
+            content = part.get_content()
+            return content if isinstance(content, str) else str(content)
+        except Exception:
+            payload = part.get_payload(decode=True) or b""
+            charset = part.get_content_charset() or "utf-8"
+            return payload.decode(charset, errors="replace")
+
+    @property
+    def body(self) -> str | None:
+        return self._part_text(self._plain_part)
+
+    def getStream(self, name: str) -> str | None:
+        return self._part_text(self._html_part) if name == "__substg1.0_10130102" else None
+
+    def getStringStream(self, name: str) -> str | None:
+        return self.body if name == "__substg1.0_1000" else None
+
+    def close(self) -> None:
+        return None
 
 
 def normalize_msg_output_format(value: str | None) -> str:
@@ -128,6 +245,28 @@ def get_msg_convert_config() -> dict[str, Any]:
     }
 
 
+def validate_email_content_header(original_filename: str, header_bytes: bytes) -> None:
+    """根据扩展名验证 MSG 文件头或 EML 的 RFC 822/MIME 头。"""
+    suffix = Path(original_filename or "").suffix.lower()
+    if suffix not in MSG_CONVERT_ALLOWED_EXTENSIONS:
+        raise ValueError("仅支持 .msg、.eml 文件")
+    if suffix == ".msg":
+        if not header_bytes.startswith(OLE_COMPOUND_FILE_SIGNATURE):
+            raise ValueError("文件不是有效的 Outlook MSG（OLE 文件头不正确）")
+        return
+
+    if not header_bytes or b"\x00" in header_bytes:
+        raise ValueError("文件不是有效的 EML 邮件")
+    try:
+        parsed = BytesHeaderParser(policy=policy.default).parsebytes(header_bytes)
+    except Exception as exc:
+        raise ValueError(f"EML 邮件头解析失败：{exc}") from exc
+    header_names = {name.lower() for name in parsed.keys()}
+    recognized = {"from", "to", "subject", "date", "message-id", "mime-version", "content-type"}
+    if not header_names.intersection(recognized):
+        raise ValueError("文件不是有效的 EML 邮件（未找到标准邮件头）")
+
+
 def validate_msg_file(
     input_path: str | Path,
     original_filename: str | None = None,
@@ -137,19 +276,18 @@ def validate_msg_file(
     path = Path(input_path)
     filename = original_filename or path.name
     if Path(filename).suffix.lower() not in MSG_CONVERT_ALLOWED_EXTENSIONS:
-        raise ValueError("仅支持 .msg 文件")
+        raise ValueError("仅支持 .msg、.eml 文件")
     if not path.exists() or not path.is_file():
-        raise FileNotFoundError(f"MSG 文件不存在：{path}")
+        raise FileNotFoundError(f"邮件文件不存在：{path}")
     size = path.stat().st_size
     if size <= 0:
-        raise ValueError("MSG 文件为空")
+        raise ValueError("邮件文件为空")
     if max_bytes is not None and size > max_bytes:
         limit_mb = max_bytes / (1024 * 1024)
-        raise ValueError(f"MSG 文件超过 {limit_mb:g} MB 限制")
+        raise ValueError(f"邮件文件超过 {limit_mb:g} MB 限制")
     with path.open("rb") as handle:
-        signature = handle.read(len(OLE_COMPOUND_FILE_SIGNATURE))
-    if signature != OLE_COMPOUND_FILE_SIGNATURE:
-        raise ValueError("文件不是有效的 Outlook MSG（OLE 文件头不正确）")
+        header_bytes = handle.read(EML_HEADER_SCAN_BYTES)
+    validate_email_content_header(filename, header_bytes)
     return path
 
 
@@ -518,7 +656,7 @@ def sanitize_email_html(
             resolver.warnings.append("外部图片未下载，已保留替代文本或链接")
             _replace_unavailable_image(tag, external_url=source if scheme in {"http", "https"} else None)
         else:
-            resolver.warnings.append(f"正文图片未在 MSG 内找到：{source or '无地址'}")
+            resolver.warnings.append(f"正文图片未在邮件文件内找到：{source or '无地址'}")
             _replace_unavailable_image(tag)
 
     styles: list[str] = []
@@ -593,7 +731,7 @@ def build_safe_message_html(message: Any, assets_dir: str | Path) -> dict[str, A
                 '<section class="inline-image-gallery"><h2>邮件内嵌图片</h2>'
                 f'<div class="inline-image-grid">{image_items}</div></section>'
             )
-            warnings.append("正文中未找到图片位置，已将 MSG 标记的内嵌图片附加到正文末尾")
+            warnings.append("正文中未找到图片位置，已将邮件标记的内嵌图片附加到正文末尾")
 
     subject = str(_safe_get(message, "subject", "") or "").strip() or "（无主题）"
     document = f"""<!DOCTYPE html>
@@ -635,6 +773,149 @@ a {{ color: #0369a1; text-decoration: underline; }}
     }
 
 
+def _external_image_target_path(target: str) -> Path | None:
+    parsed = urlsplit(target)
+    if parsed.scheme.lower() not in {"", "file"}:
+        return None
+    if parsed.scheme.lower() == "file":
+        decoded_path = unquote(parsed.path)
+        if parsed.netloc:
+            return Path(f"//{parsed.netloc}{decoded_path}")
+        if re.match(r"^/[A-Za-z]:/", decoded_path):
+            decoded_path = decoded_path[1:]
+        return Path(decoded_path)
+    return Path(unquote(target))
+
+
+def embed_local_images_in_docx(docx_path: str | Path, assets_dir: str | Path) -> int:
+    """把 LibreOffice 生成的外链图片改为 DOCX 包内图片。"""
+    document_path = Path(docx_path)
+    allowed_root = Path(assets_dir).resolve()
+    if not document_path.exists() or not allowed_root.exists():
+        return 0
+
+    temp_path = document_path.with_name(f".{document_path.stem}.embed-{uuid.uuid4().hex}.docx")
+    relationship_namespace = "http://schemas.openxmlformats.org/package/2006/relationships"
+    image_relationship_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    embedded_count = 0
+
+    try:
+        with zipfile.ZipFile(document_path, "r") as source:
+            entries = {info.filename: (info, source.read(info.filename)) for info in source.infolist()}
+
+        media_by_digest: dict[str, str] = {}
+        for name, (_, data) in list(entries.items()):
+            if not name.startswith("word/_rels/") or not name.endswith(".rels"):
+                continue
+            try:
+                relationships = ElementTree.fromstring(data)
+            except ElementTree.ParseError:
+                continue
+
+            source_xml_name = f"word/{Path(name).name[:-5]}"
+            source_entry = entries.get(source_xml_name)
+            if source_entry is None:
+                continue
+            source_xml = source_entry[1]
+            relationships_changed = False
+            source_changed = False
+
+            for relationship in relationships.findall(f"{{{relationship_namespace}}}Relationship"):
+                if relationship.get("Type") != image_relationship_type:
+                    continue
+                if str(relationship.get("TargetMode") or "").lower() != "external":
+                    continue
+                target_path = _external_image_target_path(str(relationship.get("Target") or ""))
+                if target_path is None:
+                    continue
+                try:
+                    resolved_image = target_path.resolve()
+                    resolved_image.relative_to(allowed_root)
+                except (OSError, ValueError):
+                    continue
+                if not resolved_image.is_file():
+                    continue
+
+                image_data = resolved_image.read_bytes()
+                extension = _detect_image_extension(
+                    image_data,
+                    filename=resolved_image.name,
+                )
+                if not extension:
+                    continue
+                digest = hashlib.sha256(image_data).hexdigest()
+                media_name = media_by_digest.get(digest)
+                if media_name is None:
+                    media_name = f"word/media/email_{len(media_by_digest) + 1:03d}_{digest[:8]}{extension}"
+                    media_by_digest[digest] = media_name
+                    entries[media_name] = (None, image_data)
+
+                relationship_id = str(relationship.get("Id") or "")
+                relationship.set("Target", media_name.removeprefix("word/"))
+                relationship.attrib.pop("TargetMode", None)
+                relationships_changed = True
+                embedded_count += 1
+
+                for quote in ('"', "'"):
+                    old = f'r:link={quote}{relationship_id}{quote}'.encode()
+                    new = f'r:embed={quote}{relationship_id}{quote}'.encode()
+                    if old in source_xml:
+                        source_xml = source_xml.replace(old, new)
+                        source_changed = True
+
+            if relationships_changed:
+                ElementTree.register_namespace("", relationship_namespace)
+                entries[name] = (
+                    entries[name][0],
+                    ElementTree.tostring(relationships, encoding="utf-8", xml_declaration=True),
+                )
+            if source_changed:
+                entries[source_xml_name] = (source_entry[0], source_xml)
+
+        if embedded_count == 0:
+            return 0
+
+        content_types_name = "[Content_Types].xml"
+        content_types_entry = entries.get(content_types_name)
+        if content_types_entry is not None:
+            content_types_namespace = "http://schemas.openxmlformats.org/package/2006/content-types"
+            content_types_root = ElementTree.fromstring(content_types_entry[1])
+            declared_extensions = {
+                str(item.get("Extension") or "").lower()
+                for item in content_types_root.findall(f"{{{content_types_namespace}}}Default")
+            }
+            for media_name in media_by_digest.values():
+                extension = Path(media_name).suffix.lower().lstrip(".")
+                if not extension or extension in declared_extensions:
+                    continue
+                mime_type = _EXTENSION_MIME_MAP.get(f".{extension}")
+                if not mime_type:
+                    continue
+                ElementTree.SubElement(
+                    content_types_root,
+                    f"{{{content_types_namespace}}}Default",
+                    Extension=extension,
+                    ContentType=mime_type,
+                )
+                declared_extensions.add(extension)
+            ElementTree.register_namespace("", content_types_namespace)
+            entries[content_types_name] = (
+                content_types_entry[0],
+                ElementTree.tostring(content_types_root, encoding="utf-8", xml_declaration=True),
+            )
+
+        with zipfile.ZipFile(temp_path, "w") as target:
+            for entry_name, (info, data) in entries.items():
+                if info is None:
+                    target.writestr(entry_name, data, compress_type=zipfile.ZIP_DEFLATED)
+                else:
+                    target.writestr(info, data)
+        temp_path.replace(document_path)
+        return embedded_count
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 def convert_msg_to_documents(
     *,
     input_path: str | Path,
@@ -660,10 +941,14 @@ def convert_msg_to_documents(
     prepared: dict[str, Any]
     try:
         try:
-            message = extract_msg.openMsg(str(validated_path), strict=True)
+            if Path(original_filename).suffix.lower() == ".eml":
+                with validated_path.open("rb") as source:
+                    message = EmlMessageAdapter(BytesParser(policy=policy.default).parse(source))
+            else:
+                message = extract_msg.openMsg(str(validated_path), strict=True)
             prepared = build_safe_message_html(message, assets_dir)
         except Exception as exc:
-            raise ValueError(f"MSG 文件解析失败：{exc}") from exc
+            raise ValueError(f"邮件文件解析失败：{exc}") from exc
         finally:
             if message is not None:
                 try:
@@ -673,6 +958,12 @@ def convert_msg_to_documents(
 
         html_path.write_text(prepared["html"], encoding="utf-8")
         convert_to_docx_via_libreoffice(html_path, docx_path)
+        embedded_image_count = embed_local_images_in_docx(docx_path, assets_dir)
+        if prepared["inline_image_count"] and embedded_image_count < prepared["inline_image_count"]:
+            prepared["warnings"].append(
+                f"识别到 {prepared['inline_image_count']} 张正文内嵌图片，"
+                f"实际写入文档 {embedded_image_count} 张"
+            )
         if normalized_format in {"pdf", "both"}:
             convert_docx_to_pdf_via_libreoffice(docx_path, pdf_path)
 
@@ -689,6 +980,7 @@ def convert_msg_to_documents(
             "subject": prepared["subject"],
             "body_format": prepared["body_format"],
             "inline_image_count": prepared["inline_image_count"],
+            "embedded_image_count": embedded_image_count,
             "output_format": normalized_format,
             "output_docx": portable(published_docx),
             "output_pdf": portable(published_pdf),
@@ -719,7 +1011,7 @@ async def execute_msg_convert_task(
     import asyncio
 
     if progress_callback:
-        await progress_callback(10, "正在解析 MSG 邮件")
+        await progress_callback(10, "正在解析邮件")
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         executor,

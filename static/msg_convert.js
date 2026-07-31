@@ -18,7 +18,12 @@ let taskStates = [];
 let pollTimer = null;
 let isSubmitting = false;
 let submittedFormat = 'word';
-let config = { max_files: 50, upload_max_mb: 95, default_output_format: 'word' };
+let config = {
+    allowed_extensions: ['.msg', '.eml'],
+    max_files: 50,
+    upload_max_mb: 95,
+    default_output_format: 'word',
+};
 
 const terminalStatuses = new Set(['done', 'failed', 'cancelled']);
 
@@ -44,12 +49,13 @@ function fileIdentity(file) {
 }
 
 function validateFiles(files) {
-    const invalid = files.find((file) => !file.name.toLowerCase().endsWith('.msg'));
-    if (invalid) return `仅支持 .msg 文件：“${invalid.name}”格式不正确。`;
+    const allowedExtensions = config.allowed_extensions || ['.msg', '.eml'];
+    const invalid = files.find((file) => !allowedExtensions.some((ext) => file.name.toLowerCase().endsWith(ext)));
+    if (invalid) return `仅支持 MSG、EML 文件：“${invalid.name}”格式不正确。`;
     const identities = new Set(selectedFiles.map(fileIdentity));
     const uniqueNewFiles = files.filter((file) => !identities.has(fileIdentity(file)));
     if (selectedFiles.length + uniqueNewFiles.length > config.max_files) {
-        return `单次最多选择 ${config.max_files} 个 MSG 文件。`;
+        return `单次最多选择 ${config.max_files} 个邮件文件。`;
     }
     const nextTotal = totalSelectedBytes() + uniqueNewFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
     if (nextTotal > config.upload_max_mb * 1024 * 1024) {
@@ -213,7 +219,7 @@ async function submitTasks() {
             }];
         } else {
             taskStates = (payload.tasks || []).map((task) => ({
-                filename: task.filename || '未命名.msg', task_id: task.task_id,
+                filename: task.filename || '未命名邮件', task_id: task.task_id,
                 status: task.status === 'ACCEPTED' ? 'queued' : 'failed', progress: 0,
                 message: task.status === 'ACCEPTED' ? (task.deduped ? '已复用相同任务' : '已进入任务队列') : (task.error || '提交失败'),
                 error: task.error || '', batch_id: task.batch_id || payload.batch_id,
@@ -275,13 +281,13 @@ async function downloadAll() {
     try {
         const response = await fetch('/task/batch-download', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_ids: completed.map((task) => task.task_id), extensions, archive_name: 'MSG转文档批量结果.zip' }),
+            body: JSON.stringify({ task_ids: completed.map((task) => task.task_id), extensions, archive_name: '邮件转文档批量结果.zip' }),
         });
         if (!response.ok) throw new Error((await readError(response)) || `打包失败（${response.status}）`);
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
-        anchor.href = url; anchor.download = 'MSG转文档批量结果.zip'; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+        anchor.href = url; anchor.download = '邮件转文档批量结果.zip'; document.body.appendChild(anchor); anchor.click(); anchor.remove();
         URL.revokeObjectURL(url);
     } catch (error) {
         window.alert(`批量下载失败：${error.message}`);

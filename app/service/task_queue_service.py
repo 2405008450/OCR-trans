@@ -732,7 +732,7 @@ class TaskQueueService:
             )
         except UploadSizeLimitError as exc:
             raise UploadSizeLimitError(
-                f"MSG 文件超过 {settings.MSG_CONVERT_UPLOAD_MAX_MB:g} MB 上传限制"
+                f"邮件文件超过 {settings.MSG_CONVERT_UPLOAD_MAX_MB:g} MB 上传限制"
             ) from exc
 
         reserved_task = None
