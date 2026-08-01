@@ -15,7 +15,12 @@ from openpyxl import load_workbook
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SOURCE = REPO_ROOT / "data" / "english_variant" / "英美式英语词汇对比_名词_260505.xlsx"
+DEFAULT_SOURCE = (
+    REPO_ROOT
+    / "data"
+    / "english_variant"
+    / "英美式英语词汇对比_名词动词形容词副词_260723.xlsx"
+)
 DEFAULT_OUTPUT = REPO_ROOT / "data" / "english_variant" / "dictionary.json"
 
 NOUN_HEADERS = ("英式单数", "英式复数", "美式单数", "美式复数")
@@ -31,6 +36,11 @@ VERB_HEADERS = (
     "美式过去分词",
     "美式ing",
 )
+SIMPLE_HEADERS = ("英式", "美式")
+SIMPLE_SHEETS = {
+    "形容词": "adjective",
+    "副词": "adverb",
+}
 
 
 def _clean(value: object) -> str:
@@ -58,7 +68,7 @@ def _source_document_timestamp(source: Path) -> str:
 def _iter_pairs(source: Path) -> Iterable[dict[str, Any]]:
     workbook = load_workbook(source, read_only=True, data_only=True)
     try:
-        required_sheets = {"名词", "动词"}
+        required_sheets = {"名词", "动词", *SIMPLE_SHEETS}
         missing = required_sheets.difference(workbook.sheetnames)
         if missing:
             raise ValueError(f"词库缺少工作表: {', '.join(sorted(missing))}")
@@ -94,6 +104,23 @@ def _iter_pairs(source: Path) -> Iterable[dict[str, Any]]:
                         "british": british,
                         "american": american,
                         "source": _source_ref("动词", row_index, form),
+                    }
+
+        for sheet_name, form in SIMPLE_SHEETS.items():
+            sheet = workbook[sheet_name]
+            headers = tuple(_clean(cell.value) for cell in sheet[1][:2])
+            if headers != SIMPLE_HEADERS:
+                raise ValueError(f"{sheet_name}工作表表头不正确: {headers!r}")
+            for row_index, row in enumerate(
+                sheet.iter_rows(min_row=2, values_only=True), start=2
+            ):
+                british = _clean(row[0] if row else None)
+                american = _clean(row[1] if len(row) > 1 else None)
+                if british and american and british.casefold() != american.casefold():
+                    yield {
+                        "british": british,
+                        "american": american,
+                        "source": _source_ref(sheet_name, row_index, form),
                     }
     finally:
         workbook.close()

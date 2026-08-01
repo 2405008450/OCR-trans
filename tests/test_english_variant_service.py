@@ -30,12 +30,12 @@ from scripts.build_english_variant_dictionary import (
 def test_dictionary_compiler_matches_committed_runtime_dictionary() -> None:
     payload = compile_dictionary(DEFAULT_SOURCE)
     assert payload["stats"] == {
-        "raw_pairs": 2269,
-        "unique_pairs": 1923,
-        "british_to_american_rules": 1895,
-        "british_to_american_ambiguous": 14,
-        "american_to_british_rules": 1863,
-        "american_to_british_ambiguous": 30,
+        "raw_pairs": 1957,
+        "unique_pairs": 1589,
+        "british_to_american_rules": 1583,
+        "british_to_american_ambiguous": 3,
+        "american_to_british_rules": 1577,
+        "american_to_british_ambiguous": 6,
     }
     assert build_dictionary(DEFAULT_SOURCE, DEFAULT_OUTPUT, check=True)
 
@@ -49,21 +49,35 @@ def test_dictionary_output_does_not_depend_on_filesystem_mtime(tmp_path: Path) -
 
 def test_converter_handles_phrases_case_boundaries_and_ambiguity() -> None:
     result = convert_text(
-        "The AEROPLANE accessorised an american football. An aeroplanet, a check and a meter.",
+        "The AEROPLANE was accessorised and colourfully organised. An aeroplanet and an overpass.",
         "american",
     )
     assert result["converted_text"] == (
-        "The AIRPLANE accessorized an football. An aeroplanet, a check and a meter."
+        "The AIRPLANE was accessorized and colorfully organized. An aeroplanet and an overpass."
     )
-    assert result["replacement_count"] == 3
+    assert result["replacement_count"] == 4
     assert result["ambiguous_hit_count"] == 0
 
-    british = convert_text("The airplane accessorized football; a check and a meter.", "british")
-    assert british["converted_text"].startswith(
-        "The aeroplane accessorised american football"
+    british = convert_text(
+        "The airplane was accessorized and colorfully organized near an overpass.",
+        "british",
     )
-    assert {item["term"] for item in british["ambiguous_hits"]} == {"check", "meter"}
-    assert british["ambiguous_hit_count"] == 2
+    assert british["converted_text"].startswith(
+        "The aeroplane was accessorised and colourfully organised"
+    )
+    assert {item["term"] for item in british["ambiguous_hits"]} == {"overpass"}
+    assert british["ambiguous_hit_count"] == 1
+
+
+def test_converter_includes_adjective_and_adverb_sheets() -> None:
+    result = convert_text(
+        "The amortisable asset was colourfully illustrated.",
+        "american",
+    )
+    assert result["converted_text"] == (
+        "The amortizable asset was colorfully illustrated."
+    )
+    assert result["replacement_count"] == 2
 
 
 def test_dictionary_hash_participates_in_task_fingerprint() -> None:
@@ -174,8 +188,8 @@ def test_pptx_conversion_handles_runs_tables_and_notes(tmp_path: Path) -> None:
 
 def test_text_api_and_config_expose_dictionary_metadata() -> None:
     config = anyio.run(task_controller.get_english_variant_config)
-    assert config["dictionary_version"] == "260505"
-    assert config["stats"]["british_to_american_ambiguous"] == 14
+    assert config["dictionary_version"] == "260723"
+    assert config["stats"]["british_to_american_ambiguous"] == 3
 
     body = task_controller.EnglishVariantTextBody(
         text="The airplane.",
