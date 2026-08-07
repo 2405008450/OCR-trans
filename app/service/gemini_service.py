@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import base64
+import math
 import os
 import random
 import time
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 import requests.exceptions
 import urllib3.exceptions
@@ -58,6 +59,13 @@ DEFAULT_GEMINI_ROUTE = (
     settings.GEMINI_DEFAULT_ROUTE if settings.GEMINI_DEFAULT_ROUTE in _ALL_GEMINI_ROUTES else GEMINI_ROUTE_GOOGLE
 )
 DEFAULT_GEMINI_TIMEOUT_SECONDS = float(settings.GEMINI_TIMEOUT_SECONDS)
+DEFAULT_EMBEDDING_MODEL = settings.GEMINI_EMBEDDING_MODEL or "gemini-embedding-001"
+DEFAULT_EMBEDDING_DIMENSIONS = int(settings.GEMINI_EMBEDDING_DIMENSIONS or 768)
+OPENROUTER_EMBEDDING_MODEL = (
+    DEFAULT_EMBEDDING_MODEL
+    if "/" in DEFAULT_EMBEDDING_MODEL
+    else f"google/{DEFAULT_EMBEDDING_MODEL}"
+)
 
 GEMINI_ROUTE_OPTIONS: Dict[str, Dict[str, str]] = {
     GEMINI_ROUTE_GOOGLE: {
@@ -603,3 +611,182 @@ def generate_audio_analysis(
         timeout=timeout,
         log_callback=log_callback,
     )
+
+
+def _l2_normalize(vector: Sequence[float]) -> List[float]:
+    norm = math.sqrt(sum(float(v) * float(v) for v in vector))
+    if norm <= 0:
+        return [0.0] * len(vector)
+    return [float(v) / norm for v in vector]
+
+
+def _extract_google_embeddings(response) -> List[List[float]]:
+    embeddings: List[List[float]] = []
+    items = getattr(response, "embeddings", None)
+    if items:
+        for item in items:
+            values = getattr(item, "values", None)
+            if values is None and isinstance(item, dict):
+                values = item.get("values")
+            if values is not None:
+                embeddings.append(_l2_normalize(values))
+        return embeddings
+
+    # Single embedding response shape
+    embedding = getattr(response, "embedding", None)
+    values = getattr(embedding, "values", None) if embedding is not None else None
+    if values is not None:
+        return [_l2_normalize(values)]
+    return embeddings
+
+
+def _embed_google_batch(
+    *,
+    client: genai.Client,
+    model: str,
+    texts: Sequence[str],
+    task_type: str,
+    dimensions: int,
+) -> List[List[float]]:
+    config_kwargs = {
+        "task_type": task_type,
+        "output_dimensionality": dimensions,
+    }
+    # Prefer batch contents when supported; fall back to one-by-one.
+    try:
+        response = client.models.embed_content(
+            model=model,
+            contents=list(texts),
+            config=types.EmbedContentConfig(**config_kwargs),
+        )
+        vectors = _extract_google_embeddings(response)
+        if len(vectors) == len(texts):
+            return vectors
+    except Exception:
+        pass
+
+    vectors = []
+    for text in texts:
+        response = client.models.embed_content(
+            model=model,
+            contents=text,
+            config=types.EmbedContentConfig(**config_kwargs),
+        )
+        item_vectors = _extract_google_embeddings(response)
+        if not item_vectors:
+            raise RuntimeError("embedding response missing values")
+        vectors.append(item_vectors[0])
+    return vectors
+
+
+def _embed_openrouter_batch(
+    *,
+    texts: Sequence[str],
+    model: str,
+    dimensions: int,
+    timeout: float,
+    log_callback: GeminiLogCallback = None,
+) -> List[List[float]]:
+    if not settings.OPENROUTER_API_KEY:
+        raise ValueError("未配置 OPENROUTER_API_KEY，无法使用 OpenRouter Embedding。")
+    client = OpenAI(
+        base_url=settings.OPENROUTER_BASE_URL,
+        api_key=settings.OPENROUTER_API_KEY,
+        timeout=timeout,
+    )
+    if log_callback:
+        log_callback(f"[embedding-openrouter] model={model}, batch={len(texts)}, dims={dimensions}")
+    kwargs = {
+        "model": model,
+        "input": list(texts),
+        "extra_headers": {"HTTP-Referer": "local-debug", "X-Title": "fastapi-llm-demo"},
+    }
+    if dimensions and dimensions > 0:
+        kwargs["dimensions"] = dimensions
+    response = client.embeddings.create(**kwargs)
+    ordered = sorted(response.data, key=lambda item: item.index)
+    return [_l2_normalize(item.embedding) for item in ordered]
+
+
+def resolve_embedding_route(route: Optional[str] = None) -> str:
+    """Prefer google/aistudio for embeddings; fall back to openrouter when needed."""
+    preferred = normalize_gemini_route(route)
+    if preferred in {GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_AISTUDIO}:
+        try:
+            return ensure_gemini_route_configured(preferred)
+        except ValueError:
+            pass
+    if preferred == GEMINI_ROUTE_OPENROUTER:
+        try:
+            return ensure_gemini_route_configured(GEMINI_ROUTE_OPENROUTER)
+        except ValueError:
+            pass
+    for candidate in (GEMINI_ROUTE_AISTUDIO, GEMINI_ROUTE_GOOGLE, GEMINI_ROUTE_OPENROUTER):
+        try:
+            return ensure_gemini_route_configured(candidate)
+        except ValueError:
+            continue
+    raise ValueError("未配置可用的 Embedding 路线（需要 GOOGLE_API_KEY / Vertex / OPENROUTER_API_KEY）。")
+
+
+def embed_texts(
+    texts: Sequence[str],
+    *,
+    model: Optional[str] = None,
+    route: Optional[str] = None,
+    task_type: str = "SEMANTIC_SIMILARITY",
+    dimensions: Optional[int] = None,
+    batch_size: int = 64,
+    timeout: float = DEFAULT_GEMINI_TIMEOUT_SECONDS,
+    log_callback: GeminiLogCallback = None,
+) -> List[List[float]]:
+    """
+    Embed texts with gemini-embedding-001 (or configured model).
+    Returns L2-normalized vectors in the same order as inputs.
+    """
+    cleaned = [str(text or "").strip() or " " for text in texts]
+    if not cleaned:
+        return []
+
+    dims = int(dimensions or DEFAULT_EMBEDDING_DIMENSIONS)
+    normalized_route = resolve_embedding_route(route)
+    raw_model = (model or DEFAULT_EMBEDDING_MODEL).strip() or DEFAULT_EMBEDDING_MODEL
+
+    if log_callback:
+        log_callback(
+            f"[embedding] route={normalized_route}, model={raw_model}, "
+            f"count={len(cleaned)}, dims={dims}, task_type={task_type}"
+        )
+
+    vectors: List[List[float]] = []
+    for start in range(0, len(cleaned), max(1, batch_size)):
+        batch = cleaned[start:start + max(1, batch_size)]
+        if normalized_route == GEMINI_ROUTE_OPENROUTER:
+            openrouter_model = raw_model if "/" in raw_model else f"google/{raw_model}"
+            batch_vectors = _embed_openrouter_batch(
+                texts=batch,
+                model=openrouter_model,
+                dimensions=dims,
+                timeout=timeout,
+                log_callback=log_callback,
+            )
+        else:
+            google_model = normalize_google_model(raw_model)
+            client_factory = (
+                _get_vertex_client if normalized_route == GEMINI_ROUTE_GOOGLE else _get_aistudio_client
+            )
+            client = client_factory(timeout=timeout)
+            batch_vectors = _embed_google_batch(
+                client=client,
+                model=google_model,
+                texts=batch,
+                task_type=task_type,
+                dimensions=dims,
+            )
+        if len(batch_vectors) != len(batch):
+            raise RuntimeError(
+                f"embedding batch size mismatch: got {len(batch_vectors)} for {len(batch)} texts"
+            )
+        vectors.extend(batch_vectors)
+
+    return vectors

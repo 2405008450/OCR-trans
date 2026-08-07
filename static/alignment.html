@@ -553,18 +553,28 @@
                             </div>
                             <select id="targetLang" class="language-native-select" tabindex="-1" aria-hidden="true"></select>
                         </div>
-                        <div class="option-group full-width" style="display:flex;align-items:center;gap:1.5rem;">
+                        <div class="option-group full-width" style="display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap;">
                             <label class="checkbox-inline">
-                                <input type="checkbox" id="enablePostSplit" checked>
-                                <span>启用后处理细粒度分句（中文按 。！？，英文自动排除缩写）</span>
+                                <input type="checkbox" id="enablePostSplit">
+                                <span>启用后处理细粒度分句（中文按 。！？，英文自动排除缩写；向量模式下通常不需要）</span>
                             </label>
+                        </div>
+                        <div class="option-group full-width">
+                            <label><i class="fas fa-vector-square"></i> 对齐模式:</label>
+                            <select id="alignmentModeSelect"></select>
+                            <div class="model-desc" id="alignmentModeDesc"></div>
+                        </div>
+                        <div class="option-group" id="embeddingConfidenceGroup">
+                            <label><i class="fas fa-sliders-h"></i> 向量置信阈值:</label>
+                            <input type="number" id="embeddingConfidence" min="0.2" max="0.95" step="0.05" value="0.55">
+                            <div class="model-desc">低于该阈值的句对会交给 LLM 补齐（仅 hybrid）。Embedding: <span id="embeddingModelLabel">gemini-embedding-001</span></div>
                         </div>
                         <div class="language-summary" id="langHint">
                             <span class="language-route" id="languageRoute">
                                 <i class="fas fa-arrow-right-arrow-left"></i>
                                 <span>正在加载语言配置...</span>
                             </span>
-                            <span class="hint-text" id="langHintText">LLM 对齐后会按源语言再次检查并拆分多句原文键</span>
+                            <span class="hint-text" id="langHintText">默认使用向量匹配保真，低置信片段再由 LLM 补齐</span>
                         </div>
                     </div>
 

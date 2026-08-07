@@ -2807,6 +2807,131 @@ def run_llm_alignment(file_original_path, file_trans_path, output_excel_path, mo
     return True
 
 
+def run_hybrid_alignment(
+    file_original_path,
+    file_trans_path,
+    output_excel_path,
+    model_id,
+    anchor_info_orig=None,
+    anchor_info_trans=None,
+    system_prompt_override=None,
+    source_lang="中文",
+    target_lang="英语",
+    enable_post_split=False,
+    alignment_mode="hybrid",
+    embedding_confidence=0.55,
+    gemini_route=None,
+):
+    """
+    向量主对齐 + 可选 LLM 低置信度回退。
+    alignment_mode:
+      - hybrid: embedding DP + 低置信窗口 LLM
+      - embedding: 仅向量对齐（不做 LLM 回退；最终覆盖校验仍可补漏）
+    """
+    from app.service.embedding_alignment import align_bitext_with_embeddings
+    from app.service.gemini_service import (
+        DEFAULT_EMBEDDING_DIMENSIONS,
+        DEFAULT_EMBEDDING_MODEL,
+        embed_texts,
+    )
+
+    filename = os.path.basename(file_original_path)
+    mode = (alignment_mode or "hybrid").strip().lower()
+    use_llm_fallback = mode != "embedding"
+    log_manager.log(f"正在向量对齐: {filename} (mode={mode})")
+    log_manager.log(f"语言对: {source_lang} → {target_lang}")
+    log_manager.log(f"Embedding 置信阈值: {embedding_confidence}")
+    log_manager.log(f"LLM 低置信回退: {'启用' if use_llm_fallback else '禁用'}")
+
+    text_original = read_file_content(file_original_path)
+    text_trans = read_file_content(file_trans_path)
+    if not text_original or not text_trans:
+        log_manager.log_exception("内容为空，跳过文件", f"原文: {file_original_path}")
+        return False
+
+    if system_prompt_override:
+        system_prompt = system_prompt_override
+    else:
+        system_prompt = get_docx_alignment_prompt(source_lang, target_lang)
+
+    anchor_hint = ""
+    if anchor_info_orig and anchor_info_trans:
+        anchor_hint = f"""
+## 上下文提示
+这是文档的一个片段：
+- 原文开头: "{anchor_info_orig.get('first_anchor', '')[:100]}"
+- 译文开头: "{anchor_info_trans.get('first_anchor', '')[:100]}"
+"""
+
+    embedding_route = gemini_route or get_gemini_route()
+
+    def _embed_fn(texts):
+        return embed_texts(
+            texts,
+            model=DEFAULT_EMBEDDING_MODEL,
+            route=embedding_route,
+            dimensions=DEFAULT_EMBEDDING_DIMENSIONS,
+            task_type="SEMANTIC_SIMILARITY",
+            log_callback=log_manager.log,
+        )
+
+    def _llm_align_fn(src_block, tgt_block):
+        user_prompt = build_alignment_user_prompt(anchor_hint, src_block, tgt_block)
+        response = call_llm_stream(system_prompt, user_prompt, model_id, filename)
+        return parse_alignment_response(response)
+
+    data = align_bitext_with_embeddings(
+        text_original,
+        text_trans,
+        embed_fn=_embed_fn,
+        llm_align_fn=_llm_align_fn if use_llm_fallback else None,
+        confidence_threshold=float(embedding_confidence),
+        use_llm_fallback=use_llm_fallback,
+        log_fn=log_manager.log,
+    )
+
+    if not data:
+        log_manager.log_exception("向量对齐结果为空，文件处理失败")
+        return False
+
+    # 向量路径已按句切分；默认不再二次 AI 后处理分句，避免再次改写风险
+    if enable_post_split:
+        log_manager.log("检查是否需要后处理分句...")
+        data = post_process_sentence_split(
+            data, model_id, source_lang, target_lang, enable_ai_split=True
+        )
+
+    data, _ = validate_alignment_coverage_only(
+        data,
+        text_original,
+        text_trans,
+        report_path=_coverage_report_path(output_excel_path),
+        phase="分片覆盖校验",
+    )
+    if not data:
+        log_manager.log_exception("覆盖校验后无有效结果，文件处理失败")
+        return False
+
+    df = pd.DataFrame(data)
+    log_manager.log("执行质量检查...")
+    issues = AlignmentChecker.full_check(df, source_lang, target_lang)
+    if issues:
+        log_manager.log_exception(f"发现 {len(issues)} 个潜在问题（仅警告）")
+        for issue in issues[:10]:
+            orig_text = issue.get("original_text", "")
+            orig_preview = orig_text[:80] if orig_text else ""
+            log_manager.log_exception(
+                f"行 {issue.get('row', '?')}: {issue.get('type', '')} - {issue.get('detail', '')}",
+                f"原文: {orig_preview}...",
+            )
+        issue_path = output_excel_path.replace(".xlsx", "_问题报告.xlsx")
+        save_issues_report(issues, issue_path)
+
+    df.to_excel(output_excel_path, index=False)
+    log_manager.log(f"✅ 已保存: {output_excel_path}（{len(df)} 行，mode={mode}）")
+    return True
+
+
 def needs_sentence_split(orig_text, trans_text, source_lang="中文"):
     """判断是否需要分句 - 根据原文语言检测相应的句末标点"""
     source_is_cjk = is_cjk_source_lang(source_lang)

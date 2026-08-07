@@ -821,18 +821,82 @@ async def update_zhongfanyi_rule(body: RuleUpdateBody):
 
 @router.get("/alignment/config")
 async def get_alignment_config():
-    from app.service.alignment_service import AVAILABLE_MODELS as ALIGNMENT_MODELS, BUFFER_CHARS, SUPPORTED_LANGUAGES, THRESHOLD_MAP
-    return {"models": {name: {"description": info["description"], "id": info["id"], "max_output": info["max_output"], "max_output_display": info.get("max_output_display")} for name, info in ALIGNMENT_MODELS.items()}, "routes": get_gemini_routes(), "default_route": "openrouter", "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()}, "thresholds": THRESHOLD_MAP, "buffer_chars": BUFFER_CHARS}
+    from app.service.alignment_service import (
+        ALIGNMENT_MODES,
+        AVAILABLE_MODELS as ALIGNMENT_MODELS,
+        BUFFER_CHARS,
+        DEFAULT_ALIGNMENT_MODE,
+        DEFAULT_EMBEDDING_CONFIDENCE,
+        SUPPORTED_LANGUAGES,
+        THRESHOLD_MAP,
+    )
+    from app.service.gemini_service import DEFAULT_EMBEDDING_MODEL
+    return {
+        "models": {
+            name: {
+                "description": info["description"],
+                "id": info["id"],
+                "max_output": info["max_output"],
+                "max_output_display": info.get("max_output_display"),
+            }
+            for name, info in ALIGNMENT_MODELS.items()
+        },
+        "routes": get_gemini_routes(),
+        "default_route": "openrouter",
+        "languages": {k: v["description"] for k, v in SUPPORTED_LANGUAGES.items()},
+        "thresholds": THRESHOLD_MAP,
+        "buffer_chars": BUFFER_CHARS,
+        "alignment_modes": ALIGNMENT_MODES,
+        "default_alignment_mode": DEFAULT_ALIGNMENT_MODE,
+        "embedding_model": DEFAULT_EMBEDDING_MODEL,
+        "default_embedding_confidence": DEFAULT_EMBEDDING_CONFIDENCE,
+    }
 
 
 @router.post("/alignment")
-async def run_alignment(original_file: UploadFile = File(...), translated_file: UploadFile = File(...), source_lang: str = Query("zh"), target_lang: str = Query("en"), model_name: str = Query("Google gemini-3-flash-preview"), gemini_route: str = Query("openrouter"), enable_post_split: bool = Query(True), threshold_2: int = Query(25000), threshold_3: int = Query(50000), threshold_4: int = Query(75000), threshold_5: int = Query(100000), threshold_6: int = Query(125000), threshold_7: int = Query(150000), threshold_8: int = Query(175000), buffer_chars: int = Query(2000)):
+async def run_alignment(
+    original_file: UploadFile = File(...),
+    translated_file: UploadFile = File(...),
+    source_lang: str = Query("zh"),
+    target_lang: str = Query("en"),
+    model_name: str = Query("Google gemini-3-flash-preview"),
+    gemini_route: str = Query("openrouter"),
+    enable_post_split: bool = Query(True),
+    alignment_mode: str = Query("hybrid"),
+    embedding_confidence: float = Query(0.55),
+    threshold_2: int = Query(25000),
+    threshold_3: int = Query(50000),
+    threshold_4: int = Query(75000),
+    threshold_5: int = Query(100000),
+    threshold_6: int = Query(125000),
+    threshold_7: int = Query(150000),
+    threshold_8: int = Query(175000),
+    buffer_chars: int = Query(2000),
+):
     allowed_ext = {".docx", ".doc", ".pptx", ".xlsx", ".xls"}
     if os.path.splitext(original_file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported original file format")
     if os.path.splitext(translated_file.filename or "")[1].lower() not in allowed_ext:
         raise HTTPException(status_code=400, detail="Unsupported translated file format")
-    submit_result = await task_queue_service.submit_alignment_task(original_file=original_file, translated_file=translated_file, source_lang=source_lang, target_lang=target_lang, model_name=model_name, gemini_route=gemini_route, enable_post_split=enable_post_split, threshold_2=threshold_2, threshold_3=threshold_3, threshold_4=threshold_4, threshold_5=threshold_5, threshold_6=threshold_6, threshold_7=threshold_7, threshold_8=threshold_8, buffer_chars=buffer_chars)
+    submit_result = await task_queue_service.submit_alignment_task(
+        original_file=original_file,
+        translated_file=translated_file,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        model_name=model_name,
+        gemini_route=gemini_route,
+        enable_post_split=enable_post_split,
+        alignment_mode=alignment_mode,
+        embedding_confidence=embedding_confidence,
+        threshold_2=threshold_2,
+        threshold_3=threshold_3,
+        threshold_4=threshold_4,
+        threshold_5=threshold_5,
+        threshold_6=threshold_6,
+        threshold_7=threshold_7,
+        threshold_8=threshold_8,
+        buffer_chars=buffer_chars,
+    )
     return {"status": "ACCEPTED", "task_id": submit_result.task_id, "message": "Task submitted", "deduped": submit_result.deduped}
 
 

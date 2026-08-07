@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     GEMINI_DEFAULT_ROUTE: str = os.getenv("GEMINI_DEFAULT_ROUTE", "openrouter")
     GEMINI_ENABLE_OPENROUTER_FALLBACK: str = os.getenv("GEMINI_ENABLE_OPENROUTER_FALLBACK", "False")
     GEMINI_TIMEOUT_SECONDS: float = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "120"))
+    GEMINI_EMBEDDING_MODEL: str = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+    GEMINI_EMBEDDING_DIMENSIONS: int = int(os.getenv("GEMINI_EMBEDDING_DIMENSIONS", "768"))
+    ALIGNMENT_DEFAULT_MODE: str = os.getenv("ALIGNMENT_DEFAULT_MODE", "hybrid")
+    ALIGNMENT_EMBEDDING_CONFIDENCE: float = float(os.getenv("ALIGNMENT_EMBEDDING_CONFIDENCE", "0.55"))
 
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", "gen-lang-client-0128671098")
     VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "global")

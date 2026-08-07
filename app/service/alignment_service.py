@@ -29,6 +29,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from app.core.config import settings
 from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import (
+    DEFAULT_EMBEDDING_MODEL,
     DEFAULT_GEMINI_TIMEOUT_SECONDS,
     ensure_gemini_route_configured,
     generate_text,
@@ -39,6 +40,26 @@ from app.service.libreoffice_service import convert_doc_to_docx_via_libreoffice
 ROW_BUCKET = 20_000
 _gemini_route_local = threading.local()
 
+ALIGNMENT_MODES = {
+    "hybrid": {
+        "label": "向量 + LLM（推荐）",
+        "description": "用 gemini-embedding-001 做句级匹配保真，低置信片段再由 LLM 补齐。",
+    },
+    "embedding": {
+        "label": "仅向量对齐",
+        "description": "全程向量相似度对齐，不做 LLM 改写；复杂错位依赖后续覆盖补漏。",
+    },
+    "llm": {
+        "label": "仅 LLM（原模式）",
+        "description": "沿用原有大模型双流对齐，适合结构极复杂或向量效果不佳的文档。",
+    },
+}
+DEFAULT_ALIGNMENT_MODE = (
+    settings.ALIGNMENT_DEFAULT_MODE
+    if settings.ALIGNMENT_DEFAULT_MODE in ALIGNMENT_MODES
+    else "hybrid"
+)
+DEFAULT_EMBEDDING_CONFIDENCE = float(settings.ALIGNMENT_EMBEDDING_CONFIDENCE or 0.55)
 
 def _set_current_gemini_route(route: str) -> None:
     _gemini_route_local.route = route
@@ -1689,12 +1710,18 @@ def _run_alignment_sync(
     buffer_chars: int = 2000,
     original_filename: Optional[str] = None,
     translated_filename: Optional[str] = None,
+    alignment_mode: str = DEFAULT_ALIGNMENT_MODE,
+    embedding_confidence: float = DEFAULT_EMBEDDING_CONFIDENCE,
 ):
     """同步执行对齐任务 - 线程安全版，支持多任务并发"""
     try:
         _update_progress(task_id, 5, "正在加载处理引擎...", stream_log="")
         model_info = AVAILABLE_MODELS.get(model_name, AVAILABLE_MODELS[DEFAULT_MODEL])
         model_id = model_info['id']
+        mode = (alignment_mode or DEFAULT_ALIGNMENT_MODE).strip().lower()
+        if mode not in ALIGNMENT_MODES:
+            mode = DEFAULT_ALIGNMENT_MODE
+        conf = float(embedding_confidence if embedding_confidence is not None else DEFAULT_EMBEDDING_CONFIDENCE)
         if _is_deepseek_alignment_model(model_id):
             if not settings.DEEPSEEK_API_KEY:
                 raise ValueError("未配置 DEEPSEEK_API_KEY，无法使用 DeepSeek-V4-Pro")
@@ -1732,7 +1759,11 @@ def _run_alignment_sync(
         print(f"[alignment] translated={translated_path}, exists={os.path.exists(translated_path)}, size={os.path.getsize(translated_path) if os.path.exists(translated_path) else 'N/A'}")
         print(f"[alignment] file_type={file_type}, model={model_name} ({model_id})")
         print(f"[alignment] lang: {source_lang} → {target_lang}")
+        print(f"[alignment] mode={mode}, embedding_confidence={conf}")
         _log(f"语言对: {source_lang} → {target_lang}")
+        _log(f"对齐模式: {ALIGNMENT_MODES[mode]['label']} ({mode})")
+        if mode in {"hybrid", "embedding"}:
+            _log(f"Embedding 模型: {DEFAULT_EMBEDDING_MODEL}，置信阈值: {conf}")
         _log(f"后处理分句: {'启用' if enable_post_split else '禁用'}")
         _log(f"LLM 通道: {'DeepSeek API' if runtime_route == 'deepseek' else f'Gemini {runtime_route}'}")
         _log(f"模型: {model_name} ({model_id})")
@@ -1845,8 +1876,9 @@ def _run_alignment_sync(
                 'system_prompt_override': ppt_prompt,
             })
 
-        # ── AI 对齐 ──
-        _update_progress(task_id, 30, f"AI 对齐中（共 {len(tasks_queue)} 个任务）...")
+            # ── AI 对齐 ──
+        align_label = "向量对齐" if mode in {"hybrid", "embedding"} else "AI 对齐"
+        _update_progress(task_id, 30, f"{align_label}中（共 {len(tasks_queue)} 个任务）...")
         _log(f"待处理任务数: {len(tasks_queue)}")
         progress_per_task = 50 / len(tasks_queue) if tasks_queue else 50
         stop_following_tasks = False
@@ -1857,7 +1889,7 @@ def _run_alignment_sync(
                 break
             progress = 30 + int((idx + 1) * progress_per_task)
             _update_progress(task_id, progress,
-                             f"AI 对齐中 ({idx + 1}/{len(tasks_queue)})...")
+                             f"{align_label}中 ({idx + 1}/{len(tasks_queue)})...")
 
             _log(f"处理任务 {idx + 1}/{len(tasks_queue)}: {os.path.basename(task['output'])}")
             print(f"[alignment] 处理任务 {idx + 1}/{len(tasks_queue)}")
@@ -1893,18 +1925,35 @@ def _run_alignment_sync(
                     )
 
                 memory_module.set_gemini_route(runtime_route)
-                success = memory_module.run_llm_alignment(
-                    task['original'],
-                    task['trans'],
-                    task['output'],
-                    model_id,
-                    anchor_info_orig=task.get('anchor_orig'),
-                    anchor_info_trans=task.get('anchor_trans'),
-                    system_prompt_override=task.get('system_prompt_override'),
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    enable_post_split=enable_post_split,
-                )
+                if mode in {"hybrid", "embedding"}:
+                    success = memory_module.run_hybrid_alignment(
+                        task['original'],
+                        task['trans'],
+                        task['output'],
+                        model_id,
+                        anchor_info_orig=task.get('anchor_orig'),
+                        anchor_info_trans=task.get('anchor_trans'),
+                        system_prompt_override=task.get('system_prompt_override'),
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                        enable_post_split=enable_post_split,
+                        alignment_mode=mode,
+                        embedding_confidence=conf,
+                        gemini_route=runtime_route if runtime_route != "deepseek" else "openrouter",
+                    )
+                else:
+                    success = memory_module.run_llm_alignment(
+                        task['original'],
+                        task['trans'],
+                        task['output'],
+                        model_id,
+                        anchor_info_orig=task.get('anchor_orig'),
+                        anchor_info_trans=task.get('anchor_trans'),
+                        system_prompt_override=task.get('system_prompt_override'),
+                        source_lang=source_lang,
+                        target_lang=target_lang,
+                        enable_post_split=enable_post_split,
+                    )
 
                 if success and os.path.exists(task['output']):
                     break
@@ -2002,6 +2051,8 @@ def _run_alignment_sync(
                 "row_count": row_count,
                 "file_type": file_type,
                 "gemini_route": runtime_route,
+                "alignment_mode": mode,
+                "embedding_confidence": conf,
                 "split_parts": split_parts,
                 "issues": issues[:10] if issues else [],
                 "intermediate_files": _list_intermediate_files(temp_dir),
@@ -2042,6 +2093,8 @@ async def run_alignment_task(
     buffer_chars: int = 2000,
     original_filename: Optional[str] = None,
     translated_filename: Optional[str] = None,
+    alignment_mode: str = DEFAULT_ALIGNMENT_MODE,
+    embedding_confidence: float = DEFAULT_EMBEDDING_CONFIDENCE,
     executor: Optional[Executor] = None,
 ):
     """在后台线程池中执行对齐任务"""
@@ -2058,5 +2111,6 @@ async def run_alignment_task(
             threshold_6=threshold_6, threshold_7=threshold_7,
             threshold_8=threshold_8, buffer_chars=buffer_chars,
             original_filename=original_filename, translated_filename=translated_filename,
+            alignment_mode=alignment_mode, embedding_confidence=embedding_confidence,
         ),
     )

@@ -9,6 +9,11 @@ const modelDesc = document.getElementById('modelDesc');
 const modelIdDisplay = document.getElementById('modelIdDisplay');
 const modelMaxOutput = document.getElementById('modelMaxOutput');
 const enablePostSplit = document.getElementById('enablePostSplit');
+const alignmentModeSelect = document.getElementById('alignmentModeSelect');
+const alignmentModeDesc = document.getElementById('alignmentModeDesc');
+const embeddingConfidenceInput = document.getElementById('embeddingConfidence');
+const embeddingConfidenceGroup = document.getElementById('embeddingConfidenceGroup');
+const embeddingModelLabel = document.getElementById('embeddingModelLabel');
 const btnStart = document.getElementById('btnStart');
 const btnReset = document.getElementById('btnReset');
 const origFileLabel = document.getElementById('origFileLabel');
@@ -211,8 +216,58 @@ function populateSelects() {
     });
     geminiRouteSelect.value = routes[defaultRoute] ? defaultRoute : Object.keys(routes)[0];
     updateRouteInfo();
+    populateAlignmentModes();
     updateModelInfo();
     updateLangLabels();
+}
+
+function populateAlignmentModes() {
+    const modes = configData?.alignment_modes || {
+        hybrid: { label: '向量 + LLM（推荐）', description: '用向量匹配保真，低置信片段再由 LLM 补齐。' },
+        embedding: { label: '仅向量对齐', description: '全程向量相似度对齐，不做 LLM 改写。' },
+        llm: { label: '仅 LLM（原模式）', description: '沿用原有大模型双流对齐。' },
+    };
+    const defaultMode = configData?.default_alignment_mode || 'hybrid';
+    alignmentModeSelect.innerHTML = '';
+    Object.entries(modes).forEach(([value, info]) => {
+        alignmentModeSelect.add(new Option(info.label || value, value));
+    });
+    alignmentModeSelect.value = modes[defaultMode] ? defaultMode : Object.keys(modes)[0];
+    if (embeddingConfidenceInput && configData?.default_embedding_confidence != null) {
+        embeddingConfidenceInput.value = configData.default_embedding_confidence;
+    }
+    if (embeddingModelLabel) {
+        embeddingModelLabel.textContent = configData?.embedding_model || 'gemini-embedding-001';
+    }
+    updateAlignmentModeInfo();
+}
+
+function updateAlignmentModeInfo() {
+    const modes = configData?.alignment_modes || {};
+    const mode = alignmentModeSelect?.value || 'hybrid';
+    const info = modes[mode] || {};
+    if (alignmentModeDesc) {
+        alignmentModeDesc.textContent = info.description || '';
+    }
+    if (embeddingConfidenceGroup) {
+        embeddingConfidenceGroup.style.display = (mode === 'llm') ? 'none' : 'block';
+    }
+    // 向量路径已按句切分；默认关闭二次 AI 分句，降低改写风险
+    if (enablePostSplit && !enablePostSplit.dataset.userTouched) {
+        enablePostSplit.checked = (mode === 'llm');
+    }
+    const src = sourceLangSelect?.value || '';
+    const tgt = targetLangSelect?.value || '';
+    const pair = (src && tgt) ? `${src} → ${tgt}；` : '';
+    if (langHintText) {
+        if (mode === 'embedding') {
+            langHintText.textContent = `${pair}全程向量句级匹配，输出直接来自原文/译文切片，避免 LLM 微调改写`;
+        } else if (mode === 'llm') {
+            langHintText.textContent = `${pair}LLM 对齐后会按源语言再次检查并拆分多句原文键`;
+        } else {
+            langHintText.textContent = `${pair}向量匹配保真；低置信片段再由 LLM 补齐`;
+        }
+    }
 }
 
 function populateThresholds() {
@@ -251,6 +306,7 @@ function populateDefaults() {
     geminiRouteSelect.innerHTML = '<option value="google">\u7ebf\u8def1</option><option value="openrouter">\u7ebf\u8def2</option>';
     geminiRouteSelect.value = "openrouter";
     updateRouteInfo();
+    populateAlignmentModes();
     updateModelInfo();
     updateLangLabels();
 }
@@ -280,7 +336,10 @@ function updateLangLabels() {
     if (languageRoute) {
         languageRoute.innerHTML = `<i class="fas fa-arrow-right-arrow-left"></i><span>${escapeLanguageHtml(src)} <b>→</b> ${escapeLanguageHtml(tgt)}</span>`;
     }
-    langHintText.textContent = `${srcDesc} → ${tgtDesc}；LLM 对齐后会按源语言再次检查并拆分多句原文键`;
+    updateAlignmentModeInfo();
+    if (langHintText && !alignmentModeSelect) {
+        langHintText.textContent = `${srcDesc} → ${tgtDesc}；向量匹配保真，低置信片段再由 LLM 补齐`;
+    }
     updateLanguagePickerTrigger(sourceLangPicker, sourceLangSelect);
     updateLanguagePickerTrigger(targetLangPicker, targetLangSelect);
 }
@@ -455,6 +514,10 @@ function renderStreamLog(logText) {
 
 modelSelect.addEventListener('change', updateModelInfo);
 geminiRouteSelect?.addEventListener('change', updateRouteInfo);
+alignmentModeSelect?.addEventListener('change', updateAlignmentModeInfo);
+enablePostSplit?.addEventListener('change', () => {
+    if (enablePostSplit) enablePostSplit.dataset.userTouched = '1';
+});
 sourceLangSelect.addEventListener('change', updateLangLabels);
 targetLangSelect.addEventListener('change', updateLangLabels);
 setupLanguagePicker(sourceLangPicker, sourceLangSelect, targetLangSelect);
@@ -520,6 +583,8 @@ async function startAlignment() {
             model_name: modelSelect.value,
             gemini_route: geminiRouteSelect?.value || (configData?.default_route || 'openrouter'),
             enable_post_split: enablePostSplit.checked,
+            alignment_mode: alignmentModeSelect?.value || (configData?.default_alignment_mode || 'hybrid'),
+            embedding_confidence: embeddingConfidenceInput?.value || (configData?.default_embedding_confidence || 0.55),
             threshold_2: document.getElementById('threshold2').value,
             threshold_3: document.getElementById('threshold3').value,
             threshold_4: document.getElementById('threshold4').value,

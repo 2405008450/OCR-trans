@@ -472,9 +472,9 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
-    async def submit_alignment_task(self, *, original_file: UploadFile, translated_file: UploadFile, source_lang: str, target_lang: str, model_name: str, gemini_route: str, enable_post_split: bool, threshold_2: int, threshold_3: int, threshold_4: int, threshold_5: int, threshold_6: int, threshold_7: int, threshold_8: int, buffer_chars: int) -> TaskSubmitResult:
+    async def submit_alignment_task(self, *, original_file: UploadFile, translated_file: UploadFile, source_lang: str, target_lang: str, model_name: str, gemini_route: str, enable_post_split: bool, threshold_2: int, threshold_3: int, threshold_4: int, threshold_5: int, threshold_6: int, threshold_7: int, threshold_8: int, buffer_chars: int, alignment_mode: str = 'hybrid', embedding_confidence: float = 0.55) -> TaskSubmitResult:
         display_name = f'{original_file.filename} | {translated_file.filename}'
-        params = {'source_lang': source_lang, 'target_lang': target_lang, 'model_name': model_name, 'gemini_route': gemini_route, 'enable_post_split': enable_post_split, 'threshold_2': threshold_2, 'threshold_3': threshold_3, 'threshold_4': threshold_4, 'threshold_5': threshold_5, 'threshold_6': threshold_6, 'threshold_7': threshold_7, 'threshold_8': threshold_8, 'buffer_chars': buffer_chars}
+        params = {'source_lang': source_lang, 'target_lang': target_lang, 'model_name': model_name, 'gemini_route': gemini_route, 'enable_post_split': enable_post_split, 'alignment_mode': alignment_mode, 'embedding_confidence': embedding_confidence, 'threshold_2': threshold_2, 'threshold_3': threshold_3, 'threshold_4': threshold_4, 'threshold_5': threshold_5, 'threshold_6': threshold_6, 'threshold_7': threshold_7, 'threshold_8': threshold_8, 'buffer_chars': buffer_chars}
         staged_uploads = await self._stage_uploads(
             'alignment',
             [('original', original_file, 'original.docx'), ('translated', translated_file, 'translated.docx')],
