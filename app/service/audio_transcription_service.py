@@ -47,6 +47,13 @@ class AudioTranscriptionError(RuntimeError):
     pass
 
 
+def _create_dashscope_session() -> requests.Session:
+    """创建仅供音频转写使用的直连会话，不读取系统代理环境变量。"""
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
+
 def get_audio_transcription_config() -> dict[str, Any]:
     return {
         "model": AUDIO_TRANSCRIPTION_MODEL,
@@ -486,7 +493,9 @@ def _run_audio_transcription(*, display_no: str, input_path: str, original_filen
     timeout = max(30, settings.AUDIO_TRANSCRIPTION_TIMEOUT_SECONDS)
     if log_callback:
         log_callback("[audio-transcription] 上传完整原始音频，不分块、不强制降噪")
-    with requests.Session() as session:
+    # DashScope 会返回额外的 OSS 上传及结果下载地址；整条链路均使用直连，
+    # 避免 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 导致 TLS 握手被中途关闭。
+    with _create_dashscope_session() as session:
         file_url = _upload_temporary_file(session, source_path, timeout)
         task_id = _submit_task(
             session,

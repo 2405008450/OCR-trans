@@ -32,6 +32,11 @@ def test_audio_transcription_filename_and_options() -> None:
         normalize_audio_transcription_options(language="xx", enable_itn=False)
 
 
+def test_dashscope_session_ignores_environment_proxy() -> None:
+    with service._create_dashscope_session() as session:
+        assert session.trust_env is False
+
+
 def test_normalize_and_write_all_timeline_outputs(tmp_path: Path) -> None:
     raw = {
         "audio_info": {"format": "wav", "sample_rate": 16000},
