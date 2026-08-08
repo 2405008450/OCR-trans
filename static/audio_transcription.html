@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频转写</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .transcribe-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:22px}
+        .transcribe-card{background:var(--card-bg,#fff);border:1px solid var(--border-color,#e5e7eb);border-radius:18px;padding:22px;box-shadow:0 10px 30px rgba(15,23,42,.06)}
+        .transcribe-card h2{margin:0 0 8px;font-size:20px}.muted{color:var(--text-secondary,#64748b);font-size:13px;line-height:1.65}
+        .drop-zone{border:2px dashed #94a3b8;border-radius:16px;padding:30px 20px;text-align:center;cursor:pointer;transition:.2s;background:rgba(14,165,233,.04)}
+        .drop-zone:hover,.drop-zone.dragging{border-color:#0ea5e9;background:rgba(14,165,233,.09)}.drop-zone>i{display:block;font-size:36px;color:#0ea5e9;margin-bottom:10px}
+        .file-summary{display:none;margin-top:14px;padding:12px 14px;border-radius:12px;background:rgba(15,23,42,.05)}.file-summary strong{display:block;word-break:break-all}
+        #audioPreview{display:none;width:100%;margin-top:12px}.field{margin-top:16px}.field label{display:block;margin-bottom:7px;font-size:13px;font-weight:700;color:var(--text-primary,#334155)}
+        .field select{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;background:#fff;color:#0f172a;font:inherit}
+        .switch-row{display:flex;align-items:flex-start;gap:10px;margin-top:18px;padding:13px;border:1px solid #dbeafe;border-radius:12px;background:#eff6ff}.switch-row input{margin-top:3px}
+        .flow-list{display:grid;gap:12px;margin-top:18px}.flow-item{display:grid;grid-template-columns:34px 1fr;gap:11px;align-items:start}.flow-index{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:800}
+        .flow-item strong{display:block;margin:2px 0 3px;color:#0f172a}.actions{display:flex;gap:12px;margin-top:20px}.actions button{flex:1}
+        .progress-panel,.result-panel{display:none;margin-top:22px}.progress-track{height:12px;overflow:hidden;border-radius:999px;background:#e2e8f0;margin:14px 0 8px}.progress-fill{width:0;height:100%;background:linear-gradient(90deg,#06b6d4,#2563eb);transition:width .3s}.status-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#64748b}
+        .error-box{display:none;margin-top:16px;padding:13px 15px;border-radius:12px;background:#fff1f2;color:#be123c;border:1px solid #fecdd3;white-space:pre-wrap}.result-meta{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px}.result-meta span{padding:5px 10px;border-radius:999px;background:#e0f2fe;color:#075985;font-size:12px;font-weight:700}
+        .download-grid{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.download-link{display:inline-flex;align-items:center;gap:7px;text-decoration:none;padding:9px 13px;border-radius:10px;background:#0f766e;color:#fff;font-size:13px;font-weight:700}.download-link.primary{background:#2563eb}
+        .transcript-view{max-height:520px;overflow:auto;padding:18px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;color:#1e293b;white-space:pre-wrap;line-height:1.8}.timeline-view{display:grid;gap:8px;margin-top:16px;max-height:520px;overflow:auto}.timeline-row{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0}.timeline-time{font-variant-numeric:tabular-nums;color:#0369a1;font-size:12px;font-weight:700}
+        @media(max-width:900px){.transcribe-grid{grid-template-columns:1fr}}@media(max-width:560px){.timeline-row{grid-template-columns:1fr}.actions{flex-direction:column}}
+    </style>
+</head>
+<body>
+<div class="container">
+    <header class="header">
+        <div class="logo"><i class="fas fa-closed-captioning"></i><h1>音频转写</h1></div>
+        <p class="subtitle">使用 Qwen 将常规音频整段转换为带时间轴文本、字幕和逐词时间戳</p>
+    </header>
+    <main class="main-content">
+        <div class="transcribe-grid">
+            <section class="transcribe-card">
+                <h2>上传音频</h2>
+                <p class="muted" id="formatHint">正在读取支持格式……</p>
+                <div class="drop-zone" id="dropZone" tabindex="0">
+                    <i class="fas fa-cloud-arrow-up"></i>
+                    <strong>点击选择或拖入一个音频文件</strong>
+                    <div class="muted">三至四分钟音频直接整段处理，不会分块</div>
+                    <input id="audioFile" type="file" hidden>
+                </div>
+                <div class="file-summary" id="fileSummary"><strong id="fileName"></strong><span class="muted" id="fileMeta"></span></div>
+                <audio id="audioPreview" controls preload="metadata"></audio>
+                <div class="field"><label for="languageSelect"><i class="fas fa-language"></i> 音频语言</label><select id="languageSelect"></select><div class="muted">已知语言时建议明确选择，可减少近音误判。</div></div>
+                <label class="switch-row"><input id="enableItn" type="checkbox" checked><span><strong>启用文本规范化（ITN）</strong><br><span class="muted">将中文、英文中的口述数字、日期等转换为更易读形式。</span></span></label>
+                <div class="actions"><button class="btn-secondary" id="cancelTask" type="button" style="display:none"><i class="fas fa-ban"></i> 取消任务</button><button class="btn-primary" id="runTranscription" type="button" disabled><i class="fas fa-play"></i> 开始转写</button></div>
+                <div class="error-box" id="errorBox"></div>
+                <div class="progress-panel" id="progressPanel"><strong id="progressTitle">正在提交任务……</strong><div class="progress-track"><div class="progress-fill" id="progressFill"></div></div><div class="status-row"><span id="progressMessage">初始化</span><span id="progressPercent">0%</span></div></div>
+            </section>
+            <section class="transcribe-card">
+                <h2>处理说明</h2>
+                <p class="muted">常规清晰语音不会强制降噪，避免预处理损伤辅音和人名。</p>
+                <div class="flow-list">
+                    <div class="flow-item"><div class="flow-index">1</div><div><strong>完整上传</strong><span class="muted">保留原始编码，上传到阿里云临时存储。</span></div></div>
+                    <div class="flow-item"><div class="flow-index">2</div><div><strong>异步识别</strong><span class="muted">Qwen FileTrans 生成句级和逐词时间戳。</span></div></div>
+                    <div class="flow-item"><div class="flow-index">3</div><div><strong>智能时间线</strong><span class="muted">依据逐词时间戳、停顿、标点与字幕时长重新切段。</span></div></div>
+                    <div class="flow-item"><div class="flow-index">4</div><div><strong>多格式导出</strong><span class="muted">生成 TXT、SRT、VTT、TSV、JSON 和 ZIP。</span></div></div>
+                </div>
+                <div class="switch-row"><i class="fas fa-circle-info" style="color:#0284c7;margin-top:2px"></i><span class="muted">此板块面向会议、访谈、讲解等常规语音。歌曲或强背景音乐建议先做人声分离与降噪。</span></div>
+            </section>
+        </div>
+        <section class="transcribe-card result-panel" id="resultPanel">
+            <h2><i class="fas fa-circle-check" style="color:#16a34a"></i> 转写完成</h2>
+            <div class="result-meta" id="resultMeta"></div>
+            <div class="download-grid" id="downloadGrid"></div>
+            <h3>纯文本预览</h3><div class="transcript-view" id="transcriptView"></div>
+            <h3>时间轴预览</h3><div class="timeline-view" id="timelineView"></div>
+        </section>
+    </main>
+</div>
+<script src="/static/audio_transcription.js"></script>
+<script src="/static/header.js"></script>
+</body>
+</html>

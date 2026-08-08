@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 
+    DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
+    DASHSCOPE_BASE_URL: str = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/api/v1")
+    AUDIO_TRANSCRIPTION_MAX_MB: int = int(os.getenv("AUDIO_TRANSCRIPTION_MAX_MB", "200"))
+    AUDIO_TRANSCRIPTION_TIMEOUT_SECONDS: int = int(os.getenv("AUDIO_TRANSCRIPTION_TIMEOUT_SECONDS", "60"))
+    AUDIO_TRANSCRIPTION_MAX_WAIT_SECONDS: int = int(os.getenv("AUDIO_TRANSCRIPTION_MAX_WAIT_SECONDS", "7200"))
+    AUDIO_TRANSCRIPTION_POLL_INTERVAL_SECONDS: float = float(os.getenv("AUDIO_TRANSCRIPTION_POLL_INTERVAL_SECONDS", "2"))
+
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8001"))
     DEBUG: str = os.getenv("DEBUG", "False")

@@ -22,6 +22,7 @@ TASK_TYPE_LABELS = {
     'pdf_tools': 'PDF 工具箱',
     'file_rename': '文件名整理',
     'audio_check': '音频质量检查',
+    'audio_transcription': '音频转写',
 }
 
 

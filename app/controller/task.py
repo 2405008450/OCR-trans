@@ -29,6 +29,11 @@ from app.service.audio_check_service import (
     normalize_audio_check_options,
     validate_audio_filename,
 )
+from app.service.audio_transcription_service import (
+    get_audio_transcription_config,
+    normalize_audio_transcription_options,
+    validate_audio_transcription_filename,
+)
 from app.service.business_licence_service import (
     BUSINESS_LICENCE_DEFAULT_MODEL,
     BUSINESS_LICENCE_DEFAULT_ROUTE,
@@ -671,6 +676,46 @@ async def get_audio_check_module_config():
     preferred = settings.GEMINI_DEFAULT_ROUTE
     config["default_route"] = preferred if preferred in configured_routes else next(iter(configured_routes), preferred)
     return config
+
+
+@router.get("/audio-transcription/config")
+async def get_audio_transcription_module_config():
+    return get_audio_transcription_config()
+
+
+@router.post("/audio-transcription")
+async def run_audio_transcription(
+    file: UploadFile = File(...),
+    language: str = Form("auto"),
+    enable_itn: bool = Form(True),
+):
+    try:
+        validate_audio_transcription_filename(file.filename or "")
+        content_type = (file.content_type or "").lower()
+        if content_type and content_type != "application/octet-stream" and not (
+            content_type.startswith("audio/") or content_type.startswith("video/")
+        ):
+            raise ValueError("上传内容不是音频文件")
+        params = normalize_audio_transcription_options(language=language, enable_itn=enable_itn)
+        submit_result = await task_queue_service.submit_audio_transcription_task(file=file, params=params)
+    except UploadSizeLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.get("/audio-transcription/status/{task_id}")
+async def get_audio_transcription_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue_task
 
 
 @router.post("/audio-check")

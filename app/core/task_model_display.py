@@ -10,6 +10,7 @@ TASK_MODEL_FIELDS: dict[str, tuple[str, ...]] = {
     "pdf2docx": ("model",),
     "zhongfanyi": ("model_name",),
     "audio_check": ("model_name",),
+    "audio_transcription": ("model_name",),
 }
 
 _MODEL_ALIASES = {
@@ -77,6 +78,7 @@ _MODEL_LABELS = {
     "deepseek/deepseek-v3.2": "DeepSeek V3.2",
     "x-ai/grok-4.3": "Grok 4.3",
     "mistralai/mistral-medium-3-5": "Mistral Medium 3.5",
+    "qwen3-asr-flash-filetrans": "Qwen3 ASR FileTrans",
 }
 
 

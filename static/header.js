@@ -4,6 +4,7 @@
     const UPLOAD_TIMEOUT_MS = 240000;
     const PAGE_TRANSITION_DELAY_MS = 180;
     const RELEASE_NOTES = [
+        '8月8日_新增音频转写，支持 Qwen 逐词时间戳并导出 TXT、SRT、VTT、TSV 和 JSON',
         '7月31日_邮件转文档新增 EML 支持，可与 MSG 混合批量转换并保留正文内嵌图片',
         '7月22日_字数统计对齐 Word 核心指标，中日韩与拉丁候选明细支持折叠查看并补齐字符数；单文件 Word 行数优先实时重新分页，页面同步增加仅供参考提示',
         '7月16日_上线文件名整理，支持编号清理、自动编号、正则预览和源目录内副本生成',
@@ -26,6 +27,7 @@
         { href: '/pdf-tools', icon: 'fa-screwdriver-wrench', text: 'PDF 工具箱' },
         { href: '/word-count', icon: 'fa-calculator', text: '\u5b57\u6570\u7edf\u8ba1' },
         { href: '/file-rename', icon: 'fa-file-signature', text: '文件名整理' },
+        { href: '/audio-transcription', icon: 'fa-closed-captioning', text: '音频转写' },
     ];
     const navActiveAliases = {
         '/certificate-translation': ['/certificate-translation', '/doc-translate', '/drivers-license', '/business-licence'],

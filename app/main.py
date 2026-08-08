@@ -26,6 +26,7 @@ HTML_CACHE_HEADERS = {
 }
 LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']+)(?P=quote)')
 RELEASE_NOTES = [
+    "8月8日_新增音频转写，支持 Qwen 逐词时间戳并导出 TXT、SRT、VTT、TSV 和 JSON",
     "7月31日_邮件转文档新增 EML 支持，可与 MSG 混合批量转换并保留正文内嵌图片",
     "7月22日_字数统计对齐 Word 核心指标，中日韩与拉丁候选明细支持折叠查看并补齐字符数；单文件 Word 行数优先实时重新分页，页面同步增加仅供参考提示",
     "7月16日_上线文件名整理，支持编号清理、自动编号、正则预览和源目录内副本生成",
@@ -57,6 +58,7 @@ TOOL_NAV_GROUPS = [
         ("/number-check", "fa-check-double", "数字专检", "双语文档数字一致性检查"),
         ("/zhongfanyi", "fa-spell-check", "中翻专检", "规则与 AI 联合审校"),
         ("/audio-check", "fa-wave-square", "音频质量检查", "原始音频多模态质量检查"),
+        ("/audio-transcription", "fa-closed-captioning", "音频转写", "生成带时间轴文本与字幕文件"),
     ]),
 ]
 NAV_ACTIVE_ALIASES = {
@@ -719,6 +721,11 @@ async def zhongfanyi_page():
 @app.get("/audio-check", response_class=HTMLResponse)
 async def audio_check_page():
     return _render_page("audio_check.html", "/audio-check")
+
+
+@app.get("/audio-transcription", response_class=HTMLResponse)
+async def audio_transcription_page():
+    return _render_page("audio_transcription.html", "/audio-transcription")
 
 
 @app.get("/pdf2docx", response_class=HTMLResponse)
