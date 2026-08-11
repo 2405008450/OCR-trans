@@ -12,6 +12,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -1371,7 +1372,9 @@ async def get_english_variant_config():
 @router.post("/english-variant/text")
 async def run_english_variant_text(body: EnglishVariantTextBody):
     try:
-        return convert_english_variant_text(body.text, body.target_style)
+        return await run_in_threadpool(
+            convert_english_variant_text, body.text, body.target_style
+        )
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

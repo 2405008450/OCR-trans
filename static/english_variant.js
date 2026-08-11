@@ -31,8 +31,9 @@ async function loadConfig() {
 
 function renderSummary(element, result) {
     const ambiguous = result.ambiguous_hits || [];
+    const llmReviews = Number(result.llm_review_count || 0);
     element.hidden = false;
-    element.innerHTML = `<strong>已替换 ${result.replacement_count || 0} 处</strong>，涉及 ${result.distinct_rule_count || 0} 条规则；跳过 ${result.ambiguous_hit_count || 0} 处歧义词。` +
+    element.innerHTML = `<strong>已替换 ${result.replacement_count || 0} 处</strong>，涉及 ${result.distinct_rule_count || 0} 条规则；DeepSeek V4 Pro 判定 ${llmReviews} 处；跳过 ${result.ambiguous_hit_count || 0} 处未处理歧义词。` +
         (ambiguous.length ? `<ul class="ambiguity-list">${ambiguous.slice(0, 8).map((item) => `<li>${esc(item.term)}：${esc(item.candidates.join(' / '))}（${item.count} 处）</li>`).join('')}</ul>` : '');
 }
 

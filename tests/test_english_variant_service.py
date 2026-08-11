@@ -6,6 +6,7 @@ import os
 import shutil
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 from docx import Document
@@ -15,7 +16,13 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from app.controller import task as task_controller
-from app.service.english_variant_service import convert_text, get_converter
+from app.core.config import settings
+from app.service import english_variant_service
+from app.service.english_variant_service import (
+    EnglishVariantConverter,
+    convert_text,
+    get_converter,
+)
 from app.service import office_text_transform_service
 from app.service.office_text_transform_service import transform_office_file
 from app.service.task_queue_service import TaskQueueService
@@ -30,11 +37,11 @@ from scripts.build_english_variant_dictionary import (
 def test_dictionary_compiler_matches_committed_runtime_dictionary() -> None:
     payload = compile_dictionary(DEFAULT_SOURCE)
     assert payload["stats"] == {
-        "raw_pairs": 1957,
-        "unique_pairs": 1589,
-        "british_to_american_rules": 1583,
+        "raw_pairs": 2009,
+        "unique_pairs": 1630,
+        "british_to_american_rules": 1624,
         "british_to_american_ambiguous": 3,
-        "american_to_british_rules": 1577,
+        "american_to_british_rules": 1618,
         "american_to_british_ambiguous": 6,
     }
     assert build_dictionary(DEFAULT_SOURCE, DEFAULT_OUTPUT, check=True)
@@ -78,6 +85,145 @@ def test_converter_includes_adjective_and_adverb_sheets() -> None:
         "The amortizable asset was colorfully illustrated."
     )
     assert result["replacement_count"] == 2
+
+
+def test_special_rules_to_american_are_deterministic_and_keep_boundaries() -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def classifier(rule_kind: str, term: str, sentence: str) -> bool:
+        calls.append((rule_kind, term, sentence))
+        return True
+
+    converter = EnglishVariantConverter(
+        get_converter().payload,
+        ambiguity_classifier=classifier,
+    )
+    result = converter.convert(
+        "She practises at a licensed practice; the cheque covers two licences. "
+        "Malpractise remains inside a longer word.",
+        "american",
+    )
+
+    assert result["converted_text"] == (
+        "She practices at a licensed practice; the check covers two licenses. "
+        "Malpractise remains inside a longer word."
+    )
+    assert result["replacement_count"] == 3
+    assert result["llm_review_count"] == 0
+    assert calls == []
+
+
+def test_special_rules_to_british_use_sentence_level_semantic_decisions() -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def classifier(rule_kind: str, term: str, sentence: str) -> bool:
+        calls.append((rule_kind, term.casefold(), sentence))
+        if rule_kind == "practice_pos":
+            return "daily" in sentence
+        if rule_kind == "check_meaning":
+            return "bank" in sentence
+        if rule_kind == "license_pos":
+            return "expires" in sentence
+        raise AssertionError(f"unexpected rule: {rule_kind}")
+
+    converter = EnglishVariantConverter(
+        get_converter().payload,
+        ambiguity_classifier=classifier,
+    )
+    result = converter.convert(
+        "I practice daily. This practice is safe. "
+        "Please check the total. The bank issued two checks. "
+        "The agency licenses banks. The license expires tomorrow.",
+        "british",
+    )
+
+    assert result["converted_text"] == (
+        "I practise daily. This practice is safe. "
+        "Please check the total. The bank issued two cheques. "
+        "The agency licenses banks. The licence expires tomorrow."
+    )
+    assert result["replacement_count"] == 3
+    assert result["llm_review_count"] == 6
+    assert [item[:2] for item in calls] == [
+        ("practice_pos", "practice"),
+        ("practice_pos", "practice"),
+        ("check_meaning", "check"),
+        ("check_meaning", "checks"),
+        ("license_pos", "licenses"),
+        ("license_pos", "license"),
+    ]
+    assert all("<target>" in sentence for _, _, sentence in calls)
+
+
+def test_special_rules_do_not_break_longer_dictionary_phrases() -> None:
+    converter = EnglishVariantConverter(
+        get_converter().payload,
+        ambiguity_classifier=lambda *_: (_ for _ in ()).throw(
+            AssertionError("license plate should be handled by the longer dictionary rule")
+        ),
+    )
+    result = converter.convert("The license plate is visible.", "british")
+    assert result["converted_text"] == "The number plate is visible."
+    assert result["llm_review_count"] == 0
+
+
+def test_deepseek_semantic_classifier_uses_v4_pro_json(monkeypatch) -> None:
+    request_args: dict[str, object] = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            request_args.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content='{"replace": true}')
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+    monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "test-key")
+
+    decision = english_variant_service._classify_with_deepseek(
+        "practice_pos",
+        "practice",
+        "I <target>practice</target> daily.",
+    )
+
+    assert decision is True
+    assert request_args["model"] == "deepseek-v4-pro"
+    assert request_args["response_format"] == {"type": "json_object"}
+
+
+def test_docx_semantic_conversion_preserves_cross_run_formatting(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "semantic-source.docx"
+    output = tmp_path / "semantic-output.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    first = paragraph.add_run("prac")
+    first.bold = True
+    paragraph.add_run("tice daily.")
+    document.save(source)
+
+    converter = EnglishVariantConverter(
+        get_converter().payload,
+        ambiguity_classifier=lambda rule, term, sentence: True,
+    )
+    monkeypatch.setattr(office_text_transform_service, "get_converter", lambda: converter)
+
+    summary = transform_office_file(source, output, "british")
+    converted = Document(output)
+    assert converted.paragraphs[0].text == "practise daily."
+    assert converted.paragraphs[0].runs[0].bold is True
+    assert summary["replacement_count"] == 1
+    assert summary["llm_review_count"] == 1
 
 
 def test_dictionary_hash_participates_in_task_fingerprint() -> None:
@@ -188,7 +334,7 @@ def test_pptx_conversion_handles_runs_tables_and_notes(tmp_path: Path) -> None:
 
 def test_text_api_and_config_expose_dictionary_metadata() -> None:
     config = anyio.run(task_controller.get_english_variant_config)
-    assert config["dictionary_version"] == "260723"
+    assert config["dictionary_version"] == "260803"
     assert config["stats"]["british_to_american_ambiguous"] == 3
 
     body = task_controller.EnglishVariantTextBody(

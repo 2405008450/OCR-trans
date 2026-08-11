@@ -39,6 +39,7 @@ class ConversionSummary:
         self.replacements: Counter[tuple[str, str]] = Counter()
         self.ambiguous: Counter[tuple[str, tuple[str, ...]]] = Counter()
         self.processed_text_units = 0
+        self.llm_review_count = 0
 
     def add(self, result: dict[str, Any]) -> None:
         self.processed_text_units += 1
@@ -47,6 +48,7 @@ class ConversionSummary:
         for item in result.get("ambiguous_hits") or []:
             key = (str(item["term"]), tuple(str(value) for value in item.get("candidates") or []))
             self.ambiguous[key] += int(item["count"])
+        self.llm_review_count += int(result.get("llm_review_count") or 0)
 
     def to_dict(self) -> dict[str, Any]:
         replacements = [
@@ -68,6 +70,7 @@ class ConversionSummary:
             "replacements": replacements,
             "ambiguous_hit_count": sum(self.ambiguous.values()),
             "ambiguous_hits": ambiguous_hits,
+            "llm_review_count": self.llm_review_count,
             "processed_text_units": self.processed_text_units,
             "dictionary_version": self.converter.dictionary_version,
             "dictionary_sha256": self.converter.source_sha256,

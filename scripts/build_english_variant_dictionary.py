@@ -19,7 +19,7 @@ DEFAULT_SOURCE = (
     REPO_ROOT
     / "data"
     / "english_variant"
-    / "英美式英语词汇对比_名词动词形容词副词_260723.xlsx"
+    / "英美式英语词汇对比_名词动词形容词副词_260803.xlsx"
 )
 DEFAULT_OUTPUT = REPO_ROOT / "data" / "english_variant" / "dictionary.json"
 
