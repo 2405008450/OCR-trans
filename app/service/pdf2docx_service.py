@@ -6,17 +6,19 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from app.core.config import settings
 from app.core.file_naming import build_user_visible_filename, ensure_unique_path
 from app.service.gemini_service import GEMINI_ROUTE_OPENROUTER, ensure_gemini_route_configured
+from app.service.fixed_layout_docx_service import convert_html_to_fixed_layout_docx
 from app.service.chat_preserve_docx_service import convert_chat_screenshot_to_docx
 from app.service.web_asset_preserve_docx_service import (
     WEB_RECOMMENDED_MODEL,
     convert_web_screenshot_to_docx,
 )
-from pdf2docx import convert_text_to_word_via_libreoffice, ocr_file
+from pdf2docx import convert_text_to_word_via_libreoffice, normalize_to_word_html, ocr_file
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 PDF2DOCX_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
 PDF2DOCX_DEFAULT_MODEL = "google/gemini-3-flash-preview"
 PDF2DOCX_LAYOUT_MODE_OCR_HTML = "ocr_html"
+PDF2DOCX_LAYOUT_MODE_FIXED = "fixed_layout"
 PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE = "chat_preserve"
 PDF2DOCX_LAYOUT_MODE_WEB_ASSET_PRESERVE = "web_asset_preserve"
 PDF2DOCX_DEFAULT_LAYOUT_MODE = PDF2DOCX_LAYOUT_MODE_OCR_HTML
@@ -25,6 +27,10 @@ PDF2DOCX_LAYOUT_MODES: Dict[str, Dict[str, str]] = {
     PDF2DOCX_LAYOUT_MODE_OCR_HTML: {
         "label": "通用文档",
         "description": "沿用当前 OCR 到 Word 流程，适合票据、扫描件、表格型页面。",
+    },
+    PDF2DOCX_LAYOUT_MODE_FIXED: {
+        "label": "高保真固定布局",
+        "description": "OCR 后按浏览器实际坐标生成可编辑文本框，优先保持原页面排版。",
     },
     PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE: {
         "label": "聊天截图（保头像/表情）",
@@ -346,16 +352,38 @@ async def execute_pdf2docx_task_from_path(
     await _maybe_report(progress_callback, 70, pages_msg)
     raw_output_path.write_text(raw_text, encoding="utf-8")
 
-    await _maybe_report(progress_callback, 85, "正在生成 Word 文档")
-    await loop.run_in_executor(
-        executor,
-        lambda: convert_text_to_word_via_libreoffice(
-            raw_text,
-            str(docx_output_path),
-            html_output_path=str(html_output_path),
-            title=input_file.stem,
-        ),
-    )
+    fixed_layout_rendered = False
+    processing_warnings = []
+    if layout_mode == PDF2DOCX_LAYOUT_MODE_FIXED:
+        fixed_html = normalize_to_word_html(raw_text, title=input_file.stem)
+        try:
+            await _maybe_report(progress_callback, 85, "正在按浏览器实际排版生成高保真 Word 文档")
+            await loop.run_in_executor(
+                executor,
+                lambda: convert_html_to_fixed_layout_docx(
+                    fixed_html,
+                    str(docx_output_path),
+                    html_output_path=str(html_output_path),
+                    debug_layout_path=str(layout_json_path),
+                ),
+            )
+            fixed_layout_rendered = True
+        except Exception as exc:
+            warning = f"浏览器固定布局 Word 生成失败，已回退到通用文档模式: {exc}"
+            processing_warnings.append(warning)
+            await _maybe_report(progress_callback, 88, warning)
+
+    if not fixed_layout_rendered:
+        await _maybe_report(progress_callback, 85, "正在生成 Word 文档")
+        await loop.run_in_executor(
+            executor,
+            lambda: convert_text_to_word_via_libreoffice(
+                raw_text,
+                str(docx_output_path),
+                html_output_path=str(html_output_path),
+                title=input_file.stem,
+            ),
+        )
 
     final_docx_path = ensure_unique_path(
         task_output_dir / build_user_visible_filename(original_filename, ext=".docx"),
@@ -374,7 +402,12 @@ async def execute_pdf2docx_task_from_path(
         "layout_mode": layout_mode,
         "raw_output_txt": _normalize_path(raw_output_path),
         "output_html": _normalize_path(html_output_path),
+        "output_layout_json": (
+            _normalize_path(layout_json_path) if layout_json_path.exists() else None
+        ),
         "output_docx": _normalize_path(docx_output_path),
+        "fixed_layout_rendered": fixed_layout_rendered,
+        "warnings": processing_warnings,
         "total_pages": total_pages,
         "blank_page_count": blank_page_count,
         "blank_pages": blank_pages,

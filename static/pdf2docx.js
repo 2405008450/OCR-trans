@@ -3,6 +3,7 @@ let pollingTimer = null;
 let modelConfig = {};
 let routeConfig = {};
 let layoutModeConfig = {};
+let defaultWordLayoutMode = 'fixed';
 let defaultModel = 'google/gemini-3-flash-preview';
 let defaultRoute = 'openrouter';
 let defaultLayoutMode = 'ocr_html';
@@ -42,6 +43,8 @@ const btnProcess = document.getElementById('btnProcess');
 const btnNewTask = document.getElementById('btnNewTask');
 const btnBatchDownloadAll = document.getElementById('btnBatchDownloadAll');
 const layoutModeSelect = document.getElementById('layoutModeSelect');
+const wordLayoutModeGroup = document.getElementById('wordLayoutModeGroup');
+const wordLayoutModeHint = document.getElementById('wordLayoutModeHint');
 const modelSelect = document.getElementById('modelSelect');
 let geminiRouteSelect = document.getElementById('geminiRouteSelect');
 const layoutModeLabel = document.getElementById('layoutModeLabel');
@@ -184,6 +187,7 @@ async function loadConfig() {
         routeConfig = { google: { label: '\u7ebf\u8def1' }, openrouter: { label: '\u7ebf\u8def2' } };
         layoutModeConfig = {
             ocr_html: { label: '通用文档', description: '沿用当前 OCR 到 Word 流程，适合票据、扫描件、表格型页面。' },
+            fixed_layout: { label: '高保真固定布局', description: 'OCR 后按浏览器实际坐标生成可编辑文本框，优先保持原页面排版。' },
             chat_preserve: { label: '聊天截图（保头像/表情）', description: '聊天记录专用：文字保持可编辑，并保留头像、图片表情和贴纸。' },
             web_asset_preserve: { label: '网页截图（保重要图片）', description: '网页截图专用：文字保持可编辑，并保留产品图、图表、流程图、地图、二维码等重要图片。', recommended_model: WEB_ASSET_RECOMMENDED_MODEL },
         };
@@ -198,6 +202,7 @@ async function loadConfig() {
         };
     }
     renderLayoutModes();
+    renderWordLayoutModes();
     renderModels();
     renderRoutes();
 }
@@ -205,9 +210,59 @@ async function loadConfig() {
 function renderLayoutModes() {
     if (!layoutModeSelect) return;
     layoutModeSelect.innerHTML = '';
-    Object.entries(layoutModeConfig).forEach(([value, info]) => layoutModeSelect.add(new Option(info.label || value, value)));
+    Object.entries(layoutModeConfig)
+        .filter(([value]) => value !== 'fixed_layout')
+        .forEach(([value, info]) => layoutModeSelect.add(new Option(info.label || value, value)));
     layoutModeSelect.value = layoutModeConfig[defaultLayoutMode] ? defaultLayoutMode : Object.keys(layoutModeConfig)[0];
     updateLayoutModeInfo();
+}
+function renderWordLayoutModes() {
+    if (!wordLayoutModeGroup) return;
+    const config = {
+        fixed: { label: '高保真固定布局', description: '绝对定位文本框，优先保持排版' },
+        editable: { label: '易编辑表格布局', description: '传统表格转换，方便人工调整' },
+    };
+    wordLayoutModeGroup.innerHTML = '';
+    Object.entries(config).forEach(([value, info]) => {
+        const chip = document.createElement('label');
+        chip.className = `mode-chip mode-chip--${value}`;
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'wordLayoutMode';
+        radio.value = value;
+        radio.checked = value === defaultWordLayoutMode;
+        const checkIcon = document.createElement('span');
+        checkIcon.className = 'chip-check';
+        checkIcon.innerHTML = '<i class="fas fa-check"></i>';
+        const copy = document.createElement('span');
+        copy.className = 'mode-chip-copy';
+        copy.innerHTML = `<span class="mode-chip-title">${info.label}</span><span class="mode-chip-desc">${info.description}</span>`;
+        chip.append(radio, checkIcon, copy);
+        chip.classList.toggle('active', radio.checked);
+        chip.addEventListener('click', (event) => {
+            event.preventDefault();
+            selectWordLayoutMode(value);
+        });
+        wordLayoutModeGroup.appendChild(chip);
+    });
+}
+function getSelectedWordLayoutMode() {
+    return wordLayoutModeGroup?.querySelector('input[type="radio"]:checked')?.value || defaultWordLayoutMode;
+}
+function selectWordLayoutMode(mode) {
+    if (!wordLayoutModeGroup) return;
+    wordLayoutModeGroup.querySelectorAll('.mode-chip').forEach((chip) => {
+        const radio = chip.querySelector('input[type="radio"]');
+        const isActive = radio?.value === mode;
+        if (radio) radio.checked = isActive;
+        chip.classList.toggle('active', isActive);
+    });
+    updateLayoutModeInfo();
+}
+function getEffectiveLayoutMode() {
+    const processingMode = layoutModeSelect?.value || defaultLayoutMode;
+    if (processingMode !== 'ocr_html') return processingMode;
+    return getSelectedWordLayoutMode() === 'fixed' ? 'fixed_layout' : 'ocr_html';
 }
 function renderModels() {
     modelSelect.innerHTML = '';
@@ -228,7 +283,8 @@ function updateModelInfo() {
 }
 function updateLayoutModeInfo(userTriggered = false) {
     if (!layoutModeSelect) return;
-    const mode = layoutModeSelect.value;
+    const processingMode = layoutModeSelect.value;
+    const mode = getEffectiveLayoutMode();
     const info = layoutModeConfig[mode] || {};
     if (layoutModeLabel) layoutModeLabel.textContent = info.label || mode || '';
     if (layoutModeDesc) layoutModeDesc.textContent = info.description || '';
@@ -236,6 +292,14 @@ function updateLayoutModeInfo(userTriggered = false) {
     if (userTriggered && recommendedModel && modelConfig[recommendedModel] && modelSelect.value !== recommendedModel) {
         modelSelect.value = recommendedModel;
         updateModelInfo();
+    }
+    const layoutCard = wordLayoutModeGroup?.closest('.word-layout-card');
+    const usesOcrLayout = processingMode === 'ocr_html';
+    layoutCard?.classList.toggle('is-disabled', !usesOcrLayout);
+    if (wordLayoutModeHint) {
+        wordLayoutModeHint.textContent = usesOcrLayout
+            ? '高保真模式适合直接交付；易编辑模式使用传统表格，适合后期人工调整。'
+            : '当前专项截图模式使用自身的排版策略；切换到“通用文档”后可选择 Word 排版方式。';
     }
 }
 
@@ -331,7 +395,7 @@ async function processFiles() {
 async function processSingleFile() {
     const formData = new FormData();
     formData.append('file', selectedFiles[0]);
-    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, layout_mode: layoutModeSelect?.value || defaultLayoutMode });
+    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, layout_mode: getEffectiveLayoutMode() });
 
     let response;
     try { response = await fetch(`/task/pdf2docx?${params.toString()}`, { method: 'POST', body: formData }); }
@@ -363,7 +427,7 @@ async function processBatchFiles() {
     resultSection.style.display = 'none';
     batchSection.style.display = 'block';
 
-    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, layout_mode: layoutModeSelect?.value || defaultLayoutMode });
+    const params = new URLSearchParams({ model: modelSelect.value, gemini_route: geminiRouteSelect?.value || defaultRoute, layout_mode: getEffectiveLayoutMode() });
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append('files', file));
 

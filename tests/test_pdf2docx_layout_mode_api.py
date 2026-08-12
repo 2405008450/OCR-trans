@@ -25,10 +25,90 @@ def test_pdf2docx_config_exposes_layout_modes():
 
     assert result["default_layout_mode"] == "ocr_html"
     assert "ocr_html" in result["layout_modes"]
+    assert "fixed_layout" in result["layout_modes"]
     assert "chat_preserve" in result["layout_modes"]
     assert "web_asset_preserve" in result["layout_modes"]
     assert result["layout_modes"]["web_asset_preserve"]["recommended_model"] == "anthropic/claude-sonnet-5"
     assert "anthropic/claude-sonnet-5" in result["models"]
+
+
+def test_execute_pdf2docx_fixed_layout_branch(tmp_path, monkeypatch):
+    input_path = tmp_path / "scan.png"
+    input_path.write_bytes(b"fake-image")
+    monkeypatch.setattr(pdf2docx_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(pdf2docx_service, "ensure_gemini_route_configured", lambda route: route or "openrouter")
+    monkeypatch.setattr(
+        pdf2docx_service,
+        "ocr_file",
+        lambda **kwargs: {"text": "<p>姓名：张三</p>", "total_pages": 1},
+    )
+    fixed_calls = []
+
+    def fake_fixed(html_text, output_path, **kwargs):
+        from docx import Document
+
+        fixed_calls.append(html_text)
+        Document().save(output_path)
+        Path(kwargs["html_output_path"]).write_text(html_text, encoding="utf-8")
+        Path(kwargs["debug_layout_path"]).write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(pdf2docx_service, "convert_html_to_fixed_layout_docx", fake_fixed)
+
+    async def scenario():
+        return await pdf2docx_service.execute_pdf2docx_task_from_path(
+            task_id="task-fixed",
+            display_no="000003",
+            input_path=str(input_path),
+            original_filename="scan.png",
+            layout_mode="fixed_layout",
+        )
+
+    result = anyio.run(scenario)
+
+    assert fixed_calls and "姓名：张三" in fixed_calls[0]
+    assert result["layout_mode"] == "fixed_layout"
+    assert result["fixed_layout_rendered"] is True
+    assert result["output_layout_json"].endswith("_layout.json")
+    assert result["warnings"] == []
+
+
+def test_execute_pdf2docx_fixed_layout_failure_falls_back(tmp_path, monkeypatch):
+    input_path = tmp_path / "scan.png"
+    input_path.write_bytes(b"fake-image")
+    monkeypatch.setattr(pdf2docx_service.settings, "OUTPUT_DIR", str(tmp_path / "outputs"))
+    monkeypatch.setattr(pdf2docx_service, "ensure_gemini_route_configured", lambda route: route or "openrouter")
+    monkeypatch.setattr(pdf2docx_service, "ocr_file", lambda **kwargs: "<p>正文</p>")
+    monkeypatch.setattr(
+        pdf2docx_service,
+        "convert_html_to_fixed_layout_docx",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("browser unavailable")),
+    )
+    fallback_calls = []
+
+    def fake_libreoffice(text, output_path, **kwargs):
+        from docx import Document
+
+        fallback_calls.append(text)
+        Document().save(output_path)
+        Path(kwargs["html_output_path"]).write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(pdf2docx_service, "convert_text_to_word_via_libreoffice", fake_libreoffice)
+
+    async def scenario():
+        return await pdf2docx_service.execute_pdf2docx_task_from_path(
+            task_id="task-fixed-fallback",
+            display_no="000004",
+            input_path=str(input_path),
+            original_filename="scan.png",
+            layout_mode="fixed_layout",
+        )
+
+    result = anyio.run(scenario)
+
+    assert fallback_calls == ["<p>正文</p>"]
+    assert result["fixed_layout_rendered"] is False
+    assert result["output_layout_json"] is None
+    assert any("已回退到通用文档模式" in warning for warning in result["warnings"])
 
 
 def test_run_pdf2docx_passes_layout_mode(monkeypatch):
