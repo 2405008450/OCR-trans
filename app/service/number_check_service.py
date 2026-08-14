@@ -66,11 +66,15 @@ NUMBER_CHECK_MODELS: Dict[str, Dict[str, str]] = {
         "description": "速度更快，适合常规数字核对场景。",
     },
     "gemini-3.5-flash": {
-        "label": "新模型",
+        "label": "快速版V3",
         "description": "OpenRouter 新模型，适合常规数字核对场景。",
     },
+    "gemini-3.7-flash": {
+        "label": "快速版V5",
+        "description": "新一代 Flash 模型，适合常规数字核对场景。",
+    },
     "gemini-3.1-pro-preview": {
-        "label": "增强版V2",
+        "label": "老旗舰V2",
         "description": "推理更强，适合复杂编号和上下文判断场景。",
     },
 }
@@ -82,6 +86,9 @@ NUMBER_CHECK_MODEL_ALIASES: Dict[str, str] = {
     "gemini-3.5-flash": "gemini-3.5-flash",
     "google/gemini-3.5-flash": "gemini-3.5-flash",
     "gemini 3.5 flash": "gemini-3.5-flash",
+    "gemini-3.7-flash": "gemini-3.7-flash",
+    "google/gemini-3.7-flash": "gemini-3.7-flash",
+    "gemini 3.7 flash": "gemini-3.7-flash",
     "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
     "google/gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
     "gemini 3.1 pro preview": "gemini-3.1-pro-preview",

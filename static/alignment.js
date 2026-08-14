@@ -127,7 +127,7 @@ function formatEtaDate(date) {
     const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
     return `${values.month}-${values.day} ${values.hour}:${values.minute}`;
 }
-const DEFAULT_MODEL_NAME = 'Google gemini-3-flash-preview';
+const DEFAULT_MODEL_NAME = 'Google: google/gemini-3.7-flash';
 let pollingTimer = null;
 let configData = null;
 const SENSITIVE_LOG_PATTERNS = [
@@ -143,14 +143,16 @@ const SENSITIVE_LOG_PATTERNS = [
 ];
 const MODEL_DISPLAY_NAMES = {
     'Google Gemini 2.5 Flash': '快速版V1',
-    'Google Gemini 2.5 Pro': '增强版V1',
+    'Google Gemini 2.5 Pro': '老旗舰V1',
     'Google gemini-3-flash-preview': '快速版V2',
-    'Google: google/gemini-3.5-flash': '新模型',
-    'Google: google/gemini-3.6-flash': 'Gemini 3.6 Flash',
+    'Google: google/gemini-3.5-flash': '快速版V3',
+    'Google: google/gemini-3.6-flash': '快速版V4',
+    'Google: google/gemini-3.7-flash': '快速版V5',
     'Google: google/gemini-3.5-flash-lite': '极速版V3',
-    'Google: google/gemini-3.1-pro-preview': '增强版V2',
-    'DeepSeek-V4-Pro': 'DeepSeek-V4-Pro',
+    'Google: google/gemini-3.1-pro-preview': '老旗舰V2',
+    'DeepSeek-V4-Pro': '长文版V1',
 };
+const HIDDEN_MODEL_IDS = new Set(['google/gemini-3-flash-preview']);
 const LANGUAGE_ALIASES = {
     '中文': 'zh chinese mandarin 简体 繁体',
     '英语': 'en english',
@@ -203,8 +205,11 @@ function populateSelects() {
     renderLanguagePickers();
 
     modelSelect.innerHTML = '';
-    for (const name of Object.keys(models)) {
-        modelSelect.add(new Option(getModelDisplayName(name), name));
+    for (const [name, info] of Object.entries(models)) {
+        if (HIDDEN_MODEL_IDS.has(info?.id)) continue;
+        const option = new Option(getModelDisplayName(name), name);
+        option.title = info?.id || name;
+        modelSelect.add(option);
     }
     if (models[DEFAULT_MODEL_NAME]) {
         modelSelect.value = DEFAULT_MODEL_NAME;
@@ -296,13 +301,14 @@ function populateDefaults() {
     renderLanguagePickers();
 
     modelSelect.innerHTML = '';
-    modelSelect.add(new Option(getModelDisplayName('Google gemini-3-flash-preview'), 'Google gemini-3-flash-preview'));
     modelSelect.add(new Option(getModelDisplayName('Google: google/gemini-3.5-flash'), 'Google: google/gemini-3.5-flash'));
     modelSelect.add(new Option(getModelDisplayName('Google: google/gemini-3.6-flash'), 'Google: google/gemini-3.6-flash'));
+    modelSelect.add(new Option(getModelDisplayName('Google: google/gemini-3.7-flash'), 'Google: google/gemini-3.7-flash'));
     modelSelect.add(new Option(getModelDisplayName('Google: google/gemini-3.5-flash-lite'), 'Google: google/gemini-3.5-flash-lite'));
     modelSelect.add(new Option(getModelDisplayName('Google Gemini 2.5 Pro'), 'Google Gemini 2.5 Pro'));
     modelSelect.add(new Option(getModelDisplayName('DeepSeek-V4-Pro'), 'DeepSeek-V4-Pro'));
     modelSelect.value = DEFAULT_MODEL_NAME;
+    Array.from(modelSelect.options).forEach((option) => { option.title = option.value.replace(/^Google:\s*/, ''); });
     geminiRouteSelect.innerHTML = '<option value="google">\u7ebf\u8def1</option><option value="openrouter">\u7ebf\u8def2</option>';
     geminiRouteSelect.value = "openrouter";
     updateRouteInfo();
@@ -314,6 +320,7 @@ function populateDefaults() {
 function updateModelInfo() {
     const name = modelSelect.value;
     const info = configData?.models?.[name];
+    modelSelect.title = info?.id || name;
     if (info) {
         modelDesc.textContent = info.description || '';
         modelIdDisplay.textContent = getModelDisplayName(name);

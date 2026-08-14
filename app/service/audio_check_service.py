@@ -22,15 +22,19 @@ AUDIO_CHECK_MIME_TYPES = {
 }
 AUDIO_CHECK_MODELS = {
     "google/gemini-3.6-flash": {
-        "label": "Gemini 3.6 Flash",
+        "label": "快速版V4",
         "description": "默认模型，速度与音频理解能力均衡。",
     },
+    "google/gemini-3.7-flash": {
+        "label": "快速版V5",
+        "description": "新一代 Flash 模型，适合音频理解与质量检查。",
+    },
     "google/gemini-3.5-flash": {
-        "label": "Gemini 3.5 Flash",
+        "label": "快速版V3",
         "description": "适合常规音质检查。",
     },
     "google/gemini-3.1-pro-preview": {
-        "label": "Gemini 3.1 Pro",
+        "label": "老旗舰V2",
         "description": "适合复杂音频和更细致的综合判断。",
     },
 }

@@ -91,12 +91,17 @@ AVAILABLE_MODELS = {
     },
     "Google: google/gemini-3.5-flash": {
         "id": "google/gemini-3.5-flash",
-        "description": "新模型，适合通过 OpenRouter 处理常规对齐任务",
+        "description": "适合通过 OpenRouter 处理常规对齐任务",
         "max_output": 65536,
     },
     "Google: google/gemini-3.6-flash": {
         "id": "google/gemini-3.6-flash",
-        "description": "Gemini 3.6 Flash，更高效的 Flash 模型，适合常规对齐任务",
+        "description": "更高效的快速模型，适合常规对齐任务",
+        "max_output": 65536,
+    },
+    "Google: google/gemini-3.7-flash": {
+        "id": "google/gemini-3.7-flash",
+        "description": "新一代快速模型，适合常规对齐任务",
         "max_output": 65536,
     },
     "Google: google/gemini-3.5-flash-lite": {
@@ -121,7 +126,7 @@ AVAILABLE_MODELS = {
         "max_output_display": "最大 384K",
     },
 }
-DEFAULT_MODEL = "Google gemini-3-flash-preview"
+DEFAULT_MODEL = "Google: google/gemini-3.7-flash"
 
 CHAPTER_PATTERNS = [
     r'^第[一二三四五六七八九十百千\d]+[章节篇部]', r'^Chapter\s*\d+', r'^CHAPTER\s*\d+',

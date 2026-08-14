@@ -32,7 +32,7 @@ _BUSINESS_LICENCE_COMPANY_NAME_LABELS = {
 
 BUSINESS_LICENCE_MODELS: Dict[str, Dict[str, str]] = {
     "google/gemini-3.1-pro-preview": {
-        "label": "增强版V2",
+        "label": "老旗舰V2",
         "description": "适合复杂版面和印章、二维码等细节识别。",
     },
     "google/gemini-3-flash-preview": {
@@ -40,8 +40,12 @@ BUSINESS_LICENCE_MODELS: Dict[str, Dict[str, str]] = {
         "description": "速度更快，适合常规营业执照图片。",
     },
     "google/gemini-3.5-flash": {
-        "label": "新模型",
+        "label": "快速版V3",
         "description": "OpenRouter 新模型，适合常规营业执照图片。",
+    },
+    "google/gemini-3.7-flash": {
+        "label": "快速版V5",
+        "description": "新一代 Flash 模型，适合常规营业执照图片。",
     },
 }
 

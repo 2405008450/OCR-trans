@@ -84,18 +84,22 @@ function setSelectedFile(file) {
     elements.preview.style.display = 'block';
 }
 
-function populateSelect(select, values, defaultValue) {
+function populateSelect(select, values, defaultValue, isModel = false) {
     select.innerHTML = '';
-    Object.entries(values || {}).forEach(([value, info]) => {
-        select.add(new Option(info.label || value, value));
+    Object.entries(values || {}).filter(([value]) => !isModel || value !== 'google/gemini-3-flash-preview').forEach(([value, info]) => {
+        const option = new Option(info.label || value, value);
+        if (isModel) option.title = value;
+        select.add(option);
     });
     const fallback = Object.keys(values || {})[0] || '';
     select.value = values?.[defaultValue] ? defaultValue : fallback;
+    if (isModel) select.title = select.value;
 }
 
 function updateDescriptions() {
     elements.modelDescription.textContent = config?.models?.[elements.model.value]?.description || '';
     elements.routeDescription.textContent = config?.routes?.[elements.route.value]?.description || '';
+    elements.model.title = elements.model.value;
 }
 
 function loadStoredPrompts() {
@@ -120,7 +124,7 @@ async function loadConfig() {
     const response = await fetch('/task/audio-check/config');
     if (!response.ok) throw new Error(`配置加载失败：${response.status}`);
     config = await response.json();
-    populateSelect(elements.model, config.models, config.default_model);
+    populateSelect(elements.model, config.models, config.default_model, true);
     populateSelect(elements.route, config.routes, config.default_route);
     const defaults = config.defaults || {};
     elements.temperature.value = defaults.temperature ?? 0.1;

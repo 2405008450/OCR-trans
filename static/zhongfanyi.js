@@ -37,10 +37,12 @@ const ETA_TIME_ZONE = 'Asia/Shanghai';
 const MODEL_DISPLAY_NAMES = {
     'gemini-3-flash-preview': '快速版',
     'google/gemini-3-flash-preview': '快速版',
-    'gemini-3.5-flash': '新模型',
-    'google/gemini-3.5-flash': '新模型',
-    'gemini-3.1-pro-preview': '增强版',
-    'google/gemini-3.1-pro-preview': '增强版',
+    'gemini-3.5-flash': '快速版V3',
+    'google/gemini-3.5-flash': '快速版V3',
+    'gemini-3.7-flash': '快速版V5',
+    'google/gemini-3.7-flash': '快速版V5',
+    'gemini-3.1-pro-preview': '老旗舰',
+    'google/gemini-3.1-pro-preview': '老旗舰',
 };
 
 let pollingTimer = null;
@@ -98,16 +100,16 @@ async function loadConfig() {
     } catch (error) {
         console.error(error);
         modelConfig = {
-            'google/gemini-3-flash-preview': {
-                label: '快速版',
-                description: '速度更快，适合常规中翻专检场景。',
-            },
             'google/gemini-3.5-flash': {
-                label: '新模型',
-                description: 'OpenRouter 新模型，适合常规中翻专检场景。',
+                label: '快速版V3',
+                description: '适合常规中翻专检场景。',
+            },
+            'google/gemini-3.7-flash': {
+                label: '快速版V5',
+                description: '新一代 Flash 模型，适合常规中翻专检场景。',
             },
             'google/gemini-3.1-pro-preview': {
-                label: '增强版',
+                label: '老旗舰',
                 description: '推理更强，适合复杂规则和上下文判断场景。',
             },
         };
@@ -133,11 +135,14 @@ async function loadConfig() {
 function renderModels() {
     if (!modelSelect) return;
     modelSelect.innerHTML = '';
-    Object.entries(modelConfig).forEach(([value, info]) => {
-        modelSelect.add(new Option(getModelDisplayName(info.label || value), value));
+    Object.entries(modelConfig).filter(([value]) => value !== 'google/gemini-3-flash-preview').forEach(([value, info]) => {
+        const option = new Option(getModelDisplayName(value), value);
+        option.title = value;
+        modelSelect.add(option);
     });
     const fallback = Object.keys(modelConfig)[0] || defaultModel;
     modelSelect.value = modelConfig[defaultModel] ? defaultModel : fallback;
+    modelSelect.title = modelSelect.value;
 }
 
 function updateModelInfo() {
@@ -145,6 +150,7 @@ function updateModelInfo() {
     const currentModel = modelSelect?.value || defaultModel;
     const info = modelConfig[currentModel] || {};
     modelDesc.textContent = info.description || '';
+    modelSelect.title = currentModel;
 }
 
 function applyMode(mode) {

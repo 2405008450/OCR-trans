@@ -55,8 +55,8 @@ let languageConfig = {};
 let translateModeConfig = {};
 let wordLayoutModeConfig = {};
 let routeConfig = {};
-let defaultModel = 'google/gemini-3-flash-preview';
-let defaultTranslationEngine = 'google/gemini-3-flash-preview';
+let defaultModel = 'google/gemini-3.7-flash';
+let defaultTranslationEngine = 'google/gemini-3.7-flash';
 let defaultRoute = 'openrouter';
 let defaultTranslateMode = 'standard';
 let defaultWordLayoutMode = 'fixed';
@@ -127,8 +127,9 @@ function formatEtaDate(date) {
 const MODEL_DISPLAY_NAMES = {
     'google/gemini-3.1-flash-lite': '极速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
-    'google/gemini-3.5-flash': '新模型',
-    'google/gemini-3.1-pro-preview': '增强版V2',
+    'google/gemini-3.5-flash': '快速版V3',
+    'google/gemini-3.7-flash': '快速版V5',
+    'google/gemini-3.1-pro-preview': '老旗舰V2',
     'deepseek-v4-flash': 'DeepSeek V4 Flash',
     'deepseek-chat': 'DeepSeek Chat',
     'openai/gpt-5.5': 'GPT-5.5',
@@ -268,13 +269,15 @@ async function loadConfig() {
         modelConfig = {
             'google/gemini-3.1-flash-lite': { label: '极速版V2', description: '轻量快速 OCR。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规 OCR。' },
-            'google/gemini-3.5-flash': { label: '新模型', description: 'OpenRouter 新模型，适合常规 OCR。' },
-            'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '复杂版面表现更稳。' },
+            'google/gemini-3.5-flash': { label: '快速版V3', description: '适合常规 OCR。' },
+            'google/gemini-3.7-flash': { label: '快速版V5', description: '新一代 Flash 模型，适合常规 OCR。' },
+            'google/gemini-3.1-pro-preview': { label: '老旗舰V2', description: '复杂版面表现更稳。' },
         };
         translationEngineConfig = {
-            'google/gemini-3-flash-preview': { label: 'Gemini 3 Flash Preview', description: '默认文本翻译引擎。' },
-            'google/gemini-3.5-flash': { label: 'Gemini 3.5 Flash', description: '新一代 Gemini Flash 模型。' },
-            'google/gemini-3.1-pro-preview': { label: 'Gemini 3.1 Pro Preview', description: '复杂语境和术语一致性更强。' },
+            'google/gemini-3-flash-preview': { label: 'Gemini 3 Flash Preview', description: '速度优先的文本翻译引擎。' },
+            'google/gemini-3.5-flash': { label: '快速版V3', description: '常规多语种翻译模型。' },
+            'google/gemini-3.7-flash': { label: '快速版V5', description: '默认文本翻译引擎。' },
+            'google/gemini-3.1-pro-preview': { label: '老旗舰V2', description: '复杂语境和术语一致性更强。' },
             'openai/gpt-5.5': { label: 'GPT-5.5', description: 'OpenAI 新一代 GPT 旗舰模型。' },
             'openai/gpt-5.4': { label: 'GPT-5.4', description: 'OpenAI GPT-5.4 主力模型。' },
             'openai/gpt-5.4-mini': { label: 'GPT-5.4 Mini', description: 'GPT-5.4 系列轻量模型。' },
@@ -311,8 +314,12 @@ async function loadConfig() {
 
 function renderModels() {
     modelSelect.innerHTML = '';
-    Object.entries(modelConfig).forEach(([value, info]) => modelSelect.add(new Option(getModelDisplayName(info.label || value), value)));
-    modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
+    Object.entries(modelConfig).filter(([value]) => value !== 'google/gemini-3-flash-preview').forEach(([value, info]) => {
+        const option = new Option(getModelDisplayName(value), value);
+        option.title = value;
+        modelSelect.add(option);
+    });
+    modelSelect.value = Array.from(modelSelect.options).some((option) => option.value === defaultModel) ? defaultModel : (modelSelect.options[0]?.value || '');
     renderSmartSelect({
         container: modelSmartSelect,
         select: modelSelect,
@@ -325,9 +332,9 @@ function renderModels() {
 function renderTranslationEngines() {
     if (!translationEngineSelect) return;
     translationEngineSelect.innerHTML = '';
-    Object.entries(translationEngineConfig).forEach(([value, info]) => {
-        const option = new Option(getModelDisplayName(info.label || value), value);
-        if (info.description) option.title = info.description;
+    Object.entries(translationEngineConfig).filter(([value]) => value !== 'google/gemini-3-flash-preview').forEach(([value, info]) => {
+        const option = new Option(getModelDisplayName(value), value);
+        option.title = value;
         translationEngineSelect.add(option);
     });
     translationEngineSelect.value = translationEngineConfig[defaultTranslationEngine] ? defaultTranslationEngine : Object.keys(translationEngineConfig)[0];
@@ -380,6 +387,7 @@ function appendSmartSelectOption(list, option, select, renderAgain) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'smart-select-option';
+    item.title = option.value;
     item.classList.toggle('selected', option.value === select.value);
 
     const main = document.createElement('span');
@@ -436,6 +444,7 @@ function renderSmartSelect({ container, select, config, iconClass, searchPlaceho
     const trigger = document.createElement('button');
     trigger.type = 'button';
     trigger.className = 'smart-select-trigger';
+    trigger.title = selectedOption?.value || '';
 
     const icon = document.createElement('span');
     icon.className = 'smart-select-icon';

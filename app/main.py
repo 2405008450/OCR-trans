@@ -61,6 +61,11 @@ TOOL_NAV_GROUPS = [
         ("/audio-transcription", "fa-closed-captioning", "音频转写", "生成带时间轴文本与字幕文件"),
     ]),
 ]
+TOOL_NAV_GROUPS[1][2].insert(
+    1,
+    ("/svg-editable", "fa-pen-ruler", "SVG 可编辑化", "转曲文字识别并重建为可编辑文本"),
+)
+
 NAV_ACTIVE_ALIASES = {
     "/certificate-translation": (
         "/certificate-translation",
@@ -731,6 +736,11 @@ async def audio_transcription_page():
 @app.get("/pdf2docx", response_class=HTMLResponse)
 async def pdf2docx_page():
     return _render_page("pdf2docx.html", "/pdf2docx")
+
+
+@app.get("/svg-editable", response_class=HTMLResponse)
+async def svg_editable_page():
+    return _render_page("svg_editable.html", "/svg-editable")
 
 
 @app.get("/msg-convert", response_class=HTMLResponse)

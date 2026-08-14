@@ -3,8 +3,8 @@ let pollingTimer = null;
 let modelConfig = {};
 let routeConfig = {};
 let layoutModeConfig = {};
-let defaultWordLayoutMode = 'fixed';
-let defaultModel = 'google/gemini-3-flash-preview';
+let defaultWordLayoutMode = 'editable';
+let defaultModel = 'google/gemini-3.7-flash';
 let defaultRoute = 'openrouter';
 let defaultLayoutMode = 'ocr_html';
 const NGINX_UPLOAD_LIMIT_MB = 100;
@@ -13,23 +13,26 @@ const FRONTEND_UPLOAD_LIMIT_BYTES = FRONTEND_UPLOAD_LIMIT_MB * 1024 * 1024;
 const NGINX_UPLOAD_LIMIT_LABEL = `${NGINX_UPLOAD_LIMIT_MB}MB`;
 const FRONTEND_UPLOAD_LIMIT_LABEL = `${FRONTEND_UPLOAD_LIMIT_MB}MB`;
 const WEB_ASSET_RECOMMENDED_MODEL = 'anthropic/claude-sonnet-5';
+const HIDDEN_MODEL_IDS = new Set(['google/gemini-3-flash-preview']);
 
 const MODEL_DISPLAY_NAMES = {
     'google/gemini-3.1-flash-lite': '极速版V2',
     'gemini-3.1-flash-lite-preview': '极速版V2',
     'google/gemini-3.1-flash-lite-preview': '极速版V2',
     'google/gemini-3-flash-preview': '快速版V2',
-    'google/gemini-3.5-flash': '新模型',
-    'google/gemini-3.6-flash': 'Gemini 3.6 Flash',
+    'google/gemini-3.5-flash': '快速版V3',
+    'google/gemini-3.6-flash': '快速版V4',
+    'google/gemini-3.7-flash': '快速版V5',
     'google/gemini-3.5-flash-lite': '极速版V3',
-    'google/gemini-3.1-pro-preview': '增强版V2',
-    'anthropic/claude-sonnet-5': 'Claude Sonnet 5',
+    'google/gemini-3.1-pro-preview': '老旗舰V2',
+    'anthropic/claude-sonnet-5': '对比版V1',
     'Google Gemini 3 Flash Preview': '快速版V2',
-    '新模型': '新模型',
-    'Gemini 3.6 Flash': 'Gemini 3.6 Flash',
+    '新模型': '快速版V3',
+    'Gemini 3.6 Flash': '快速版V4',
+    'Gemini 3.7 Flash': '快速版V5',
     '极速版V3': '极速版V3',
-    'Google Gemini 3.1 Pro Preview': '增强版V2',
-    'Claude Sonnet 5': 'Claude Sonnet 5',
+    'Google Gemini 3.1 Pro Preview': '老旗舰V2',
+    'Claude Sonnet 5': '对比版V1',
 };
 
 const uploadArea = document.getElementById('uploadArea');
@@ -194,11 +197,12 @@ async function loadConfig() {
         modelConfig = {
             'google/gemini-3.1-flash-lite': { label: '极速版V2', description: '更轻量的极速 OCR 模型。' },
             'google/gemini-3-flash-preview': { label: '快速版V2', description: '速度更快，适合常规场景。' },
-            'google/gemini-3.5-flash': { label: '新模型', description: 'OpenRouter 新模型，适合常规场景。' },
-            'google/gemini-3.6-flash': { label: 'Gemini 3.6 Flash', description: '更高效的 Flash 模型，适合常规场景。' },
+            'google/gemini-3.5-flash': { label: '快速版V3', description: '适合常规场景。' },
+            'google/gemini-3.6-flash': { label: '快速版V4', description: '更高效的快速模型，适合常规场景。' },
+            'google/gemini-3.7-flash': { label: '快速版V5', description: '新一代快速模型，适合常规场景。' },
             'google/gemini-3.5-flash-lite': { label: '极速版V3', description: '更快更轻量的 OCR 模型，适合高吞吐场景。' },
-            'google/gemini-3.1-pro-preview': { label: '增强版V2', description: '更强的复杂版面理解能力。' },
-            'anthropic/claude-sonnet-5': { label: 'Claude Sonnet 5', description: '适合对比测试截图布局和网页重要图片定位效果。' },
+            'google/gemini-3.1-pro-preview': { label: '老旗舰V2', description: '更强的复杂版面理解能力。' },
+            'anthropic/claude-sonnet-5': { label: '对比版V1', description: '适合对比测试截图布局和网页重要图片定位效果。' },
         };
     }
     renderLayoutModes();
@@ -266,8 +270,12 @@ function getEffectiveLayoutMode() {
 }
 function renderModels() {
     modelSelect.innerHTML = '';
-    Object.entries(modelConfig).forEach(([value, info]) => modelSelect.add(new Option(getModelDisplayName(info.label || value), value)));
-    modelSelect.value = modelConfig[defaultModel] ? defaultModel : Object.keys(modelConfig)[0];
+    Object.entries(modelConfig).filter(([value]) => !HIDDEN_MODEL_IDS.has(value)).forEach(([value, info]) => {
+        const option = new Option(getModelDisplayName(value, info), value);
+        option.title = value;
+        modelSelect.add(option);
+    });
+    modelSelect.value = Array.from(modelSelect.options).some((option) => option.value === defaultModel) ? defaultModel : (modelSelect.options[0]?.value || '');
 }
 function renderRoutes() {
     if (!geminiRouteSelect) return;
@@ -278,8 +286,9 @@ function renderRoutes() {
 function updateModelInfo() {
     const model = modelSelect.value;
     const info = modelConfig[model] || {};
-    modelLabel.textContent = getModelDisplayName(info.label || model);
+    modelLabel.textContent = getModelDisplayName(model, info);
     modelDesc.textContent = info.description || '';
+    modelSelect.title = model;
 }
 function updateLayoutModeInfo(userTriggered = false) {
     if (!layoutModeSelect) return;
@@ -765,5 +774,5 @@ function buildCompletedTaskMessage(result) {
 async function safeReadError(response) { try { const p = await response.json(); return p?.detail?.error || p?.detail || p?.message || ''; } catch (_) { return ''; } }
 function formatFileSize(size) { if (size < 1024) return `${size} B`; if (size < 1024*1024) return `${(size/1024).toFixed(1)} KB`; return `${(size/1024/1024).toFixed(1)} MB`; }
 function escapeHtml(v) { return String(v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;'); }
-function getModelDisplayName(name) { return MODEL_DISPLAY_NAMES[name] || name; }
+function getModelDisplayName(name, info = {}) { return MODEL_DISPLAY_NAMES[name] || info.label || name; }
 function getLayoutModeDisplayName(mode) { return layoutModeConfig?.[mode]?.label || mode; }

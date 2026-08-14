@@ -8,6 +8,159 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <style>
+        /* PDF2DOCX 页面专属布局：让上传与核心参数成为首屏主角 */
+        .pdf2docx-page .hero-banner {
+            grid-template-columns: minmax(0, 1.25fr) minmax(420px, 0.75fr);
+            align-items: center;
+            gap: 20px;
+            padding: 22px 26px;
+        }
+
+        .pdf2docx-page .hero-banner h2 {
+            margin: 12px 0 8px;
+            font-size: clamp(28px, 3vw, 36px);
+        }
+
+        .pdf2docx-page .hero-banner p {
+            margin: 0;
+            line-height: 1.65;
+        }
+
+        .pdf2docx-page .hero-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .pdf2docx-page .metric-card {
+            height: 100%;
+            padding: 15px 16px;
+        }
+
+        .pdf2docx-page .workspace-grid {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .pdf2docx-page .upload-card {
+            padding: 26px;
+        }
+
+        .pdf2docx-page .upload-desc {
+            margin: 8px 0 18px;
+        }
+
+        .pdf2docx-page .upload-area {
+            padding: 22px;
+            margin-bottom: 18px;
+        }
+
+        .pdf2docx-page .upload-placeholder i {
+            font-size: 42px;
+            margin-bottom: 10px;
+        }
+
+        .pdf2docx-page .options-panel {
+            grid-template-columns: repeat(12, minmax(0, 1fr));
+            align-items: stretch;
+            gap: 14px;
+        }
+
+        .pdf2docx-page .processing-mode-card,
+        .pdf2docx-page .model-picker-card {
+            grid-column: span 3;
+        }
+
+        .pdf2docx-page .word-layout-card {
+            grid-column: span 6;
+        }
+
+        .pdf2docx-page .selection-summary-card,
+        .pdf2docx-page #geminiRouteGroup {
+            grid-column: 1 / -1;
+        }
+
+        .pdf2docx-page .option-card {
+            min-width: 0;
+            padding: 15px;
+        }
+
+        .selection-summary-card {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(124, 58, 237, 0.06));
+        }
+
+        .selection-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .selection-summary-item {
+            display: grid;
+            grid-template-columns: 34px minmax(0, 1fr);
+            gap: 10px;
+            align-items: start;
+            padding: 12px;
+            border: 1px solid rgba(88, 112, 138, 0.12);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .selection-summary-icon {
+            display: grid;
+            place-items: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            color: var(--primary-color);
+            background: var(--primary-soft);
+        }
+
+        .selection-summary-item strong,
+        .selection-summary-item span {
+            display: block;
+        }
+
+        .selection-summary-item strong {
+            margin-bottom: 3px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .selection-summary-item span {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
+        .pdf2docx-page .info-rail {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .pdf2docx-page .info-card {
+            height: 100%;
+            padding: 20px 22px;
+        }
+
+        .pdf2docx-page .info-card.emphasis {
+            background: linear-gradient(135deg, #f1f9ff, #f7f5ff);
+        }
+
+        .pdf2docx-page .stacked-stats {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .pdf2docx-page .stacked-stats div {
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .pdf2docx-page .btn-primary {
+            min-height: 54px;
+            border-radius: 16px;
+            font-size: 16px;
+        }
+
         .word-layout-card .lang-selector {
             display: flex;
             flex-direction: column;
@@ -166,7 +319,41 @@
             box-shadow: 0 4px 10px rgba(239, 68, 68, 0.28);
         }
 
+        @media (max-width: 1100px) {
+            .pdf2docx-page .hero-banner {
+                grid-template-columns: 1fr;
+            }
+
+            .pdf2docx-page .processing-mode-card,
+            .pdf2docx-page .model-picker-card,
+            .pdf2docx-page .word-layout-card {
+                grid-column: span 6;
+            }
+
+            .pdf2docx-page .word-layout-card {
+                grid-column: 1 / -1;
+            }
+        }
+
         @media (max-width: 720px) {
+            .pdf2docx-page .hero-metrics,
+            .pdf2docx-page .selection-summary-grid,
+            .pdf2docx-page .info-rail,
+            .pdf2docx-page .stacked-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .pdf2docx-page .options-panel {
+                grid-template-columns: 1fr;
+            }
+
+            .pdf2docx-page .processing-mode-card,
+            .pdf2docx-page .model-picker-card,
+            .pdf2docx-page .word-layout-card,
+            .pdf2docx-page .selection-summary-card {
+                grid-column: 1;
+            }
+
             .word-layout-card .lang-checkbox-group {
                 grid-template-columns: 1fr;
             }
@@ -175,7 +362,7 @@
 </head>
 
 <body>
-    <div class="container">
+    <div class="container pdf2docx-page">
         <header class="header">
             <div class="logo">
                 <div class="logo-mark"><i class="fas fa-file-word"></i></div>
@@ -197,9 +384,9 @@
 
         <section class="hero-banner">
             <div>
-                <span class="section-kicker">New Module</span>
+                <span class="section-kicker">OCR · Word</span>
                 <h2>复杂文档也能直接整理成 Word</h2>
-                <p>支持 PDF、PNG、JPG、BMP、GIF、WEBP。可在极速版 / 快速版 / 增强版间切换，适合票据、扫描件、表格型页面等场景。</p>
+                <p>支持 PDF、PNG、JPG、BMP、GIF、WEBP。可在极速版 / 快速版 / 老旗舰间切换，适合票据、扫描件、表格型页面等场景。</p>
             </div>
             <div class="hero-metrics">
                 <div class="metric-card">
@@ -208,7 +395,7 @@
                 </div>
                 <div class="metric-card">
                     <strong>模型可选</strong>
-                    <span>支持 `极速版V2`、`快速版V2` 与 `增强版V2`。</span>
+                    <span>极速、快速与老旗舰多档可选，默认使用快速版V5。</span>
                 </div>
             </div>
         </section>
@@ -219,12 +406,12 @@
                     <div class="upload-card">
                         <div class="section-title-row">
                             <div>
-                                <span class="section-kicker">Step 1</span>
-                                <h2>上传并选择模型</h2>
+                                <span class="section-kicker">开始转换</span>
+                                <h2>上传文件并设置输出</h2>
                             </div>
                             <div class="section-chip">PDF / Image</div>
                         </div>
-                        <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试增强版。当前 Nginx 上传上限约 100MB，前端按 95MB 做预检。</p>
+                        <p class="upload-desc">建议优先上传清晰扫描件。若版式复杂、表格较多，可优先尝试老旗舰。当前 Nginx 上传上限约 100MB，前端按 95MB 做预检。</p>
 
                         <div class="upload-area" id="uploadArea">
                             <input type="file" id="fileInput" accept=".pdf,image/*" multiple hidden>
@@ -249,7 +436,7 @@
                         </div>
 
                         <div class="options-panel">
-                            <div class="option-group option-card">
+                            <div class="option-group option-card processing-mode-card">
                                 <label for="layoutModeSelect">处理模式</label>
                                 <div class="field-wrap">
                                     <i class="fas fa-layer-group"></i>
@@ -273,7 +460,7 @@
                                 </div>
                             </div>
 
-                            <div class="option-group option-card">
+                            <div class="option-group option-card model-picker-card">
                                 <label for="modelSelect">转换模型</label>
                                 <div class="field-wrap">
                                     <i class="fas fa-robot"></i>
@@ -288,13 +475,23 @@
                                     <select id="geminiRouteSelect"></select>
                                 </div>
                             </div>
-                            <div class="option-group option-card">
-                                <label>模式与模型说明</label>
-                                <div style="line-height: 1.8; color: var(--text-secondary);">
-                                    <div id="layoutModeLabel" style="font-weight: 700; color: var(--text-primary);"></div>
-                                    <div id="layoutModeDesc" style="margin-bottom:6px;"></div>
-                                    <div id="modelLabel" style="font-weight: 700; color: var(--text-primary);"></div>
-                                    <div id="modelDesc"></div>
+                            <div class="option-group option-card selection-summary-card">
+                                <label>当前方案</label>
+                                <div class="selection-summary-grid">
+                                    <div class="selection-summary-item">
+                                        <span class="selection-summary-icon"><i class="fas fa-layer-group"></i></span>
+                                        <div>
+                                            <strong id="layoutModeLabel"></strong>
+                                            <span id="layoutModeDesc"></span>
+                                        </div>
+                                    </div>
+                                    <div class="selection-summary-item">
+                                        <span class="selection-summary-icon"><i class="fas fa-robot"></i></span>
+                                        <div>
+                                            <strong id="modelLabel"></strong>
+                                            <span id="modelDesc"></span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -316,7 +513,7 @@
                         <ul class="info-list">
                             <li>页数较多时建议耐心等待，系统会串行处理。</li>
                             <li>扫描件若存在阴影或倾斜，先做预清理会更稳。</li>
-                            <li>复杂表格优先试 `增强版V2`。</li>
+                            <li>复杂表格优先试 `老旗舰V2`。</li>
                         </ul>
                     </div>
                     <div class="info-card emphasis">

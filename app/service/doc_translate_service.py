@@ -132,7 +132,7 @@ SUPPORTED_LANGUAGES: Dict[str, Dict[str, str]] = {
 }
 
 # OCR 模型配置（复用 pdf2docx 的模型）
-DOC_TRANSLATE_DEFAULT_MODEL = "google/gemini-3-flash-preview"
+DOC_TRANSLATE_DEFAULT_MODEL = "google/gemini-3.7-flash"
 DOC_TRANSLATE_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
 
 DOC_TRANSLATE_MODELS: Dict[str, Dict[str, str]] = {
@@ -145,11 +145,15 @@ DOC_TRANSLATE_MODELS: Dict[str, Dict[str, str]] = {
         "description": "速度更快，适合常规 PDF / 图片文档。",
     },
     "google/gemini-3.5-flash": {
-        "label": "新模型",
+        "label": "快速版V3",
         "description": "OpenRouter 新模型，适合常规 PDF / 图片文档。",
     },
+    "google/gemini-3.7-flash": {
+        "label": "快速版V5",
+        "description": "新一代 Flash 模型，适合常规 PDF / 图片文档。",
+    },
     "google/gemini-3.1-pro-preview": {
-        "label": "增强版V2",
+        "label": "老旗舰V2",
         "description": "更强调复杂版面与细节理解，适合高难度文档。",
     },
 }
@@ -166,7 +170,7 @@ DOC_TRANSLATE_TRANSLATE_MODES: Dict[str, Dict[str, str]] = {
 }
 
 # 文本翻译模型
-DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE = "google/gemini-3-flash-preview"
+DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE = "google/gemini-3.7-flash"
 DOC_TRANSLATE_TRANSLATION_MODEL = DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE
 DOC_TRANSLATE_TRANSLATION_MAX_TOKENS = 384000
 DOC_TRANSLATE_TRANSLATION_REQUEST_MAX_TOKENS = 384000
@@ -176,20 +180,27 @@ DOC_TRANSLATE_TRANSLATION_RULES_MAX_CHARS = 4000
 DOC_TRANSLATE_TRANSLATION_ENGINES: Dict[str, Dict[str, Any]] = {
     "google/gemini-3-flash-preview": {
         "label": "Gemini 3 Flash Preview",
-        "description": "默认文本翻译引擎，速度优先，适合常规证件翻译。",
+        "description": "速度优先，适合常规证件翻译。",
         "provider": "gemini",
         "model": "google/gemini-3-flash-preview",
         "max_tokens": DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS,
     },
     "google/gemini-3.5-flash": {
-        "label": "Gemini 3.5 Flash",
+        "label": "快速版V3",
         "description": "新一代 Gemini Flash 模型，适合常规多语种翻译。",
         "provider": "gemini",
         "model": "google/gemini-3.5-flash",
         "max_tokens": DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS,
     },
+    "google/gemini-3.7-flash": {
+        "label": "快速版V5",
+        "description": "默认文本翻译引擎，适合常规多语种翻译。",
+        "provider": "gemini",
+        "model": "google/gemini-3.7-flash",
+        "max_tokens": DOC_TRANSLATE_GEMINI_TRANSLATION_MAX_TOKENS,
+    },
     "google/gemini-3.1-pro-preview": {
-        "label": "Gemini 3.1 Pro Preview",
+        "label": "老旗舰V2",
         "description": "更强调复杂语境和术语一致性，适合难度较高的证件文本。",
         "provider": "gemini",
         "model": "google/gemini-3.1-pro-preview",
@@ -311,6 +322,7 @@ DOC_TRANSLATE_TRANSLATION_ENGINE_ALIASES = {
     "gemini-3.1-flash-lite": "google/gemini-3.1-flash-lite",
     "gemini-3-flash-preview": "google/gemini-3-flash-preview",
     "gemini-3.5-flash": "google/gemini-3.5-flash",
+    "gemini-3.7-flash": "google/gemini-3.7-flash",
     "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
     "gpt-5.5": "openai/gpt-5.5",
     "gpt5.5": "openai/gpt-5.5",

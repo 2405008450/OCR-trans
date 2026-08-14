@@ -1,11 +1,11 @@
 const POLL_MS = 1600;
-const FALLBACK_OCR_MODEL = 'google/gemini-3-flash-preview';
+const FALLBACK_OCR_MODEL = 'google/gemini-3.7-flash';
 const FALLBACK_OCR_MODELS = {
   'google/gemini-3.1-flash-lite': { label: '极速版V2' },
-  'google/gemini-3-flash-preview': { label: '快速版V2' },
-  'google/gemini-3.5-flash': { label: '新模型' },
-  'google/gemini-3.1-pro-preview': { label: '增强版V2' },
-  'anthropic/claude-sonnet-5': { label: 'Claude Sonnet 5' },
+  'google/gemini-3.5-flash': { label: '快速版V3' },
+  'google/gemini-3.7-flash': { label: '快速版V5' },
+  'google/gemini-3.1-pro-preview': { label: '老旗舰V2' },
+  'anthropic/claude-sonnet-5': { label: '对比版V1' },
 };
 
 let currentTaskId = '';
@@ -119,11 +119,13 @@ function renderConfig(config) {
   const models = Object.keys(configuredModels).length ? configuredModels : FALLBACK_OCR_MODELS;
   defaultOcrModel = String(config.default_ocr_model || FALLBACK_OCR_MODEL);
   const modelSelect = document.getElementById('ocrModelSelect');
-  modelSelect.innerHTML = Object.entries(models).map(([value, item]) => {
+  modelSelect.innerHTML = Object.entries(models).filter(([value]) => value !== 'google/gemini-3-flash-preview').map(([value, item]) => {
     const label = item?.label || value;
-    return `<option value="${escAttr(value)}">${escHtml(label)}</option>`;
+    return `<option value="${escAttr(value)}" title="${escAttr(value)}">${escHtml(label)}</option>`;
   }).join('');
   modelSelect.value = models[defaultOcrModel] ? defaultOcrModel : FALLBACK_OCR_MODEL;
+  modelSelect.title = modelSelect.value;
+  modelSelect.addEventListener('change', () => { modelSelect.title = modelSelect.value; });
   document.getElementById('formatHint').innerHTML = [
     `实际统计：${escHtml(countable)}`,
     `OCR 支持：PDF 与独立图片 ${escHtml(images)}`,

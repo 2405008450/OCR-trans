@@ -934,7 +934,7 @@ def test_word_count_page_keeps_ocr_model_fallback_options():
     html = (project_root / "static" / "word_count.html").read_text(encoding="utf-8")
     javascript = (project_root / "static" / "word_count.js").read_text(encoding="utf-8")
 
-    assert '<option value="google/gemini-3-flash-preview" selected>' in html
+    assert '<option value="google/gemini-3.7-flash" title="google/gemini-3.7-flash" selected>' in html
     assert "FALLBACK_OCR_MODELS" in javascript
     assert "Object.keys(configuredModels).length ? configuredModels : FALLBACK_OCR_MODELS" in javascript
 

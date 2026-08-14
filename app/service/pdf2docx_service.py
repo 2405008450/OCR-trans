@@ -16,7 +16,7 @@ from pdf2docx import convert_text_to_word_via_libreoffice, normalize_to_word_htm
 
 ProgressCallback = Callable[[int, str], Awaitable[None]]
 PDF2DOCX_DEFAULT_GEMINI_ROUTE = GEMINI_ROUTE_OPENROUTER
-PDF2DOCX_DEFAULT_MODEL = "google/gemini-3-flash-preview"
+PDF2DOCX_DEFAULT_MODEL = "google/gemini-3.7-flash"
 PDF2DOCX_LAYOUT_MODE_OCR_HTML = "ocr_html"
 PDF2DOCX_LAYOUT_MODE_FIXED = "fixed_layout"
 PDF2DOCX_LAYOUT_MODE_CHAT_PRESERVE = "chat_preserve"
@@ -53,23 +53,27 @@ PDF2DOCX_MODELS: Dict[str, Dict[str, str]] = {
         "description": "速度更快，适合常规 PDF / 图片转 Word 场景。",
     },
     "google/gemini-3.5-flash": {
-        "label": "新模型",
-        "description": "OpenRouter 新模型，适合常规 PDF / 图片转 Word 场景。",
+        "label": "快速版V3",
+        "description": "适合常规 PDF / 图片转 Word 场景。",
     },
     "google/gemini-3.6-flash": {
-        "label": "Gemini 3.6 Flash",
-        "description": "更高效的 Flash 模型，适合常规 PDF / 图片转 Word 场景。",
+        "label": "快速版V4",
+        "description": "更高效的快速模型，适合常规 PDF / 图片转 Word 场景。",
+    },
+    "google/gemini-3.7-flash": {
+        "label": "快速版V5",
+        "description": "新一代快速模型，适合常规 PDF / 图片转 Word 场景。",
     },
     "google/gemini-3.5-flash-lite": {
         "label": "极速版V3",
         "description": "更快更轻量的 OCR 模型，适合高吞吐 PDF / 图片转 Word 场景。",
     },
     "google/gemini-3.1-pro-preview": {
-        "label": "Google Gemini 3.1 Pro Preview",
+        "label": "老旗舰V2",
         "description": "更强的复杂版面与细节理解能力，适合高难度文档。",
     },
     "anthropic/claude-sonnet-5": {
-        "label": "Claude Sonnet 5",
+        "label": "对比版V1",
         "description": "用于对比测试截图布局、头像、表情和网页重要图片定位效果。",
     },
 }
@@ -78,6 +82,7 @@ PDF2DOCX_MODEL_ALIASES = {
     "gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
     "google/gemini-3.1-flash-lite-preview": "google/gemini-3.1-flash-lite",
     "gemini-3.6-flash": "google/gemini-3.6-flash",
+    "gemini-3.7-flash": "google/gemini-3.7-flash",
     "gemini-3.5-flash-lite": "google/gemini-3.5-flash-lite",
 }
 

@@ -89,9 +89,9 @@ async function loadConfig() {
     } catch (error) {
         console.error(error);
         modelConfig = {
-            'google/gemini-3.1-pro-preview': { label: '增强版V2' },
-            'google/gemini-3-flash-preview': { label: '快速版V2' },
-            'google/gemini-3.5-flash': { label: '新模型' },
+            'google/gemini-3.1-pro-preview': { label: '老旗舰V2' },
+            'google/gemini-3.5-flash': { label: '快速版V3' },
+            'google/gemini-3.7-flash': { label: '快速版V5' },
         };
         routeConfig = {
             openrouter: { label: '线路2（OpenRouter）' },
@@ -107,17 +107,22 @@ function renderModels() {
     const modelOrder = {
         'google/gemini-3-flash-preview': 0,
         'google/gemini-3.5-flash': 1,
-        'google/gemini-3.1-pro-preview': 2,
+        'google/gemini-3.7-flash': 2,
+        'google/gemini-3.1-pro-preview': 3,
     };
 
     Object.entries(modelConfig)
+        .filter(([value]) => value !== 'google/gemini-3-flash-preview')
         .sort(([left], [right]) => (modelOrder[left] ?? 99) - (modelOrder[right] ?? 99))
         .forEach(([value, info]) => {
-        modelSelect.add(new Option(info.label || value, value));
+        const option = new Option(info.label || value, value);
+        option.title = value;
+        modelSelect.add(option);
     });
 
     const fallback = Object.keys(modelConfig)[0] || defaultModel;
     modelSelect.value = modelConfig[defaultModel] ? defaultModel : fallback;
+    modelSelect.title = modelSelect.value;
 }
 
 function renderRoutes() {

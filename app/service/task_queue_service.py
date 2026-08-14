@@ -26,6 +26,7 @@ from app.service.business_licence_service import (
     execute_business_licence_task,
 )
 from app.service.doc_translate_service import (
+    DOC_TRANSLATE_DEFAULT_MODEL,
     DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
     DOC_TRANSLATE_DEFAULT_WORD_LAYOUT_MODE,
     execute_doc_translate_task,
@@ -56,6 +57,11 @@ from app.service.pdf2docx_service import (
 )
 from app.service.pdf_merge_service import execute_pdf_merge_task, prepare_pdf_merge_request
 from app.service.pdf_tools_service import execute_pdf_tools_task, prepare_pdf_tools_request
+from app.service.svg_editable_service import (
+    SVG_EDITABLE_DEFAULT_MODEL,
+    SVG_EDITABLE_DEFAULT_ROUTE,
+    execute_svg_editable_task_from_path,
+)
 from app.service.word_count_service import (
     execute_word_count_task,
     prepare_word_count_request,
@@ -93,6 +99,7 @@ class TaskQueueService:
     MAX_AUTO_REQUEUE_ATTEMPTS = 1
     DEFAULT_TASK_TYPE_LIMITS: Dict[str, int] = {
         'pdf2docx': 1,
+        'svg_editable': 1,
         'doc_translate': 1,
         'alignment': 1,
         'drivers_license': 1,
@@ -764,6 +771,51 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
+    async def submit_svg_editable_task(
+        self,
+        *,
+        file: UploadFile,
+        model: str = SVG_EDITABLE_DEFAULT_MODEL,
+        gemini_route: str = SVG_EDITABLE_DEFAULT_ROUTE,
+        confidence_threshold: float = 0.82,
+    ) -> TaskSubmitResult:
+        params = {
+            'model': model,
+            'gemini_route': gemini_route,
+            'confidence_threshold': confidence_threshold,
+        }
+        staged_uploads = await self._stage_uploads('svg_editable', [('input', file, 'input.svg')])
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='svg_editable',
+                filename=file.filename or 'input.svg',
+                params=params,
+                staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+
+            item = staged_uploads[0]
+            input_path = self._move_staged_upload(
+                item,
+                Path(settings.UPLOAD_DIR) / 'svg_editable' / reserved_task.display_no,
+                reserved_task.display_no,
+                reserved_task.task_id,
+            )
+            self._update_task_input_files(
+                reserved_task.task_id,
+                {'input_path': input_path, 'original_filename': item.original_filename},
+            )
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
     async def submit_msg_convert_task(
         self,
         *,
@@ -1074,7 +1126,7 @@ class TaskQueueService:
                 return None
             result = json.loads(task.result_json) if task.result_json else None
             tasks_ahead = task_repo.count_tasks_ahead(db, task) if task.status == 'queued' else 0
-            payload = {'display_no': task.display_no, 'task_id': task.task_id, 'status': {'queued': 'queued', 'running': 'processing', 'done': 'done', 'failed': 'failed', 'cancelled': 'cancelled'}.get(task.status, task.status), 'progress': task.progress, 'message': task.message or '', 'details': [], 'result': result, 'error': task.error_message, 'stream_log': self._task_logs.get(task_id, ''), 'created_at': task.created_at.isoformat() if task.created_at else None, 'started_at': task.started_at.isoformat() if task.started_at else None, 'finished_at': task.finished_at.isoformat() if task.finished_at else None}
+            payload = {'display_no': task.display_no, 'task_id': task.task_id, 'status': {'queued': 'queued', 'running': 'processing', 'done': 'done', 'failed': 'failed', 'cancelled': 'cancelled'}.get(task.status, task.status), 'progress': task.progress, 'message': task.message or '', 'details': [], 'result': result, 'output_files': json.loads(task.output_files_json or '[]'), 'error': task.error_message, 'stream_log': self._task_logs.get(task_id, ''), 'created_at': task.created_at.isoformat() if task.created_at else None, 'started_at': task.started_at.isoformat() if task.started_at else None, 'finished_at': task.finished_at.isoformat() if task.finished_at else None}
             if task.status == 'queued':
                 payload['queue_position'] = tasks_ahead + 1
                 payload['tasks_ahead'] = tasks_ahead
@@ -1135,7 +1187,7 @@ class TaskQueueService:
         return None
 
     def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
-        if task_type in {'doc_translate', 'business_licence', 'pdf2docx', 'msg_convert', 'english_variant', 'audio_check', 'audio_transcription'}:
+        if task_type in {'doc_translate', 'business_licence', 'pdf2docx', 'svg_editable', 'msg_convert', 'english_variant', 'audio_check', 'audio_transcription'}:
             return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
 
         if task_type == 'word_count':
@@ -1372,6 +1424,9 @@ class TaskQueueService:
             elif task_type == 'pdf2docx':
                 result = await self._execute_pdf2docx(task_id, display_no, input_files, params, update)
                 output_path = result.get('output_docx') if result else None
+            elif task_type == 'svg_editable':
+                result = await self._execute_svg_editable(task_id, display_no, input_files, params, update)
+                output_path = result.get('output_svg') if result else None
             elif task_type == 'word_count':
                 result = await self._execute_word_count(task_id, display_no, input_files, params, update)
                 output_path = result.get('report_excel') if result else None
@@ -1520,7 +1575,7 @@ class TaskQueueService:
     async def _execute_doc_translate(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'doc translate started')
         target_langs = [lang.strip() for lang in params.get('target_langs', 'en').split(',') if lang.strip()]
-        return await execute_doc_translate_task(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', source_lang=params.get('source_lang', 'zh'), target_langs=target_langs, translate_mode=params.get('translate_mode', 'standard'), word_layout_mode=params.get('word_layout_mode', DOC_TRANSLATE_DEFAULT_WORD_LAYOUT_MODE), ocr_model=params.get('ocr_model', 'google/gemini-3-flash-preview'), gemini_route=params.get('gemini_route', 'openrouter'), translation_engine=params.get('translation_engine', DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE), translation_rules=params.get('translation_rules', ''), progress_callback=update, executor=self._task_executor)
+        return await execute_doc_translate_task(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', source_lang=params.get('source_lang', 'zh'), target_langs=target_langs, translate_mode=params.get('translate_mode', 'standard'), word_layout_mode=params.get('word_layout_mode', DOC_TRANSLATE_DEFAULT_WORD_LAYOUT_MODE), ocr_model=params.get('ocr_model', DOC_TRANSLATE_DEFAULT_MODEL), gemini_route=params.get('gemini_route', 'openrouter'), translation_engine=params.get('translation_engine', DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE), translation_rules=params.get('translation_rules', ''), progress_callback=update, executor=self._task_executor)
 
     async def _execute_business_licence(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'business licence started')
@@ -1574,6 +1629,19 @@ class TaskQueueService:
     async def _execute_pdf2docx(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'pdf2docx started')
         return await execute_pdf2docx_task_from_path(task_id=task_id, display_no=display_no, input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf', model=params.get('model', PDF2DOCX_DEFAULT_MODEL), gemini_route=params.get('gemini_route', PDF2DOCX_DEFAULT_GEMINI_ROUTE), layout_mode=params.get('layout_mode', PDF2DOCX_DEFAULT_LAYOUT_MODE), progress_callback=update, executor=self._task_executor)
+
+    async def _execute_svg_editable(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
+        return await execute_svg_editable_task_from_path(
+            task_id=task_id,
+            display_no=display_no,
+            input_path=input_files['input_path'],
+            original_filename=input_files.get('original_filename') or 'input.svg',
+            model=params.get('model', SVG_EDITABLE_DEFAULT_MODEL),
+            gemini_route=params.get('gemini_route', SVG_EDITABLE_DEFAULT_ROUTE),
+            confidence_threshold=float(params.get('confidence_threshold', 0.82)),
+            progress_callback=update,
+            executor=self._task_executor,
+        )
 
     async def _execute_word_count(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
         await update(5, 'word count started')
@@ -1719,6 +1787,10 @@ class TaskQueueService:
             add_result('output_docx')
         elif task_type == 'pdf2docx':
             add_result('output_docx')
+        elif task_type == 'svg_editable':
+            add_result('output_svg')
+            add_result('review_json', ftype='report')
+            add_result('preview_png', ftype='report')
         elif task_type == 'word_count':
             add_result('report_excel', ftype='report')
             add_result('report_json', ftype='report')

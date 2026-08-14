@@ -102,6 +102,12 @@ from app.service.pdf2docx_service import (
 )
 from app.service.pdf_merge_service import discover_pdf_files, get_pdf_merge_config
 from app.service.pdf_tools_service import get_pdf_tools_config
+from app.service.svg_editable_service import (
+    SVG_EDITABLE_DEFAULT_MODEL,
+    SVG_EDITABLE_DEFAULT_ROUTE,
+    get_svg_editable_config,
+    validate_svg_filename,
+)
 from app.service.task_queue_service import UploadSizeLimitError, task_queue_service
 from app.service.word_count_service import (
     discover_word_count_files,
@@ -905,7 +911,7 @@ async def run_alignment(
     translated_file: UploadFile = File(...),
     source_lang: str = Query("zh"),
     target_lang: str = Query("en"),
-    model_name: str = Query("Google gemini-3-flash-preview"),
+    model_name: str = Query("Google: google/gemini-3.7-flash"),
     gemini_route: str = Query("openrouter"),
     enable_post_split: bool = Query(True),
     alignment_mode: str = Query("hybrid"),
@@ -1723,6 +1729,44 @@ async def run_pdf2docx_batch(files: List[UploadFile] = File(...), model: str = Q
 
 @router.get("/pdf2docx/status/{task_id}")
 async def get_pdf2docx_status(task_id: str):
+    queue_task = task_queue_service.get_task_status(task_id)
+    if not queue_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return queue_task
+
+
+@router.get("/svg-editable/config")
+async def svg_editable_config():
+    return get_svg_editable_config()
+
+
+@router.post("/svg-editable")
+async def run_svg_editable(
+    file: UploadFile = File(...),
+    model: str = Query(SVG_EDITABLE_DEFAULT_MODEL),
+    gemini_route: str = Query(SVG_EDITABLE_DEFAULT_ROUTE),
+    confidence_threshold: float = Query(0.82, ge=0.5, le=0.99),
+):
+    try:
+        validate_svg_filename(file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    submit_result = await task_queue_service.submit_svg_editable_task(
+        file=file,
+        model=model,
+        gemini_route=gemini_route,
+        confidence_threshold=confidence_threshold,
+    )
+    return {
+        "status": "ACCEPTED",
+        "task_id": submit_result.task_id,
+        "message": "Task submitted",
+        "deduped": submit_result.deduped,
+    }
+
+
+@router.get("/svg-editable/status/{task_id}")
+async def get_svg_editable_status(task_id: str):
     queue_task = task_queue_service.get_task_status(task_id)
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")
