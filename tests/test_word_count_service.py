@@ -1143,3 +1143,98 @@ def test_word_count_upload_endpoint_and_size_error(monkeypatch):
     with pytest.raises(task_controller.HTTPException) as exc_info:
         anyio.run(task_controller.submit_word_count_upload, upload, "off", None)
     assert exc_info.value.status_code == 413
+
+def test_docx_textbox_compatibility_markup_is_counted_once():
+    paragraph = etree.fromstring(
+        b"""<w:p
+            xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+            xmlns:v="urn:schemas-microsoft-com:vml"
+            xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+          <mc:AlternateContent>
+            <mc:Choice Requires="wps">
+              <wps:txbx><w:txbxContent><w:p><w:r><w:t>Alpha beta</w:t></w:r></w:p></w:txbxContent></wps:txbx>
+            </mc:Choice>
+            <mc:Fallback>
+              <v:textbox><w:txbxContent><w:p><w:r><w:t>Alpha beta</w:t></w:r></w:p></w:txbxContent></v:textbox>
+            </mc:Fallback>
+          </mc:AlternateContent>
+        </w:p>"""
+    )
+
+    texts = word_count_service._extract_textbox_texts(paragraph)
+
+    assert texts == ["Alpha beta"]
+    assert sum(word_count_service._count_text(text).word_count for text in texts) == 2
+
+
+def test_docx_text_extraction_skips_hidden_deleted_and_fallback_text():
+    paragraph = etree.fromstring(
+        b"""<w:p
+            xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+          <w:r><w:t>Visible</w:t></w:r>
+          <w:r><w:rPr><w:vanish/></w:rPr><w:t>Hidden</w:t></w:r>
+          <w:del><w:r><w:t>Deleted</w:t></w:r></w:del>
+          <w:moveFrom><w:r><w:t>Moved</w:t></w:r></w:moveFrom>
+          <mc:AlternateContent>
+            <mc:Choice Requires="w"><w:r><w:t>Choice</w:t></w:r></mc:Choice>
+            <mc:Fallback><w:r><w:t>Fallback</w:t></w:r></mc:Fallback>
+          </mc:AlternateContent>
+        </w:p>"""
+    )
+
+    assert (
+        word_count_service._extract_text_from_element(paragraph, skip_textboxes=False)
+        == "VisibleChoice"
+    )
+
+
+def test_docx_notes_filter_separator_types_and_keep_valid_ids_zero_and_one():
+    footnotes_xml = b"""<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:footnote w:id="-1" w:type="separator"><w:p><w:r><w:t>Separator</w:t></w:r></w:p></w:footnote>
+      <w:footnote w:id="0"><w:p><w:r><w:t>Valid zero</w:t></w:r></w:p></w:footnote>
+      <w:footnote w:id="1"><w:p><w:r><w:t>Valid one</w:t></w:r></w:p></w:footnote>
+      <w:footnote w:id="2" w:type="continuationSeparator"><w:p><w:r><w:t>Continuation</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>"""
+
+    assert word_count_service._extract_note_like_texts(
+        footnotes_xml,
+        "footnote",
+    ) == ["Valid zero", "Valid one"]
+
+
+def test_docx_file_count_does_not_repeat_textbox_compatibility_markup(tmp_path):
+    source_path = tmp_path / "textbox.docx"
+    document_xml = b"""<w:document
+        xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+        xmlns:v="urn:schemas-microsoft-com:vml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+      <w:body>
+        <w:p><w:r><w:t>Main text</w:t></w:r></w:p>
+        <w:p><mc:AlternateContent>
+          <mc:Choice Requires="wps"><wps:txbx><w:txbxContent><w:p><w:r><w:t>Box text</w:t></w:r></w:p></w:txbxContent></wps:txbx></mc:Choice>
+          <mc:Fallback><v:textbox><w:txbxContent><w:p><w:r><w:t>Box text</w:t></w:r></w:p></w:txbxContent></v:textbox></mc:Fallback>
+        </mc:AlternateContent></w:p>
+      </w:body>
+    </w:document>"""
+    footnotes_xml = b"""<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+      <w:footnote w:id="-1" w:type="separator"><w:p/></w:footnote>
+      <w:footnote w:id="1"><w:p><w:r><w:t>Foot note</w:t></w:r></w:p></w:footnote>
+    </w:footnotes>"""
+    with ZipFile(source_path, "w") as package:
+        package.writestr("word/document.xml", document_xml)
+        package.writestr("word/footnotes.xml", footnotes_xml)
+
+    result, rows, _ = word_count_service._count_single_file(
+        file_path=source_path,
+        root=tmp_path,
+        converted_dir=tmp_path,
+        max_bytes=1024 * 1024,
+    )
+
+    assert result["word_count"] == 4
+    assert result["extra_word_count"] == 2
+    assert result["source_counts"] == {"body": 1, "textbox": 1, "footnote": 1}
+    assert [row["source_type"] for row in rows] == ["body", "textbox", "footnote"]

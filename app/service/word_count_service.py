@@ -204,6 +204,7 @@ NS = {
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
     "c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "mc": "http://schemas.openxmlformats.org/markup-compatibility/2006",
     "wps": "http://schemas.microsoft.com/office/word/2010/wordprocessingShape",
     "v": "urn:schemas-microsoft-com:vml",
     "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
@@ -2287,8 +2288,12 @@ def _extract_note_like_texts(xml_bytes: bytes, source_type: str) -> list[str]:
 
     texts: list[str] = []
     for elem in root.iter(item_tag):
-        note_id = elem.get(_qn("w:id"), "")
-        if note_id in {"-1", "0", "1"} and source_type in {"footnote", "endnote"}:
+        note_type = elem.get(_qn("w:type"), "")
+        if source_type in {"footnote", "endnote"} and note_type in {
+            "separator",
+            "continuationSeparator",
+            "continuationNotice",
+        }:
             continue
         text = _extract_text_from_element(elem, skip_textboxes=False)
         if text.strip():
@@ -2297,53 +2302,98 @@ def _extract_note_like_texts(xml_bytes: bytes, source_type: str) -> list[str]:
 
 
 def _extract_text_from_element(element, *, skip_textboxes: bool) -> str:
-    textbox_text_ids: set[int] = set()
-    if skip_textboxes:
-        for textbox in _iter_textbox_elements(element):
-            for text_node in textbox.iter(_qn("w:t")):
-                textbox_text_ids.add(id(text_node))
-
     deleted_tag = _qn("w:del")
+    moved_from_tag = _qn("w:moveFrom")
     instr_tag = _qn("w:instrText")
+    text_tag = _qn("w:t")
+    textbox_tags = {_qn("wps:txbx"), _qn("w:txbxContent"), _qn("v:textbox")}
     parts: list[str] = []
-    for text_node in element.iter():
-        if text_node.tag not in {_qn("w:t"), instr_tag}:
-            continue
-        if text_node.tag == instr_tag:
-            continue
-        if id(text_node) in textbox_text_ids:
-            continue
-        if _has_ancestor(text_node, deleted_tag):
-            continue
-        if text_node.text:
-            parts.append(text_node.text)
+
+    def walk(node, *, deleted: bool = False, hidden: bool = False) -> None:
+        if node.tag == _qn("mc:AlternateContent"):
+            preferred_branch = _select_preferred_alternate_content_branch(node)
+            if preferred_branch is not None:
+                walk(preferred_branch, deleted=deleted, hidden=hidden)
+            return
+        if skip_textboxes and node.tag in textbox_tags:
+            return
+
+        next_deleted = deleted or node.tag in {deleted_tag, moved_from_tag}
+        next_hidden = hidden or _is_hidden_word_run(node)
+        if next_deleted or next_hidden:
+            return
+        if node.tag == instr_tag:
+            return
+        if node.tag == text_tag:
+            if node.text:
+                parts.append(node.text)
+            return
+        for child in node:
+            walk(child, deleted=next_deleted, hidden=next_hidden)
+
+    walk(element)
     return "".join(parts)
 
 
 def _iter_textbox_elements(element) -> Iterable[Any]:
-    for tag in (_qn("wps:txbx"), _qn("w:txbxContent"), _qn("v:textbox")):
-        yield from element.iter(tag)
+    canonical_tag = _qn("w:txbxContent")
+    wrapper_tags = {_qn("wps:txbx"), _qn("v:textbox")}
+
+    def walk(node) -> Iterable[Any]:
+        if node.tag == _qn("mc:AlternateContent"):
+            preferred_branch = _select_preferred_alternate_content_branch(node)
+            if preferred_branch is not None:
+                yield from walk(preferred_branch)
+            return
+        if node.tag == canonical_tag:
+            yield node
+            return
+        if node.tag in wrapper_tags:
+            canonical_descendants = list(node.iter(canonical_tag))
+            if canonical_descendants:
+                for descendant in canonical_descendants:
+                    yield descendant
+            else:
+                yield node
+            return
+        for child in node:
+            yield from walk(child)
+
+    yield from walk(element)
 
 
 def _extract_textbox_texts(element) -> list[str]:
     texts: list[str] = []
-    seen: set[int] = set()
     for textbox in _iter_textbox_elements(element):
-        if id(textbox) in seen:
-            continue
-        seen.add(id(textbox))
         text = _extract_text_from_element(textbox, skip_textboxes=False)
         if text.strip():
             texts.append(text)
     return texts
 
 
-def _has_ancestor(node, ancestor_tag: str) -> bool:
-    parent = node.getparent()
-    while parent is not None:
-        if parent.tag == ancestor_tag:
+def _select_preferred_alternate_content_branch(element):
+    for child in element:
+        if child.tag == _qn("mc:Choice"):
+            return child
+    for child in element:
+        if child.tag == _qn("mc:Fallback"):
+            return child
+    return None
+
+
+def _is_hidden_word_run(element) -> bool:
+    if element.tag != _qn("w:r"):
+        return False
+    run_properties = element.find("w:rPr", NS)
+    if run_properties is None:
+        return False
+    for property_name in ("w:vanish", "w:webHidden"):
+        hidden_property = run_properties.find(property_name, NS)
+        if hidden_property is None:
+            continue
+        value = str(hidden_property.get(_qn("w:val"), "")).strip().lower()
+        if value not in {"0", "false", "off"}:
             return True
-        parent = parent.getparent()
     return False
 
 
