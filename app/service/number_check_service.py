@@ -31,7 +31,7 @@ _task_progress: Dict[str, Dict[str, Any]] = {}
 _specialist_import_lock = threading.Lock()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NUMBER_CHECK_LATEST_ROOT = REPO_ROOT / "专检" / "数检_程序-AIV2"
+NUMBER_CHECK_LATEST_ROOT = REPO_ROOT / "专检" / "数检_程序-AI"
 NUMBER_CHECK_MAIN_FILE = NUMBER_CHECK_LATEST_ROOT / "main.py"
 
 NUMBER_CHECK_MODE_ALIGNMENT = "alignment"

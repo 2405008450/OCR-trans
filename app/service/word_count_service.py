@@ -68,6 +68,20 @@ OCR_MODES = {
 PDF_OCR_SPARSE_WORD_THRESHOLD = 20
 PDF_OCR_IMAGE_COVERAGE_THRESHOLD = 0.5
 
+
+def _xml_safe_text(value: Any) -> Any:
+    """移除 XML 1.0 不允许的字符，避免 Word/Excel 导出整批失败。"""
+    if not isinstance(value, str):
+        return value
+    return "".join(
+        char
+        for char in value
+        if ord(char) in {0x09, 0x0A, 0x0D}
+        or 0x20 <= ord(char) <= 0xD7FF
+        or 0xE000 <= ord(char) <= 0xFFFD
+        or 0x10000 <= ord(char) <= 0x10FFFF
+    )
+
 EXTRA_SOURCE_TYPES = {"header", "footer", "footnote", "endnote", "chart", "comment"}
 
 SCRIPT_COUNT_FIELDS = (
@@ -3019,6 +3033,10 @@ def _write_excel_report(path: Path, payload: dict[str, Any]) -> None:
     workbook.save(path)
 
 
+def _append_xml_safe_row(sheet, values: Iterable[Any]) -> None:
+    sheet.append([_xml_safe_text(value) for value in values])
+
+
 def _style_header(sheet, row: int = 1) -> None:
     fill = PatternFill("solid", fgColor="1F4E78")
     font = Font(color="FFFFFF", bold=True)
@@ -3082,9 +3100,9 @@ def _write_summary_sheet(sheet, payload: dict[str, Any]) -> None:
         (f"脚本明细：{SCRIPT_COUNT_LABELS.get(field, field)}", summary.get(f"total_{field}", 0))
         for field in SCRIPT_COUNT_FIELDS
     )
-    sheet.append(["项目", "值"])
+    _append_xml_safe_row(sheet, ["项目", "值"])
     for row in rows:
-        sheet.append(list(row))
+        _append_xml_safe_row(sheet, row)
     _style_header(sheet)
     _autosize(sheet)
 
@@ -3127,9 +3145,10 @@ def _write_file_sheet(sheet, files: list[dict[str, Any]]) -> None:
         "错误",
     ]
     headers.extend(SCRIPT_COUNT_LABELS[field] for field in SCRIPT_COUNT_FIELDS)
-    sheet.append(headers)
+    _append_xml_safe_row(sheet, headers)
     for item in files:
-        sheet.append(
+        _append_xml_safe_row(
+            sheet,
             [
                 item.get("relative_path", ""),
                 item.get("page_count", 0),
@@ -3196,9 +3215,10 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
         "文本预览",
     ]
     headers.extend(SCRIPT_COUNT_LABELS[field] for field in SCRIPT_COUNT_FIELDS)
-    sheet.append(headers)
+    _append_xml_safe_row(sheet, headers)
     for row in rows:
-        sheet.append(
+        _append_xml_safe_row(
+            sheet,
             [
                 row.get("relative_path", ""),
                 row.get("extension", ""),
@@ -3228,11 +3248,12 @@ def _write_source_sheet(sheet, rows: list[dict[str, Any]]) -> None:
 
 
 def _write_fail_sheet(sheet, files: list[dict[str, Any]]) -> None:
-    sheet.append(["相对路径", "扩展名", "文件类型", "状态", "统计方法", "图片数量", "OCR 页数", "OCR 失败页", "消息", "警告", "错误", "统计时间"])
+    _append_xml_safe_row(sheet, ["相对路径", "扩展名", "文件类型", "状态", "统计方法", "图片数量", "OCR 页数", "OCR 失败页", "消息", "警告", "错误", "统计时间"])
     for item in files:
         if item.get("status") == STATUS_COUNTED:
             continue
-        sheet.append(
+        _append_xml_safe_row(
+            sheet,
             [
                 item.get("relative_path", ""),
                 item.get("extension", ""),
@@ -3253,9 +3274,9 @@ def _write_fail_sheet(sheet, files: list[dict[str, Any]]) -> None:
 
 
 def _write_rules_sheet(sheet, rules: list[str]) -> None:
-    sheet.append(["规则说明"])
+    _append_xml_safe_row(sheet, ["规则说明"])
     for rule in rules:
-        sheet.append([rule])
+        _append_xml_safe_row(sheet, [rule])
     _style_header(sheet)
     _autosize(sheet)
 
@@ -3417,7 +3438,7 @@ def _write_language_docx(
     )
 
     title = document.add_paragraph(style=title_style)
-    title.add_run(f"{source_name} - {config['label']}文本")
+    title.add_run(_xml_safe_text(f"{source_name} - {config['label']}文本"))
     subtitle = document.add_paragraph(style=subtitle_style)
     subtitle.add_run("由字数统计模块按文字体系自动拆分生成；数字、空格和标点按相邻文字归属。")
 
@@ -3432,7 +3453,7 @@ def _write_language_docx(
             current_file = relative_path
             current_source = None
             heading = document.add_paragraph(
-                relative_path or source_name,
+                _xml_safe_text(relative_path or source_name),
                 style="Heading 1" if file_count > 1 else "Heading 2",
             )
             heading.paragraph_format.keep_with_next = True
@@ -3440,14 +3461,14 @@ def _write_language_docx(
         if source_key != current_source:
             current_source = source_key
             source_heading = document.add_paragraph(
-                f"{source_label}{'（额外内容）' if is_extra else ''}",
+                _xml_safe_text(f"{source_label}{'（额外内容）' if is_extra else ''}"),
                 style="Heading 2" if file_count > 1 else "Heading 3",
             )
             source_heading.paragraph_format.keep_with_next = True
 
         paragraph = document.add_paragraph()
         paragraph.paragraph_format.keep_together = False
-        run = paragraph.add_run(str(fragment.get("text") or ""))
+        run = paragraph.add_run(_xml_safe_text(str(fragment.get("text") or "")))
         _set_run_font(run, font_name, str(config["language_tag"]), rtl=bool(config["rtl"]))
         if config["rtl"]:
             _set_paragraph_rtl(paragraph)
@@ -3457,7 +3478,7 @@ def _write_language_docx(
         font_name=font_name,
         language_tag=str(config["language_tag"]),
     )
-    document.core_properties.title = f"{source_name} - {config['label']}文本"
+    document.core_properties.title = _xml_safe_text(f"{source_name} - {config['label']}文本")
     document.core_properties.subject = "字数统计分语系导出"
     document.core_properties.comments = "内容型导出，不复刻原文档版面。"
     document.save(path)

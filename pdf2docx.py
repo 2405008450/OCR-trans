@@ -327,7 +327,18 @@ def _image_has_visible_text_like_content(image_bytes: bytes) -> bool:
             gray = image.convert("L")
             gray.thumbnail((900, 900))
             histogram = gray.histogram()
+            dark_mask = gray.point(lambda value: 255 if value < 190 else 0)
+            dark_bbox = dark_mask.getbbox()
     except Exception:
+        return False
+
+    if dark_bbox is None:
+        return False
+    left, top, right, bottom = dark_bbox
+    # 扫描件边缘常带一条装订线或裁切线；它不是文字，不应让空白页 OCR 失败。
+    if (right - left) <= max(4, int(gray.width * 0.01)):
+        return False
+    if (bottom - top) <= max(4, int(gray.height * 0.01)):
         return False
 
     total = sum(histogram) or 1

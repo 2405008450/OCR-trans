@@ -1,4 +1,5 @@
 import inspect
+import importlib
 import sys
 import types
 from pathlib import Path
@@ -8,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.service import number_check_service
 
 
-def test_number_check_service_uses_v2_specialist_root():
-    expected_root = Path(__file__).resolve().parents[1] / "专检" / "数检_程序-AIV2"
+def test_number_check_service_uses_latest_specialist_root():
+    expected_root = Path(__file__).resolve().parents[1] / "专检" / "数检_程序-AI"
 
     assert number_check_service.NUMBER_CHECK_LATEST_ROOT == expected_root
     assert number_check_service.NUMBER_CHECK_MAIN_FILE == expected_root / "main.py"
@@ -27,7 +28,7 @@ def test_clear_specialist_module_cache_removes_modules_from_specialist_tree():
     assert module_name not in sys.modules
 
 
-def test_v2_main_keeps_system_integration_contract(monkeypatch):
+def test_latest_main_keeps_system_integration_contract(monkeypatch):
     monkeypatch.setenv("API_KEY", "test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -48,6 +49,18 @@ def test_v2_main_keeps_system_integration_contract(monkeypatch):
         "force_mode_b",
         "ai_check_all",
     }.issubset(parameters)
+
+
+def test_latest_version_rejects_numeric_suffix_false_match(monkeypatch):
+    monkeypatch.setenv("API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    number_check_service._load_latest_main_module()
+    replace_revision = importlib.import_module("replace_revision")
+
+    assert replace_revision._find_safe_exact_span("比例为0.00025%", "5%") is None
+    match = replace_revision._find_safe_exact_span("增长5%，达到目标", "5%")
+    assert match is not None
+    assert match.group() == "5%"
 
 
 def test_docx_revised_output_is_initialized_before_v2_run(tmp_path, monkeypatch):

@@ -391,6 +391,54 @@ def test_arabic_language_export_uses_rtl_word_properties(tmp_path):
     assert property_names.index("bidi") < property_names.index("jc")
 
 
+def test_language_and_excel_exports_remove_xml_control_characters(tmp_path):
+    control_text = "有效文本\x00中间\x0b结尾"
+    word_path = tmp_path / "safe.docx"
+    fragments = [
+        {
+            "language": "chinese",
+            "relative_path": f"目录\x01/文件.txt",
+            "source_label": "正文\x0c",
+            "is_extra": False,
+            "text": control_text,
+        }
+    ]
+
+    word_count_service._write_language_docx(
+        word_path,
+        config=word_count_service.LANGUAGE_EXPORT_CONFIG["chinese"],
+        fragments=fragments,
+        source_name="来源\x02",
+    )
+    exported_text = "\n".join(paragraph.text for paragraph in Document(word_path).paragraphs)
+    assert "有效文本中间结尾" in exported_text
+    assert not any(char in exported_text for char in ("\x00", "\x01", "\x02", "\x0b", "\x0c"))
+
+    excel_path = tmp_path / "safe.xlsx"
+    word_count_service._write_excel_report(
+        excel_path,
+        {
+            "input_path": "路径\x00",
+            "files": [{"relative_path": "文件\x0b.pdf", "status": "counted"}],
+            "source_details": [{"relative_path": "文件.pdf", "text_preview": control_text}],
+            "rules": ["规则\x0c"],
+            "summary": {},
+        },
+    )
+    workbook = load_workbook(excel_path, read_only=True)
+    try:
+        values = [
+            str(cell.value or "")
+            for sheet in workbook.worksheets
+            for row in sheet.iter_rows()
+            for cell in row
+        ]
+    finally:
+        workbook.close()
+    assert any("有效文本中间结尾" in value for value in values)
+    assert not any(any(char in value for char in ("\x00", "\x0b", "\x0c")) for value in values)
+
+
 def test_word_count_page_renders_language_word_downloads():
     javascript = (Path(__file__).resolve().parents[1] / "static" / "word_count.js").read_text(
         encoding="utf-8"
@@ -721,6 +769,25 @@ def test_pdf2docx_ocr_supports_selected_pages_and_image_frames(tmp_path, monkeyp
 
     assert len(pdf2docx_module._image_frames_for_ocr(str(tiff_path))) == 2
     assert len(pdf2docx_module._image_frames_for_ocr(str(gif_path))) == 1
+
+
+def test_ocr_visible_content_ignores_single_page_border_line():
+    from PIL import Image, ImageDraw
+
+    blank_with_border = Image.new("RGB", (800, 1200), "white")
+    ImageDraw.Draw(blank_with_border).line((40, 0, 40, 1199), fill=(40, 40, 120), width=2)
+    border_buffer = io.BytesIO()
+    blank_with_border.save(border_buffer, format="PNG")
+
+    text_like = Image.new("RGB", (800, 1200), "white")
+    draw = ImageDraw.Draw(text_like)
+    for row in range(12):
+        draw.rectangle((80, 100 + row * 45, 650, 118 + row * 45), fill="black")
+    text_buffer = io.BytesIO()
+    text_like.save(text_buffer, format="PNG")
+
+    assert pdf2docx_module._image_has_visible_text_like_content(border_buffer.getvalue()) is False
+    assert pdf2docx_module._image_has_visible_text_like_content(text_buffer.getvalue()) is True
 
 
 def test_directory_must_be_inside_allowed_roots(tmp_path, monkeypatch):
