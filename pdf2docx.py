@@ -170,7 +170,7 @@ def _emit_ocr_status(message: str, status_callback=None) -> None:
 
 def _ocr_exception_message(exc: Exception) -> str:
     if isinstance(exc, OCRIncompleteResultError):
-        return "OCR 输出疑似被截断"
+        return str(exc)
 
     detail_parts = [exc.__class__.__name__]
     status_code = getattr(exc, "status_code", None)
@@ -319,6 +319,17 @@ def _is_likely_truncated_ocr_result(text: str) -> bool:
     return False
 
 
+def _is_explicit_empty_html(text: str) -> bool:
+    """模型按提示词明确返回无文字页面；照片的深色区域不能作为文字证据。"""
+    normalized = _strip_optional_code_fence(text)
+    if not re.search(r"<body\b[^>]*>.*?</body\s*>", normalized, re.IGNORECASE | re.DOTALL):
+        return False
+    if _is_likely_truncated_ocr_result(normalized):
+        return False
+    body = BeautifulSoup(normalized, "html.parser").find("body")
+    return body is not None and not body.get_text(strip=True)
+
+
 def _image_has_visible_text_like_content(image_bytes: bytes) -> bool:
     try:
         from PIL import Image
@@ -383,8 +394,12 @@ def _ocr_single_image(
                 )
                 if _is_likely_truncated_ocr_result(response_text):
                     raise OCRIncompleteResultError("OCR 输出疑似被截断：HTML 未完整闭合")
-                if image_has_visible_content and _is_blank_ocr_result(response_text):
-                    raise OCRIncompleteResultError("OCR 输出为空，但图片包含明显可见内容")
+                if (
+                    image_has_visible_content
+                    and _is_blank_ocr_result(response_text)
+                    and not _is_explicit_empty_html(response_text)
+                ):
+                    raise OCRIncompleteResultError("OCR 未返回明确的识别结果，但图片包含明显可见内容")
                 print(response_text, end="", flush=True)
                 if stage_index > 0:
                     _emit_ocr_status(
@@ -540,7 +555,7 @@ def ocr_file(
                     )
                     if is_blank:
                         _emit_ocr_status(
-                            f"第 {page_no}/{total} 页 OCR 输出为空，已计为空白页",
+                            f"第 {page_no}/{total} 页未识别到可读文字，按空白文本页保留（可能含插画或照片）",
                             ocr_status_callback,
                         )
                 except Exception as exc:
