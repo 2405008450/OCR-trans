@@ -17,6 +17,30 @@ def test_number_check_service_uses_latest_specialist_root():
     assert number_check_service.NUMBER_CHECK_MAIN_FILE.is_file()
 
 
+def test_number_check_root_supports_configured_relative_path(tmp_path, monkeypatch):
+    configured_root = tmp_path / "deployed-number-check"
+    configured_root.mkdir()
+    (configured_root / "main.py").write_text("def run(): pass\n", encoding="utf-8")
+    relative_path = configured_root.relative_to(tmp_path)
+
+    monkeypatch.setattr(number_check_service, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(number_check_service.settings, "NUMBER_CHECK_ROOT", str(relative_path))
+
+    assert number_check_service._resolve_number_check_root() == configured_root.resolve()
+
+
+def test_number_check_root_falls_back_to_legacy_deployment_name(tmp_path, monkeypatch):
+    fallback_root = tmp_path / "专检" / "数检_程序-AIV2"
+    fallback_root.mkdir(parents=True)
+    (fallback_root / "main.py").write_text("def run(): pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(number_check_service, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(number_check_service.settings, "NUMBER_CHECK_ROOT", "")
+    monkeypatch.chdir(tmp_path)
+
+    assert number_check_service._resolve_number_check_root() == fallback_root.resolve()
+
+
 def test_clear_specialist_module_cache_removes_modules_from_specialist_tree():
     module_name = "number_check_v2_cache_probe"
     module = types.ModuleType(module_name)

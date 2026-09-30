@@ -58,7 +58,7 @@ TOOL_NAV_GROUPS = [
         ("/number-check", "fa-check-double", "数字专检", "双语文档数字一致性检查"),
         ("/zhongfanyi", "fa-spell-check", "中翻专检", "规则与 AI 联合审校"),
         ("/audio-check", "fa-wave-square", "音频质量检查", "原始音频多模态质量检查"),
-        ("/audio-transcription", "fa-closed-captioning", "音频转写", "生成带时间轴文本与字幕文件"),
+        ("/audio-transcription", "fa-closed-captioning", "音频转写", "音频与 MP4 视频生成带时间轴文本与字幕"),
     ]),
 ]
 TOOL_NAV_GROUPS[1][2].insert(

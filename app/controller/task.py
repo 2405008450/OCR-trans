@@ -702,7 +702,7 @@ async def run_audio_transcription(
         if content_type and content_type != "application/octet-stream" and not (
             content_type.startswith("audio/") or content_type.startswith("video/")
         ):
-            raise ValueError("上传内容不是音频文件")
+            raise ValueError("上传内容不是音频或视频文件")
         params = normalize_audio_transcription_options(language=language, enable_itn=enable_itn)
         submit_result = await task_queue_service.submit_audio_transcription_task(file=file, params=params)
     except UploadSizeLimitError as exc:

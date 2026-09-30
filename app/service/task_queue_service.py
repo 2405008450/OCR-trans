@@ -667,11 +667,11 @@ class TaskQueueService:
             )
         except UploadSizeLimitError as exc:
             raise UploadSizeLimitError(
-                f"音频文件超过上传限制 {settings.AUDIO_TRANSCRIPTION_MAX_MB:g} MB"
+                f"音视频文件超过上传限制 {settings.AUDIO_TRANSCRIPTION_MAX_MB:g} MB"
             ) from exc
         if not staged_uploads or staged_uploads[0].size <= 0:
             self._cleanup_staged_uploads(staged_uploads)
-            raise ValueError("音频文件不能为空")
+            raise ValueError("音视频文件不能为空")
         reserved_task = None
         try:
             submit_result, reserved_task = self._reserve_task_submission(

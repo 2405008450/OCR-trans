@@ -13,7 +13,7 @@
         .drop-zone{border:2px dashed #94a3b8;border-radius:16px;padding:30px 20px;text-align:center;cursor:pointer;transition:.2s;background:rgba(14,165,233,.04)}
         .drop-zone:hover,.drop-zone.dragging{border-color:#0ea5e9;background:rgba(14,165,233,.09)}.drop-zone>i{display:block;font-size:36px;color:#0ea5e9;margin-bottom:10px}
         .file-summary{display:none;margin-top:14px;padding:12px 14px;border-radius:12px;background:rgba(15,23,42,.05)}.file-summary strong{display:block;word-break:break-all}
-        #audioPreview{display:none;width:100%;margin-top:12px}.field{margin-top:16px}.field label{display:block;margin-bottom:7px;font-size:13px;font-weight:700;color:var(--text-primary,#334155)}
+        #audioPreview,#videoPreview{display:none;width:100%;margin-top:12px}#videoPreview{max-height:280px;background:#0f172a;border-radius:12px}.field{margin-top:16px}.field label{display:block;margin-bottom:7px;font-size:13px;font-weight:700;color:var(--text-primary,#334155)}
         .field select{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;background:#fff;color:#0f172a;font:inherit}
         .switch-row{display:flex;align-items:flex-start;gap:10px;margin-top:18px;padding:13px;border:1px solid #dbeafe;border-radius:12px;background:#eff6ff}.switch-row input{margin-top:3px}
         .flow-list{display:grid;gap:12px;margin-top:18px}.flow-item{display:grid;grid-template-columns:34px 1fr;gap:11px;align-items:start}.flow-index{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#e0f2fe;color:#0369a1;font-weight:800}
@@ -29,21 +29,22 @@
 <div class="container">
     <header class="header">
         <div class="logo"><i class="fas fa-closed-captioning"></i><h1>音频转写</h1></div>
-        <p class="subtitle">使用 Qwen 将常规音频整段转换为带时间轴文本、字幕和逐词时间戳</p>
+        <p class="subtitle">使用 Qwen 将常规音频或 MP4 视频整段转换为带时间轴文本、字幕和逐词时间戳</p>
     </header>
     <main class="main-content">
         <div class="transcribe-grid">
             <section class="transcribe-card">
-                <h2>上传音频</h2>
+                <h2>上传音视频</h2>
                 <p class="muted" id="formatHint">正在读取支持格式……</p>
                 <div class="drop-zone" id="dropZone" tabindex="0">
                     <i class="fas fa-cloud-arrow-up"></i>
-                    <strong>点击选择或拖入一个音频文件</strong>
-                    <div class="muted">三至四分钟音频直接整段处理，不会分块</div>
+                    <strong>点击选择或拖入一个音频或 MP4 视频</strong>
+                    <div class="muted">MP4 会先在服务器抽出音轨，再整段识别，不会把画面上传给模型</div>
                     <input id="audioFile" type="file" hidden>
                 </div>
                 <div class="file-summary" id="fileSummary"><strong id="fileName"></strong><span class="muted" id="fileMeta"></span></div>
                 <audio id="audioPreview" controls preload="metadata"></audio>
+                <video id="videoPreview" controls playsinline preload="metadata"></video>
                 <div class="field"><label for="languageSelect"><i class="fas fa-language"></i> 音频语言</label><select id="languageSelect"></select><div class="muted">已知语言时建议明确选择，可减少近音误判。</div></div>
                 <label class="switch-row"><input id="enableItn" type="checkbox" checked><span><strong>启用文本规范化（ITN）</strong><br><span class="muted">将中文、英文中的口述数字、日期等转换为更易读形式。</span></span></label>
                 <div class="actions"><button class="btn-secondary" id="cancelTask" type="button" style="display:none"><i class="fas fa-ban"></i> 取消任务</button><button class="btn-primary" id="runTranscription" type="button" disabled><i class="fas fa-play"></i> 开始转写</button></div>
@@ -54,7 +55,7 @@
                 <h2>处理说明</h2>
                 <p class="muted">常规清晰语音不会强制降噪，避免预处理损伤辅音和人名。</p>
                 <div class="flow-list">
-                    <div class="flow-item"><div class="flow-index">1</div><div><strong>完整上传</strong><span class="muted">保留原始编码，上传到阿里云临时存储。</span></div></div>
+                    <div class="flow-item"><div class="flow-index">1</div><div><strong>只上传音频</strong><span class="muted">音频保持原编码。MP4 先在服务器抽出音轨，能直接封装时不重新转码。</span></div></div>
                     <div class="flow-item"><div class="flow-index">2</div><div><strong>异步识别</strong><span class="muted">Qwen FileTrans 生成句级和逐词时间戳。</span></div></div>
                     <div class="flow-item"><div class="flow-index">3</div><div><strong>智能时间线</strong><span class="muted">依据逐词时间戳、停顿、标点与字幕时长重新切段。</span></div></div>
                     <div class="flow-item"><div class="flow-index">4</div><div><strong>多格式导出</strong><span class="muted">生成 TXT、SRT、VTT、TSV、JSON 和 ZIP。</span></div></div>

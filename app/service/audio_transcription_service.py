@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shutil
+import subprocess
 import time
 import zipfile
 from concurrent.futures import Executor
@@ -19,8 +21,26 @@ from app.core.file_naming import build_user_visible_filename
 
 AUDIO_TRANSCRIPTION_MODEL = "qwen3-asr-flash-filetrans"
 AUDIO_TRANSCRIPTION_ALLOWED_EXTENSIONS = {
-    ".aac", ".amr", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".wma"
+    ".aac", ".amr", ".flac", ".m4a", ".mp3", ".mp4", ".ogg", ".opus", ".wav", ".wma"
 }
+AUDIO_TRANSCRIPTION_VIDEO_EXTENSIONS = {".mp4"}
+# 这些编码可以直接封装进模型已支持的音频容器，无需重新编码。
+AUDIO_TRANSCRIPTION_STREAM_COPY_EXTENSIONS = {
+    "aac": ".m4a",
+    "mp3": ".mp3",
+    "flac": ".flac",
+    "opus": ".opus",
+    "vorbis": ".ogg",
+    "pcm_s16le": ".wav",
+    "pcm_s16be": ".wav",
+    "pcm_s24le": ".wav",
+    "pcm_f32le": ".wav",
+}
+_NO_AUDIO_MARKERS = (
+    "matches no streams",
+    "does not contain any stream",
+    "output file is empty",
+)
 AUDIO_TRANSCRIPTION_LANGUAGES = {
     "auto": "自动识别",
     "zh": "中文",
@@ -60,6 +80,7 @@ def get_audio_transcription_config() -> dict[str, Any]:
         "model_label": "Qwen3 ASR FileTrans",
         "configured": bool(settings.DASHSCOPE_API_KEY),
         "allowed_extensions": sorted(AUDIO_TRANSCRIPTION_ALLOWED_EXTENSIONS),
+        "video_extensions": sorted(AUDIO_TRANSCRIPTION_VIDEO_EXTENSIONS),
         "max_file_mb": settings.AUDIO_TRANSCRIPTION_MAX_MB,
         "languages": AUDIO_TRANSCRIPTION_LANGUAGES,
         "defaults": {"language": "auto", "enable_itn": True},
@@ -71,8 +92,97 @@ def validate_audio_transcription_filename(filename: str) -> str:
     extension = Path(filename or "").suffix.lower()
     if extension not in AUDIO_TRANSCRIPTION_ALLOWED_EXTENSIONS:
         supported = "、".join(item.lstrip(".").upper() for item in sorted(AUDIO_TRANSCRIPTION_ALLOWED_EXTENSIONS))
-        raise ValueError(f"不支持的音频格式，仅支持：{supported}")
+        raise ValueError(f"不支持的音视频格式，仅支持：{supported}")
     return extension
+
+
+def _ffmpeg_bin(name: str) -> str:
+    executable = shutil.which(name)
+    if not executable:
+        raise AudioTranscriptionError(f"服务器未安装 {name}，无法从视频提取音轨")
+    return executable
+
+
+def _run_ffmpeg(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+
+def _audio_extract_error(stderr: str) -> AudioTranscriptionError:
+    detail = (stderr or "").strip()
+    if any(marker in detail.lower() for marker in _NO_AUDIO_MARKERS):
+        return AudioTranscriptionError("视频中没有可识别的音轨")
+    tail = detail[-800:] if detail else "ffmpeg 未生成音频文件"
+    return AudioTranscriptionError(f"从视频提取音轨失败：{tail}")
+
+
+def _probe_audio_codec(source_path: Path) -> str:
+    ffprobe = _ffmpeg_bin("ffprobe")
+    completed = _run_ffmpeg([
+        ffprobe, "-v", "error",
+        "-select_streams", "a:0",
+        "-show_entries", "stream=codec_name",
+        "-of", "default=nw=1:nk=1",
+        str(source_path),
+    ])
+    if completed.returncode != 0:
+        raise _audio_extract_error(completed.stderr)
+    return (completed.stdout or "").strip().lower()
+
+
+def _extract_audio_from_video(source_path: Path, log_callback=None) -> Path:
+    """从视频中取出第一条音轨。常见 AAC 直接封装为 M4A，避免把画面上传给模型。"""
+    ffmpeg = _ffmpeg_bin("ffmpeg")
+    codec = _probe_audio_codec(source_path)
+    if not codec:
+        raise AudioTranscriptionError("视频中没有可识别的音轨")
+    copy_extension = AUDIO_TRANSCRIPTION_STREAM_COPY_EXTENSIONS.get(codec)
+    output_path = source_path.with_name(f"{source_path.stem}.model-audio{copy_extension or '.m4a'}")
+    if output_path.exists():
+        output_path.unlink()
+    if copy_extension:
+        completed = _run_ffmpeg([
+            ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(source_path),
+            "-map", "0:a:0", "-vn", "-c:a", "copy",
+            str(output_path),
+        ])
+        if completed.returncode == 0 and output_path.is_file() and output_path.stat().st_size > 0:
+            if log_callback:
+                log_callback(
+                    f"[audio-transcription] 已直接封装音轨 {codec}，"
+                    f"{source_path.stat().st_size / 1048576:.2f} MB → {output_path.stat().st_size / 1048576:.2f} MB"
+                )
+            return output_path
+        output_path.unlink(missing_ok=True)
+        copy_error = completed.stderr
+    else:
+        copy_error = ""
+    output_path = source_path.with_name(f"{source_path.stem}.model-audio.m4a")
+    if output_path.exists():
+        output_path.unlink()
+    completed = _run_ffmpeg([
+        ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(source_path),
+        "-map", "0:a:0", "-vn",
+        "-c:a", "aac", "-b:a", "128k",
+        str(output_path),
+    ])
+    if completed.returncode != 0 or not output_path.is_file() or output_path.stat().st_size <= 0:
+        output_path.unlink(missing_ok=True)
+        raise _audio_extract_error(completed.stderr or copy_error)
+    if log_callback:
+        log_callback(
+            f"[audio-transcription] 音轨 {codec or 'unknown'} 已转成 AAC，"
+            f"{source_path.stat().st_size / 1048576:.2f} MB → {output_path.stat().st_size / 1048576:.2f} MB"
+        )
+    return output_path
 
 
 def normalize_audio_transcription_options(*, language: str, enable_itn: bool) -> dict[str, Any]:
@@ -137,7 +247,7 @@ def _upload_temporary_file(session: requests.Session, audio_path: Path, timeout:
         )
     if not upload_response.ok:
         raise AudioTranscriptionError(
-            f"上传音频失败：HTTP {upload_response.status_code}：{upload_response.text[:1000]}"
+            f"上传音视频失败：HTTP {upload_response.status_code}：{upload_response.text[:1000]}"
         )
     return f"oss://{object_key}"
 
@@ -491,20 +601,29 @@ def _run_audio_transcription(*, display_no: str, input_path: str, original_filen
     validate_audio_transcription_filename(original_filename)
     source_path = Path(input_path)
     timeout = max(30, settings.AUDIO_TRANSCRIPTION_TIMEOUT_SECONDS)
-    if log_callback:
-        log_callback("[audio-transcription] 上传完整原始音频，不分块、不强制降噪")
-    # DashScope 会返回额外的 OSS 上传及结果下载地址；整条链路均使用直连，
-    # 避免 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 导致 TLS 握手被中途关闭。
-    with _create_dashscope_session() as session:
-        file_url = _upload_temporary_file(session, source_path, timeout)
-        task_id = _submit_task(
-            session,
-            file_url=file_url,
-            language=params["language"],
-            enable_itn=params["enable_itn"],
-            timeout=timeout,
-        )
-        raw, task_body = _wait_and_download(session, task_id, timeout, log_callback)
+    upload_path = source_path
+    extracted_path: Optional[Path] = None
+    try:
+        if source_path.suffix.lower() in AUDIO_TRANSCRIPTION_VIDEO_EXTENSIONS:
+            extracted_path = _extract_audio_from_video(source_path, log_callback)
+            upload_path = extracted_path
+        elif log_callback:
+            log_callback("[audio-transcription] 上传完整原始音频，不分块、不强制降噪")
+        # DashScope 会返回额外的 OSS 上传及结果下载地址；整条链路均使用直连，
+        # 避免 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 导致 TLS 握手被中途关闭。
+        with _create_dashscope_session() as session:
+            file_url = _upload_temporary_file(session, upload_path, timeout)
+            task_id = _submit_task(
+                session,
+                file_url=file_url,
+                language=params["language"],
+                enable_itn=params["enable_itn"],
+                timeout=timeout,
+            )
+            raw, task_body = _wait_and_download(session, task_id, timeout, log_callback)
+    finally:
+        if extracted_path is not None:
+            extracted_path.unlink(missing_ok=True)
     normalized = _normalize_result(raw, task_body, task_id, original_filename)
     if not normalized["text"] and not normalized["segments"]:
         raise AudioTranscriptionError("模型返回了空转写结果")
@@ -536,7 +655,8 @@ async def execute_audio_transcription_task(
     executor: Optional[Executor] = None,
     log_callback=None,
 ) -> dict[str, Any]:
-    await progress_callback(10, "正在上传完整音频")
+    is_video = Path(input_path).suffix.lower() in AUDIO_TRANSCRIPTION_VIDEO_EXTENSIONS
+    await progress_callback(10, "正在从视频提取音轨并上传音频" if is_video else "正在上传完整音频")
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         executor,

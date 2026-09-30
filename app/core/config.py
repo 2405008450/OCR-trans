@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")
     OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "outputs")
     TEMP_IMAGES_DIR: str = os.getenv("TEMP_IMAGES_DIR", "temp_images")
+    NUMBER_CHECK_ROOT: str = os.getenv("NUMBER_CHECK_ROOT", "")
 
     TARGET_IMAGE_WIDTH: int = int(os.getenv("TARGET_IMAGE_WIDTH", "1080"))
     ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "*")

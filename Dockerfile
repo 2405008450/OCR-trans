@@ -21,6 +21,7 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; \
     libxext6 \
     libxrender-dev \
     libgstreamer1.0-0 \
+    ffmpeg \
     python3-tk \
     tk-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -42,6 +43,9 @@ COPY businesslicence/ ./businesslicence/
 COPY Driver*_License/ ./Drivers_License/
 COPY memory/ ./memory/
 COPY 专检/ ./专检/
+
+# 在构建阶段确认数字专检源码已进入镜像，避免上线后才暴露缺文件问题。
+RUN test -f "/app/专检/数检_程序-AI/main.py"
 
 RUN mkdir -p uploads outputs temp_images \
     businesslicence/uploads businesslicence/outputs \

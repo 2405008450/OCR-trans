@@ -57,6 +57,7 @@ services:
       - PORT=8001
       - DEBUG=False
       - ALLOWED_ORIGINS=*
+      - NUMBER_CHECK_ROOT=${NUMBER_CHECK_ROOT:-/app/专检/数检_程序-AI}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

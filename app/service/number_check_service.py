@@ -31,7 +31,49 @@ _task_progress: Dict[str, Dict[str, Any]] = {}
 _specialist_import_lock = threading.Lock()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NUMBER_CHECK_LATEST_ROOT = REPO_ROOT / "专检" / "数检_程序-AI"
+
+
+def _number_check_root_candidates() -> List[Path]:
+    candidates: List[Path] = []
+    configured = str(getattr(settings, "NUMBER_CHECK_ROOT", "") or "").strip()
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if not configured_path.is_absolute():
+            configured_path = REPO_ROOT / configured_path
+        candidates.append(configured_path)
+
+    relative_roots = (
+        Path("专检") / "数检_程序-AI",
+        Path("专检") / "数检_程序-AIV2",
+    )
+    for base in (REPO_ROOT, Path.cwd()):
+        candidates.extend(base / relative_root for relative_root in relative_roots)
+
+    unique_candidates: List[Path] = []
+    seen = set()
+    for candidate in candidates:
+        normalized = candidate.resolve(strict=False)
+        key = os.path.normcase(str(normalized))
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append(normalized)
+    return unique_candidates
+
+
+def _resolve_number_check_root() -> Path:
+    candidates = _number_check_root_candidates()
+    for candidate in candidates:
+        if (candidate / "main.py").is_file():
+            return candidate
+    attempted = "；".join(str(candidate / "main.py") for candidate in candidates)
+    raise FileNotFoundError(
+        "未找到新版数字专检主程序。请确认部署包包含专检代码，"
+        "或通过 NUMBER_CHECK_ROOT 指定数检程序目录。"
+        f" 已检查: {attempted}"
+    )
+
+
+NUMBER_CHECK_LATEST_ROOT = _resolve_number_check_root()
 NUMBER_CHECK_MAIN_FILE = NUMBER_CHECK_LATEST_ROOT / "main.py"
 
 NUMBER_CHECK_MODE_ALIGNMENT = "alignment"
@@ -349,8 +391,9 @@ def _clear_specialist_module_cache() -> None:
 
 
 def _load_latest_main_module():
-    if not NUMBER_CHECK_MAIN_FILE.exists():
-        raise FileNotFoundError(f"未找到新版数字专检主程序: {NUMBER_CHECK_MAIN_FILE}")
+    global NUMBER_CHECK_LATEST_ROOT, NUMBER_CHECK_MAIN_FILE
+    NUMBER_CHECK_LATEST_ROOT = _resolve_number_check_root()
+    NUMBER_CHECK_MAIN_FILE = NUMBER_CHECK_LATEST_ROOT / "main.py"
 
     root = str(NUMBER_CHECK_LATEST_ROOT)
     while root in sys.path:

@@ -4,6 +4,7 @@ const el = {
     file: document.getElementById('audioFile'), dropZone: document.getElementById('dropZone'),
     fileSummary: document.getElementById('fileSummary'), fileName: document.getElementById('fileName'),
     fileMeta: document.getElementById('fileMeta'), preview: document.getElementById('audioPreview'),
+    video: document.getElementById('videoPreview'),
     language: document.getElementById('languageSelect'), enableItn: document.getElementById('enableItn'),
     run: document.getElementById('runTranscription'), cancel: document.getElementById('cancelTask'),
     error: document.getElementById('errorBox'), progressPanel: document.getElementById('progressPanel'),
@@ -25,6 +26,19 @@ function formatTime(value) {
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
 }
 
+function isVideoFile(extension) {
+    return (config?.video_extensions || ['.mp4']).includes(extension);
+}
+function clearMediaPreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+    [el.preview, el.video].forEach(media => {
+        media.pause();
+        media.removeAttribute('src');
+        media.style.display = 'none';
+        media.load();
+    });
+}
 function setSelectedFile(file) {
     clearError();
     if (!file) { syncRunState(); return; }
@@ -32,10 +46,14 @@ function setSelectedFile(file) {
     const allowed = config?.allowed_extensions || [];
     const maxBytes = (config?.max_file_mb || 200) * 1048576;
     if (!allowed.includes(extension)) return showError(`不支持 ${extension} 格式，仅支持 ${allowed.join('、')}`);
-    if (!file.size) return showError('音频文件不能为空');
+    if (!file.size) return showError('音视频文件不能为空');
     if (file.size > maxBytes) return showError(`文件超过 ${config?.max_file_mb || 200} MB 上传限制`);
     selectedFile = file; el.fileName.textContent = file.name; el.fileMeta.textContent = `${formatBytes(file.size)} · ${file.type || extension}`; el.fileSummary.style.display = 'block';
-    if (previewUrl) URL.revokeObjectURL(previewUrl); previewUrl = URL.createObjectURL(file); el.preview.src = previewUrl; el.preview.style.display = 'block';
+    clearMediaPreview();
+    previewUrl = URL.createObjectURL(file);
+    const media = isVideoFile(extension) ? el.video : el.preview;
+    media.src = previewUrl;
+    media.style.display = 'block';
     syncRunState();
 }
 
@@ -56,7 +74,7 @@ function updateProgress(task) {
     const progress = Math.max(0, Math.min(100, Number(task.progress || 0)));
     el.progressPanel.style.display = 'block'; el.progressFill.style.width = `${progress}%`; el.progressPercent.textContent = `${progress}%`;
     el.progressMessage.textContent = task.message || (task.status === 'queued' ? '任务排队中' : '处理中');
-    el.progressTitle.textContent = task.status === 'queued' ? `任务排队中${task.queue_position ? `（第 ${task.queue_position} 位）` : ''}` : '正在转写音频';
+    el.progressTitle.textContent = task.status === 'queued' ? `任务排队中${task.queue_position ? `（第 ${task.queue_position} 位）` : ''}` : '正在转写音视频';
 }
 
 function buildDownload(taskId, path, label, primary = false) {
@@ -103,9 +121,9 @@ async function pollStatus() {
 
 async function submitTranscription() {
     clearError(); el.resultPanel.style.display = 'none';
-    if (!selectedFile) return showError('请先选择一个音频文件');
+    if (!selectedFile) return showError('请先选择一个音频或 MP4 视频文件');
     const data = new FormData(); data.append('file', selectedFile); data.append('language', el.language.value); data.append('enable_itn', el.enableItn.checked ? 'true' : 'false');
-    taskActive = true; syncRunState(); updateProgress({status: 'queued', progress: 0, message: '正在上传音频'});
+    taskActive = true; syncRunState(); updateProgress({status: 'queued', progress: 0, message: '正在上传音视频'});
     try {
         const response = await fetch('/task/audio-transcription', {method: 'POST', body: data}); const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || `提交失败：${response.status}`);
@@ -124,7 +142,7 @@ function bindEvents() {
     el.dropZone.addEventListener('click', () => el.file.click()); el.dropZone.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') el.file.click(); }); el.file.addEventListener('change', () => setSelectedFile(el.file.files?.[0]));
     ['dragenter','dragover'].forEach(name => el.dropZone.addEventListener(name, event => { event.preventDefault(); el.dropZone.classList.add('dragging'); }));
     ['dragleave','drop'].forEach(name => el.dropZone.addEventListener(name, event => { event.preventDefault(); el.dropZone.classList.remove('dragging'); })); el.dropZone.addEventListener('drop', event => setSelectedFile(event.dataTransfer?.files?.[0]));
-    el.run.addEventListener('click', submitTranscription); el.cancel.addEventListener('click', cancelTask); window.addEventListener('beforeunload', () => { stopPolling(); if (previewUrl) URL.revokeObjectURL(previewUrl); });
+    el.run.addEventListener('click', submitTranscription); el.cancel.addEventListener('click', cancelTask); window.addEventListener('beforeunload', () => { stopPolling(); clearMediaPreview(); });
 }
 
 async function init() { bindEvents(); try { await loadConfig(); } catch (error) { showError(error.message); el.run.disabled = true; } }
