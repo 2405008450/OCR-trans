@@ -32,6 +32,7 @@ from app.service.doc_translate_service import (
     execute_doc_translate_task,
 )
 from app.service.english_variant_service import get_converter
+from app.service.layout_overlay.pipeline import execute_layout_overlay_task, normalize_options as normalize_layout_overlay_options
 from app.service.drivers_license_service import execute_drivers_license_task
 from app.service.file_rename_service import (
     execute_file_rename_copy_task,
@@ -101,6 +102,7 @@ class TaskQueueService:
         'pdf2docx': 1,
         'svg_editable': 1,
         'doc_translate': 1,
+        'layout_overlay': 1,
         'alignment': 1,
         'drivers_license': 1,
         'business_licence': 2,
@@ -535,6 +537,30 @@ class TaskQueueService:
 
             item = staged_uploads[0]
             input_path = self._move_staged_upload(item, Path(settings.UPLOAD_DIR) / 'doc_translate' / reserved_task.display_no, reserved_task.display_no, reserved_task.task_id)
+            self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': item.original_filename})
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            self._cleanup_staged_uploads(staged_uploads)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
+    async def submit_layout_overlay_task(self, *, file: UploadFile, **options) -> TaskSubmitResult:
+        params = normalize_layout_overlay_options(**options)
+        item = await self._stage_upload('layout_overlay', 'input', file, 'input.pdf',
+                                        max_bytes=settings.LAYOUT_OVERLAY_UPLOAD_MAX_MB * 1024 * 1024)
+        staged_uploads = [item]
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='layout_overlay', filename=item.original_filename,
+                params=params, staged_uploads=staged_uploads)
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+            input_path = self._move_staged_upload(item, Path(settings.UPLOAD_DIR) / 'layout_overlay' / reserved_task.display_no,
+                                                  reserved_task.display_no, reserved_task.task_id)
             self._update_task_input_files(reserved_task.task_id, {'input_path': input_path, 'original_filename': item.original_filename})
             self._notify_dispatcher()
             return submit_result
@@ -1187,6 +1213,8 @@ class TaskQueueService:
         return None
 
     def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
+        if task_type == 'layout_overlay':
+            return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
         if task_type in {'doc_translate', 'business_licence', 'pdf2docx', 'svg_editable', 'msg_convert', 'english_variant', 'audio_check', 'audio_transcription'}:
             return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
 
@@ -1415,6 +1443,11 @@ class TaskQueueService:
             elif task_type == 'drivers_license':
                 result = await self._execute_drivers_license(task_id, display_no, input_files, params, update)
                 output_path = result.get('output_docx') if result else None
+            elif task_type == 'layout_overlay':
+                result = await execute_layout_overlay_task(task_id=task_id, display_no=display_no,
+                    input_path=input_files['input_path'], original_filename=input_files.get('original_filename') or 'input.pdf',
+                    progress_callback=update, executor=self._task_executor, **params)
+                output_path = result.get('output_docx')
             elif task_type == 'doc_translate':
                 result = await self._execute_doc_translate(task_id, display_no, input_files, params, update)
                 output_path = result.get('raw_output_txt') if result else None
@@ -1653,7 +1686,7 @@ class TaskQueueService:
             include_hidden=bool(params.get('include_hidden', False)),
             extensions=params.get('extensions') or None,
             ocr_mode=params.get('ocr_mode', 'auto'),
-            ocr_model=params.get('ocr_model') or PDF2DOCX_DEFAULT_MODEL,
+            ocr_model=params.get('ocr_model'),
             ocr_route=params.get('ocr_route') or PDF2DOCX_DEFAULT_GEMINI_ROUTE,
             input_source=params.get('input_source', 'path'),
             original_filename=input_files.get('original_filename'),
@@ -1776,6 +1809,10 @@ class TaskQueueService:
                         files.append({'name': friendly(item['output_docx'], item.get('input_filename'), 'translation'), 'path': item['output_docx'], 'type': 'output'})
             else:
                 add_result('output_docx')
+        elif task_type == 'layout_overlay':
+            add_result('output_docx')
+            add_result('qa_report_path', ftype='report')
+            add_result('debug_archive', ftype='report')
         elif task_type == 'doc_translate':
             add_result('raw_output_txt')
             translations = result.get('translations', {})

@@ -70,6 +70,7 @@ NAV_ACTIVE_ALIASES = {
     "/certificate-translation": (
         "/certificate-translation",
         "/doc-translate",
+        "/layout-overlay",
         "/drivers-license",
         "/business-licence",
     ),
@@ -706,6 +707,11 @@ async def drivers_license_page():
 @app.get("/doc-translate", response_class=HTMLResponse)
 async def doc_translate_page():
     return _render_page("doc_translate.html", "/doc-translate")
+
+
+@app.get("/layout-overlay", response_class=HTMLResponse)
+async def layout_overlay_page():
+    return _render_page("layout_overlay.html", "/layout-overlay")
 
 
 @app.get("/business-licence/embed", response_class=HTMLResponse)

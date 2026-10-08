@@ -1,0 +1,3 @@
+# 可选的CPU识别依赖；GPU部署请按官方兼容矩阵安装paddlepaddle-gpu，勿同时装CPU包。
+paddleocr==3.3.3
+paddlepaddle==3.2.2

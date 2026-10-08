@@ -928,6 +928,33 @@ def test_unc_mapping_still_requires_allowed_root(tmp_path, monkeypatch):
         word_count_service.prepare_word_count_request(directory_path="\\\\win-server\\服务器资料7\\客户")
 
 
+@pytest.mark.parametrize("paddle_enabled", [True, False])
+def test_word_count_default_ocr_model(monkeypatch, tmp_path, paddle_enabled):
+    _allow_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(word_count_service.settings, "PADDLEOCR_ENABLED", paddle_enabled)
+    expected = (
+        word_count_service.PADDLEOCR_MODEL
+        if paddle_enabled else word_count_service.PDF2DOCX_DEFAULT_MODEL
+    )
+
+    config = word_count_service.get_word_count_config()
+    assert config["default_ocr_model"] == expected
+    assert not config["ocr_models"][expected].get("disabled", False)
+
+    path_request = word_count_service.prepare_word_count_request(directory_path=str(tmp_path))
+    upload_request = word_count_service.prepare_word_count_upload_request(filename="scan.pdf")
+    assert path_request["params"]["ocr_model"] == expected
+    assert upload_request["params"]["ocr_model"] == expected
+
+    explicit_model = "google/gemini-3.1-flash-lite"
+    assert word_count_service.prepare_word_count_request(
+        directory_path=str(tmp_path), ocr_model=explicit_model
+    )["params"]["ocr_model"] == explicit_model
+    assert word_count_service.prepare_word_count_upload_request(
+        filename="scan.pdf", ocr_model=explicit_model
+    )["params"]["ocr_model"] == explicit_model
+
+
 def test_word_count_config_and_submit_endpoint(monkeypatch, tmp_path):
     _allow_root(monkeypatch, tmp_path)
 

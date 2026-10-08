@@ -6,7 +6,7 @@ import os
 import re
 import unicodedata
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable, Optional
@@ -35,6 +35,7 @@ from app.service.libreoffice_service import (
     convert_spreadsheet_to_xlsx_via_libreoffice,
 )
 from app.service.ocr_text_service import extract_ocr_plain_text
+from app.service.paddle_ocr_service import MODEL_ID as PADDLEOCR_MODEL, extract_paddle_plain_text
 from app.service.pdf2docx_service import (
     PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     PDF2DOCX_DEFAULT_MODEL,
@@ -354,6 +355,28 @@ def _safe_path_exists(path: Path) -> bool:
         return False
 
 
+def get_word_count_default_ocr_model() -> str:
+    """启用本地识别时优先使用 PaddleOCR，否则沿用 LLM 默认模型。"""
+    return PADDLEOCR_MODEL if settings.PADDLEOCR_ENABLED else PDF2DOCX_DEFAULT_MODEL
+
+
+def _normalize_word_count_ocr_model(model: Optional[str]) -> str:
+    return normalize_pdf2docx_model(model or get_word_count_default_ocr_model())
+
+
+def get_word_count_ocr_models() -> dict[str, Any]:
+    return {**get_pdf2docx_models(), PADDLEOCR_MODEL: {
+        "label": "PaddleOCR（本地识别）" if settings.PADDLEOCR_ENABLED else "PaddleOCR（服务器未启用）",
+        "disabled": not settings.PADDLEOCR_ENABLED,
+    }}
+
+
+def _extract_word_count_ocr(**kwargs) -> dict[str, Any]:
+    if kwargs.get("model") == PADDLEOCR_MODEL:
+        return extract_paddle_plain_text(**kwargs)
+    return extract_ocr_plain_text(**kwargs)
+
+
 def get_word_count_config() -> dict[str, Any]:
     cad_support = get_cad_support_info(settings.ODA_FILE_CONVERTER_PATH)
     runtime_countable_extensions = COUNTABLE_EXTENSIONS | set(cad_support["supported_extensions"])
@@ -410,8 +433,8 @@ def get_word_count_config() -> dict[str, Any]:
         "quote_count_labels": QUOTE_COUNT_LABELS,
         "ocr_modes": OCR_MODES,
         "default_ocr_mode": OCR_MODE_AUTO,
-        "ocr_models": get_pdf2docx_models(),
-        "default_ocr_model": PDF2DOCX_DEFAULT_MODEL,
+        "ocr_models": get_word_count_ocr_models(),
+        "default_ocr_model": get_word_count_default_ocr_model(),
     }
 
 
@@ -495,8 +518,8 @@ def prepare_word_count_request(
     input_path, matched_root, input_kind = _resolve_allowed_input_path(directory_path)
     normalized_extensions = normalize_scan_extensions(extensions)
     normalized_ocr_mode = _normalize_ocr_mode(ocr_mode)
-    normalized_ocr_model = normalize_pdf2docx_model(ocr_model)
-    if normalized_ocr_model not in get_pdf2docx_models():
+    normalized_ocr_model = _normalize_word_count_ocr_model(ocr_model)
+    if normalized_ocr_model not in get_word_count_ocr_models():
         raise ValueError(f"不支持的 OCR 模型: {normalized_ocr_model}")
     ocr_enabled = _ocr_enabled_for_input(normalized_ocr_mode, input_kind)
     normalized_relative_paths: Optional[list[str]] = None
@@ -552,8 +575,8 @@ def prepare_word_count_upload_request(
         raise ValueError(f"不支持的文件格式: {extension or '无扩展名'}。支持: {supported}")
 
     normalized_ocr_mode = _normalize_ocr_mode(ocr_mode)
-    normalized_ocr_model = normalize_pdf2docx_model(ocr_model)
-    if normalized_ocr_model not in get_pdf2docx_models():
+    normalized_ocr_model = _normalize_word_count_ocr_model(ocr_model)
+    if normalized_ocr_model not in get_word_count_ocr_models():
         raise ValueError(f"不支持的 OCR 模型: {normalized_ocr_model}")
 
     return {
@@ -586,7 +609,7 @@ async def execute_word_count_task(
     include_hidden: bool,
     extensions: Iterable[str],
     ocr_mode: str = OCR_MODE_AUTO,
-    ocr_model: str = PDF2DOCX_DEFAULT_MODEL,
+    ocr_model: Optional[str] = None,
     ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     input_source: str = "path",
     original_filename: Optional[str] = None,
@@ -633,7 +656,7 @@ def run_word_count_task_sync(
     include_hidden: bool,
     extensions: Iterable[str],
     ocr_mode: str = OCR_MODE_AUTO,
-    ocr_model: str = PDF2DOCX_DEFAULT_MODEL,
+    ocr_model: Optional[str] = None,
     ocr_route: str = PDF2DOCX_DEFAULT_GEMINI_ROUTE,
     input_source: str = "path",
     original_filename: Optional[str] = None,
@@ -649,8 +672,8 @@ def run_word_count_task_sync(
     else:
         raise ValueError(f"不支持的字数统计输入方式: {normalized_input_source}")
     normalized_ocr_mode = _normalize_ocr_mode(ocr_mode)
-    normalized_ocr_model = normalize_pdf2docx_model(ocr_model)
-    if normalized_ocr_model not in get_pdf2docx_models():
+    normalized_ocr_model = _normalize_word_count_ocr_model(ocr_model)
+    if normalized_ocr_model not in get_word_count_ocr_models():
         raise ValueError(f"不支持的 OCR 模型: {normalized_ocr_model}")
     ocr_enabled = _ocr_enabled_for_input(normalized_ocr_mode, input_kind)
     scan_extensions = set(normalize_scan_extensions(extensions))
@@ -1351,6 +1374,12 @@ def _count_single_file(
         )
         return base, [], ocr_text_path
 
+    if ocr_model == PADDLEOCR_MODEL and ocr_info.get("ocr_used") and not any(item.text.strip() for item in items):
+        base.update(status=STATUS_NEEDS_OCR, page_count=extracted.page_count,
+                    warning=warning, message="PaddleOCR未识别到文字，需人工确认空白页或识别遗漏",
+                    stat_method=extracted.stat_method, counted_at=_now_iso(), **ocr_info)
+        return base, [], ocr_text_path
+
     totals = {
         "main_word_count": 0,
         "extra_word_count": 0,
@@ -1719,7 +1748,7 @@ def _extract_image_ocr_content(
     gemini_route: str,
     status_callback: Optional[Callable[[str], None]] = None,
 ) -> tuple[ExtractedContent, dict[str, Any]]:
-    payload = extract_ocr_plain_text(
+    payload = _extract_word_count_ocr(
         file_path=str(path),
         model=model,
         gemini_route=gemini_route,
@@ -1743,6 +1772,12 @@ def _extract_image_ocr_content(
         stat_method=f"图片视觉OCR（{model}）+Word近似计数",
         file_type="图片",
     )
+    if model == PADDLEOCR_MODEL:
+        review = payload.get("review_pages") or []
+        paddle_warning = f"PaddleOCR为机器识别候选统计；低于{settings.PADDLEOCR_MIN_SCORE:g}置信度的识别行未计入，原始结果保留在缓存；工程图小字、旋转文字及已有文字页中的图片文字可能遗漏，报价前需复核。"
+        if review:
+            paddle_warning += " 低置信度或未识别到文字的复核页：" + ", ".join(map(str, review))
+        content = replace(content, warning=paddle_warning)
     return content, _ocr_info_from_payload(payload, model)
 
 
@@ -1792,7 +1827,7 @@ def _extract_pdf_content_with_ocr(
             {"ocr_used": False, "ocr_page_count": 0, "ocr_model": "", "ocr_failed_pages": []},
         )
 
-    payload = extract_ocr_plain_text(
+    payload = _extract_word_count_ocr(
         file_path=str(path),
         model=model,
         gemini_route=gemini_route,
@@ -1815,7 +1850,7 @@ def _extract_pdf_content_with_ocr(
         page_number = int(page["page_number"])
         if page["needs_ocr"]:
             ocr_result = ocr_results.get(page_number) or {}
-            text = "" if ocr_result.get("error") else str(ocr_result.get("text") or "")
+            text = str(page.get("text") or "") if ocr_result.get("error") else str(ocr_result.get("text") or "")
             source_type = "pdf_ocr_page"
         else:
             text = str(page.get("text") or "")
@@ -1842,6 +1877,12 @@ def _extract_pdf_content_with_ocr(
         stat_method=f"{method}（{model}）",
         file_type="PDF",
     )
+    if model == PADDLEOCR_MODEL:
+        review = payload.get("review_pages") or []
+        paddle_warning = f"PaddleOCR为机器识别候选统计；低于{settings.PADDLEOCR_MIN_SCORE:g}置信度的识别行未计入，原始结果保留在缓存；工程图小字、旋转文字及已有文字页中的图片文字可能遗漏，报价前需复核。"
+        if review:
+            paddle_warning += " 低置信度或未识别到文字的复核页：" + ", ".join(map(str, review))
+        content = replace(content, warning=paddle_warning)
     return content, _ocr_info_from_payload(payload, model)
 
 
@@ -1849,14 +1890,13 @@ def _max_pdf_page_image_coverage(page: Any) -> float:
     page_area = max(float(page.rect.width) * float(page.rect.height), 1.0)
     max_area = 0.0
     try:
-        blocks = page.get_text("blocks") or []
+        images = page.get_image_info() or []
     except Exception:
         return 0.0
-    for block in blocks:
-        if len(block) < 7 or int(block[6]) != 1:
-            continue
-        width = max(float(block[2]) - float(block[0]), 0.0)
-        height = max(float(block[3]) - float(block[1]), 0.0)
+    for image in images:
+        bbox = image["bbox"]
+        width = max(min(float(bbox[2]), page.rect.x1) - max(float(bbox[0]), page.rect.x0), 0.0)
+        height = max(min(float(bbox[3]), page.rect.y1) - max(float(bbox[1]), page.rect.y0), 0.0)
         max_area = max(max_area, width * height)
     return min(max_area / page_area, 1.0)
 
@@ -1911,6 +1951,8 @@ def _ocr_info_from_payload(payload: dict[str, Any], model: str) -> dict[str, Any
         "ocr_page_count": len(processed_pages),
         "ocr_model": model,
         "ocr_failed_pages": failed_pages,
+        "ocr_review_pages": payload.get("review_pages") or [],
+        "ocr_cache_directory": payload.get("cache_directory", ""),
     }
 
 

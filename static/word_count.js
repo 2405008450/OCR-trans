@@ -121,7 +121,7 @@ function renderConfig(config) {
   const modelSelect = document.getElementById('ocrModelSelect');
   modelSelect.innerHTML = Object.entries(models).filter(([value]) => value !== 'google/gemini-3-flash-preview').map(([value, item]) => {
     const label = item?.label || value;
-    return `<option value="${escAttr(value)}" title="${escAttr(value)}">${escHtml(label)}</option>`;
+    return `<option value="${escAttr(value)}" title="${escAttr(value)}"${item?.disabled ? ' disabled' : ''}>${escHtml(label)}</option>`;
   }).join('');
   modelSelect.value = models[defaultOcrModel] ? defaultOcrModel : FALLBACK_OCR_MODEL;
   modelSelect.title = modelSelect.value;

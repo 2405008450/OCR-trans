@@ -10,6 +10,8 @@ build/
 
 # Virtual Environment
 .venv/
+.venv-paddleocr/
+data/paddleocr_cache/
 venv/
 ENV/
 env/
@@ -79,6 +81,7 @@ tests
 !tests/test_audio_transcription_service.py
 !tests/test_english_variant_service.py
 !tests/test_audio_check_service.py
+/.codex-tmp
 /.codex-tmp/interview_audio_20260827/C3534~1.m4a
 /.codex-tmp/interview_audio_20260827/C3592~1.m4a
 /.codex-tmp/interview_audio_20260827/C3595~1.m4a
@@ -4589,3 +4592,20 @@ tests
 /专检/数检_程序-AI/test_files/原文-测试.docx
 /专检/数检_程序-AI/output/~$可编辑_[TW202601200003]化妆品功效检测报告20260623_translated (1)_20260903_161206.docx
 /.playwright-mcp/page-2026-07-10T10-04-40-006Z.yml
+
+# PaddleOCR 自动化测试与本轮部署临时文件
+!tests/test_paddle_ocr_service.py
+/.codex-tmp/paddleocr-*
+
+# 原版式覆盖翻译测试及固定响应样本
+!tests/test_layout_overlay_service.py
+!tests/fixtures/
+tests/fixtures/*
+!tests/fixtures/layout_overlay/
+tests/fixtures/layout_overlay/*
+!tests/fixtures/layout_overlay/google.json
+!tests/fixtures/layout_overlay/qwen.json
+!tests/fixtures/layout_overlay/glm.json
+/.codex-tmp/overlay-*/
+/.codex-tmp/layout-overlay-render/
+/.codex-tmp/layout_overlay_preview.py

@@ -109,6 +109,10 @@ from app.service.svg_editable_service import (
     validate_svg_filename,
 )
 from app.service.task_queue_service import UploadSizeLimitError, task_queue_service
+from app.service.layout_overlay.pipeline import (
+    ALLOWED_EXTENSIONS as LAYOUT_OVERLAY_EXTENSIONS,
+    get_layout_overlay_config, normalize_options as normalize_layout_overlay_options,
+)
 from app.service.word_count_service import (
     discover_word_count_files,
     get_word_count_config as build_word_count_config,
@@ -1489,6 +1493,47 @@ async def get_english_variant_status(task_id: str):
     if not queue_task:
         raise HTTPException(status_code=404, detail="Task not found")
     return queue_task
+
+
+@router.get("/layout-overlay/config")
+async def layout_overlay_config():
+    return get_layout_overlay_config()
+
+
+@router.post("/layout-overlay")
+async def submit_layout_overlay(
+    file: UploadFile = File(...), source_lang: str = Form("zh"), target_lang: str = Form("en"),
+    ocr_provider: str = Form(settings.LAYOUT_OVERLAY_OCR_PROVIDER),
+    vision_model: str = Form(DOC_TRANSLATE_DEFAULT_MODEL),
+    gemini_route: str = Form(settings.GEMINI_DEFAULT_ROUTE),
+    translation_engine: str = Form(DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE),
+    enable_qa: bool = Form(True),
+):
+    if Path(file.filename or "").suffix.lower() not in LAYOUT_OVERLAY_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="仅支持 PDF 和常见图片文件")
+    try:
+        options = normalize_layout_overlay_options(
+            source_lang=source_lang, target_lang=target_lang, ocr_provider=ocr_provider,
+            vision_model=vision_model, gemini_route=gemini_route,
+            translation_engine=translation_engine, enable_qa=enable_qa)
+        submitted = await task_queue_service.submit_layout_overlay_task(file=file, **options)
+    except UploadSizeLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ACCEPTED", "task_id": submitted.task_id, "deduped": submitted.deduped}
+
+
+@router.get("/layout-overlay/status/{task_id}")
+async def layout_overlay_status(task_id: str):
+    with SessionLocal() as db:
+        task = task_repo.get_task_by_task_id(db, task_id)
+        if not task or task.task_type != "layout_overlay":
+            raise HTTPException(status_code=404, detail="原版式证件任务不存在")
+    snapshot = task_queue_service.get_task_status(task_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="原版式证件任务不存在")
+    return snapshot
 
 
 @router.get("/doc-translate/config")

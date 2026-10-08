@@ -6,6 +6,7 @@ TASK_MODEL_FIELDS: dict[str, tuple[str, ...]] = {
     "alignment": ("model_name",),
     "business_licence": ("model",),
     "doc_translate": ("translation_engine", "translation_model", "ocr_model"),
+    "layout_overlay": ("translation_engine", "vision_model", "ocr_provider"),
     "number_check": ("model_name",),
     "pdf2docx": ("model",),
     "svg_editable": ("model",),
