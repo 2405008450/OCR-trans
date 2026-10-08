@@ -23,6 +23,7 @@ from app.service.gemini_service import (
     resolve_model_for_route,
 )
 from app.service.libreoffice_service import convert_doc_to_docx_via_libreoffice
+from app.service.number_check_alignment import align_number_check_segments
 
 
 logger = logging.getLogger("app.number_check")
@@ -558,6 +559,12 @@ def _run_latest_number_check_sync(
         "use_total_normalizer": True,
         "force_mode_b": mode == NUMBER_CHECK_MODE_DIRECT,
         "ai_check_all": False,
+        "alignment_callback": lambda source_segments, target_segments: align_number_check_segments(
+            source_segments,
+            target_segments,
+            model_name=resolved_model_name,
+            log_callback=lambda message: _update_progress(task_id, 4, total_steps, message),
+        ),
     }
 
     _update_progress(

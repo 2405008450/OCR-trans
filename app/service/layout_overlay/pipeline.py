@@ -27,17 +27,30 @@ from .models import OverlayPage
 from .ocr_providers import OcrRouter, PROVIDERS, extract_pdf_text_lines
 from .qa import run_qa
 from .translation import translate_segments
+from .editable import extract_document, translate_documents, build_editable_docx, review_editable
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 
 
 def get_layout_overlay_config():
+    routes = {name: dict(info) for name, info in get_gemini_routes().items()}
+    for name, label in {"google": "Google Vertex（需服务账号）", "aistudio": "Google AI Studio（API 密钥）",
+                        "openrouter": "OpenRouter（API 密钥）"}.items():
+        routes[name]["label"] = label
+    models = {name: dict(info, label=f"{name.split('/')[-1]}（{info['label']}）")
+              for name, info in get_doc_translate_models().items()}
+    engines = {name: dict(info) for name, info in get_doc_translate_translation_engines().items()}
+    for name, info in engines.items():
+        if name.startswith("google/"):
+            info["label"] = f"{name.split('/')[-1]}（{info['label']}）"
     return {"ocr_providers": {"google": "Google Vision", "qwen": "Qwen-VL-OCR", "glm": "GLM-OCR"},
             "default_ocr_provider": settings.LAYOUT_OVERLAY_OCR_PROVIDER,
-            "models": get_doc_translate_models(), "default_model": DOC_TRANSLATE_DEFAULT_MODEL,
-            "translation_engines": get_doc_translate_translation_engines(),
+            "output_modes": {"editable": "清晰可编辑排版（推荐）", "overlay": "原坐标覆盖（保留底纹）"},
+            "default_output_mode": "editable",
+            "models": models, "default_model": DOC_TRANSLATE_DEFAULT_MODEL,
+            "translation_engines": engines,
             "default_translation_engine": DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE,
-            "routes": get_gemini_routes(), "default_route": settings.GEMINI_DEFAULT_ROUTE,
+            "routes": routes, "default_route": settings.LAYOUT_OVERLAY_GEMINI_ROUTE,
             "languages": {code: info["name"] for code, info in SUPPORTED_LANGUAGES.items()},
             "allowed_extensions": sorted(ALLOWED_EXTENSIONS),
             "upload_max_mb": settings.LAYOUT_OVERLAY_UPLOAD_MAX_MB,
@@ -46,9 +59,10 @@ def get_layout_overlay_config():
 
 
 def normalize_options(*, source_lang="zh", target_lang="en", ocr_provider=None, vision_model=DOC_TRANSLATE_DEFAULT_MODEL,
-                      gemini_route=None, translation_engine=DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE, enable_qa=True):
+                      gemini_route=None, translation_engine=DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE, enable_qa=True,
+                      output_mode="editable"):
     ocr_provider = ocr_provider or settings.LAYOUT_OVERLAY_OCR_PROVIDER
-    gemini_route = gemini_route or settings.GEMINI_DEFAULT_ROUTE
+    gemini_route = gemini_route or settings.LAYOUT_OVERLAY_GEMINI_ROUTE
     if source_lang not in SUPPORTED_LANGUAGES or target_lang not in SUPPORTED_LANGUAGES:
         raise ValueError("不支持的源语言或目标语言")
     if source_lang == target_lang:
@@ -63,9 +77,11 @@ def normalize_options(*, source_lang="zh", target_lang="en", ocr_provider=None, 
         raise ValueError("不支持的模型路由")
     if type(enable_qa) is not bool:
         raise ValueError("enable_qa 必须为布尔值")
+    if output_mode not in {"editable", "overlay"}:
+        raise ValueError("不支持的导出排版方式")
     return dict(source_lang=source_lang, target_lang=target_lang, ocr_provider=ocr_provider,
                 vision_model=vision_model, gemini_route=gemini_route,
-                translation_engine=translation_engine, enable_qa=enable_qa)
+                translation_engine=translation_engine, enable_qa=enable_qa, output_mode=output_mode)
 
 
 def render_input(input_path, debug_dir, router, notify):
@@ -126,6 +142,8 @@ def _run_pipeline(*, task_id, display_no, input_path, original_filename, options
     router = OcrRouter(options["ocr_provider"])
     notify(5, "正在读取原件与提取文字坐标")
     pages = render_input(input_path, debug_dir, router, notify)
+    if options.get("output_mode", "editable") == "editable":
+        return _run_editable(pages, output_dir, debug_dir, options, router, original_filename, notify)
     warnings = []
     for index, page in enumerate(pages):
         notify(25 + int(index / len(pages) * 15), f"第 {index + 1} 页：分析语义块及照片、印章保护区")
@@ -179,6 +197,35 @@ def _run_pipeline(*, task_id, display_no, input_path, original_filename, options
             "debug_archive": str(archive.resolve()), "qa_report": report, "page_count": len(pages),
             "segment_count": len(all_segments), "target_lang": options["target_lang"],
             "original_filename": original_filename, "warnings": report["warnings"]}
+
+
+def _run_editable(pages, output_dir, debug_dir, options, router, original_filename, notify):
+    documents = []
+    for index, page in enumerate(pages):
+        notify(25 + int(index / len(pages) * 15), f"第 {index + 1} 页：完整读取正文、字段与照片")
+        documents.append(extract_document(page, index, options))
+    notify(45, "翻译完整语义段，保留姓名、日期、编号与机构信息")
+    translate_documents(documents, options)
+    notify(65, "生成清晰可编辑 Word，正文自动换行")
+    output_path = output_dir / "editable_translation.docx"
+    build_editable_docx(pages, documents, output_path, options["target_lang"])
+    notify(75, "核对完整性、事实与 Word 实际渲染")
+    report = review_editable(pages, documents, output_path, debug_dir, options)
+    report["warnings"].extend(router.warnings)
+    report_path = output_dir / "qa_report.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    (debug_dir / "layout.json").write_text(json.dumps(documents, ensure_ascii=False, indent=2), encoding="utf-8")
+    archive = output_dir / "debug_artifacts.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+        bundle.write(report_path, "qa_report.json")
+        for file in debug_dir.rglob("*"):
+            if file.is_file():
+                bundle.write(file, file.relative_to(debug_dir))
+    notify(95, "可编辑译文 Word 与质检报告已生成")
+    return {"output_docx": str(output_path.resolve()), "qa_report_path": str(report_path.resolve()),
+            "debug_archive": str(archive.resolve()), "qa_report": report, "page_count": len(pages),
+            "segment_count": sum(len(d["blocks"]) for d in documents), "target_lang": options["target_lang"],
+            "output_mode": "editable", "original_filename": original_filename, "warnings": report["warnings"]}
 
 
 async def execute_layout_overlay_task(*, task_id, display_no, input_path, original_filename="input.pdf",

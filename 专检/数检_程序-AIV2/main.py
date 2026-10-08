@@ -31,13 +31,13 @@ def _detect_format(path: str) -> str:
 # 原文/译文直接提取对照对
 # =============================================================
 
-def _build_pairs_from_docx(src_file: str, tgt_file: str) -> list:
+def _build_pairs_from_docx(src_file: str, tgt_file: str, alignment_callback=None) -> list:
     """
     从原文和译文 DOCX 直接提取文本对，返回 [(src_text, tgt_text), ...]。
 
     对齐策略：
-    - 总段落数一致 → 逐行对比 source 标签，发现标签不同时报告位置并抛出异常
-    - 总段落数不一致 → 同上，先逐行找分叉点再报错
+    - 数量和标签一致时按顺序配对。
+    - 结构不同时调用可选的语义对齐回调，未提供回调时保留严格校验。
     """
     from full_content import scan_docx
 
@@ -58,6 +58,12 @@ def _build_pairs_from_docx(src_file: str, tgt_file: str) -> list:
     src_segs = [s for s in src_segs if s.source in _BODY_SOURCES]
     tgt_segs = [t for t in tgt_segs if t.source in _BODY_SOURCES]
     print(f"  原文片段: {len(src_segs)}  译文片段: {len(tgt_segs)}（已过滤页眉/页脚）")
+
+    if alignment_callback is not None and (
+        len(src_segs) != len(tgt_segs)
+        or any(s.source != t.source for s, t in zip(src_segs, tgt_segs))
+    ):
+        return alignment_callback(src_segs, tgt_segs)
 
     # 逐行对比 source 标签，找第一个不一致的位置
     min_len = min(len(src_segs), len(tgt_segs))
@@ -86,7 +92,7 @@ def _build_pairs_from_docx(src_file: str, tgt_file: str) -> list:
 
 
 
-def _build_pairs(src_file: str, tgt_file: str) -> list:
+def _build_pairs(src_file: str, tgt_file: str, alignment_callback=None) -> list:
     """
     多格式通用版本：从原文和译文文件提取文本对，返回 [(src_text, tgt_text), ...]。
     支持 .docx / .xlsx / .pdf / .pptx，DOCX 走原有逻辑，其余格式走 extract_any。
@@ -94,7 +100,7 @@ def _build_pairs(src_file: str, tgt_file: str) -> list:
     fmt = _detect_format(src_file)
 
     if fmt == "docx":
-        return _build_pairs_from_docx(src_file, tgt_file)
+        return _build_pairs_from_docx(src_file, tgt_file, alignment_callback=alignment_callback)
 
     from extract_any import extract, align_pdf_segments
 
@@ -637,7 +643,8 @@ def run(alignment_path: str = None,
         ai_check_all: bool = False,
         use_total_normalizer: bool = False,
         use_legacy_mode: bool = False,
-        bilingual_mode: bool = False):
+        bilingual_mode: bool = False,
+        alignment_callback=None):
     """
     两种输入模式（二选一，也可由格式自动推断）：
 
@@ -658,6 +665,7 @@ def run(alignment_path: str = None,
       check_header     : 是否检查页眉（None 时自动推断：仅 docx 格式开启）
       check_footer     : 是否检查页脚（None 时自动推断：仅 docx 格式开启）
       ai_check_all     : True 时正文全量送 AI（含规则认为正确的行），默认 False 仅送规则错误行
+      alignment_callback : DOCX 结构不一致时的语义对齐回调，返回含译文定位信息的文本对
       use_total_normalizer : True 时使用 normalizer_total（更全面的规范化策略），
                              默认 False 使用 normalizer（基础策略）
       use_legacy_mode  : True 时（仅 模式B + docx）完全采用旧版流程：
@@ -751,8 +759,10 @@ def run(alignment_path: str = None,
         # 模式B：从原文/译文文件直接提取（支持 docx/xlsx/pdf/pptx）
         print(f"  [模式B] 直接提取原文/译文对照")
         try:
-            pairs = _build_pairs(src_docx_path, tgt_docx_path)
+            pairs = _build_pairs(src_docx_path, tgt_docx_path, alignment_callback=alignment_callback)
         except ValueError as e:
+            if alignment_callback is not None:
+                raise
             raise ValueError(
                 f"{e}\n\n"
                 f"💡 提示：请先制作对照文件，然后通过 alignment_path 参数传入：\n"

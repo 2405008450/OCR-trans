@@ -122,6 +122,7 @@
             config = await request('/task/layout-overlay/config');
             populate('source_lang', config.languages, 'zh');
             populate('target_lang', config.languages, 'en');
+            populate('output_mode', config.output_modes, config.default_output_mode);
             populate('ocr_provider', config.ocr_providers, config.default_ocr_provider);
             populate('translation_engine', config.translation_engines, config.default_translation_engine);
             populate('vision_model', config.models, config.default_model);

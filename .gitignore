@@ -22,7 +22,7 @@ env/
 *.swp
 *.swo
 *~
-
+output/
 # Environment variables
 .env
 .env.local
@@ -4609,3 +4609,6 @@ tests/fixtures/layout_overlay/*
 /.codex-tmp/overlay-*/
 /.codex-tmp/layout-overlay-render/
 /.codex-tmp/layout_overlay_preview.py
+
+# 数字专检自动对齐回归测试
+!tests/test_number_check_alignment.py

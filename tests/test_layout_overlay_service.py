@@ -18,7 +18,7 @@ from starlette.datastructures import UploadFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.service.layout_overlay import classification, imaging, ocr_providers, pipeline, qa, translation
+from app.service.layout_overlay import classification, editable, imaging, ocr_providers, pipeline, qa, translation
 from app.service.layout_overlay.docx_builder import build_docx
 from app.service.layout_overlay.models import OcrLine, OverlayPage, Segment, parse_json, validate_bbox
 
@@ -41,6 +41,77 @@ def page(tmp_path):
     page = OverlayPage(path, 400, 240, 200, 120, [original], [segment],
                        [{"kind": "photo", "bbox": (250, 40, 351, 181)}], path, "google")
     return page
+
+
+def editable_payload():
+    return {"content_bbox": [0, 0, 400, 240],
+            "blocks": [{"role": "title", "text": "证书", "line_ids": []},
+                       {"role": "paragraph", "text": "姓名与完整正文", "line_ids": [0]}],
+            "images": [{"kind": "photo", "bbox": [250, 40, 350, 180]}], "warnings": []}
+
+
+@pytest.mark.parametrize("change", ["missing", "duplicate", "unsupported_image", "exclude_body"])
+def test_editable_rejects_incomplete_or_unsafe_source(page, change):
+    payload = editable_payload()
+    if change == "missing":
+        payload["blocks"][1]["line_ids"] = []
+    elif change == "duplicate":
+        payload["blocks"][1]["line_ids"] = [0, 0]
+    elif change == "unsupported_image":
+        payload["images"][0]["kind"] = "seal"
+    else:
+        payload["blocks"][1]["line_ids"] = []
+        payload["excluded_lines"] = [{"line_id": 0, "reason": "seal_overlap"}]
+    with pytest.raises(ValueError):
+        editable.validate_document(payload, page, 0)
+
+
+def test_editable_can_split_one_ocr_line_into_multiple_fields(page):
+    payload = editable_payload()
+    payload["blocks"][0]["line_ids"] = [0]
+    assert len(editable.validate_document(payload, page, 0)["blocks"]) == 2
+
+
+def test_editable_word_has_flowing_text_and_original_photo(page, tmp_path):
+    content = editable.validate_document(editable_payload(), page, 0)
+    content["blocks"][0]["translation"] = "GRADUATION CERTIFICATE"
+    long_text = "Having completed the program and all courses prescribed by the curriculum, the student is granted graduation."
+    content["blocks"][1]["translation"] = long_text
+    path = tmp_path / "editable.docx"
+    editable.build_editable_docx([page], [content], path)
+    with zipfile.ZipFile(path) as archive:
+        root = etree.fromstring(archive.read("word/document.xml"))
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        assert long_text in root.xpath("//w:t/text()", namespaces=ns)
+        assert not root.xpath("//w:txbxContent", namespaces=ns)
+        size = root.xpath("//w:pgSz", namespaces=ns)[0]
+        assert int(size.get("{%(w)s}w" % ns)) > int(size.get("{%(w)s}h" % ns))
+        assert len([n for n in archive.namelist() if n.startswith("word/media/")]) == 1
+
+
+def test_editable_qa_catches_lost_number_even_without_visual_check(page):
+    page.lines = [line("证书编号：129881201806582230")]
+    content = editable.validate_document(editable_payload(), page, 0)
+    for block in content["blocks"]:
+        block["translation"] = "Certificate"
+    issues = editable.content_issues([page], [content], pipeline.normalize_options())
+    assert any(i["kind"] == "identifier" for i in issues)
+
+
+def test_editable_pipeline_is_default_and_preserves_full_translations(page, tmp_path, monkeypatch):
+    source = page.image_path
+    monkeypatch.setattr(pipeline.settings, "OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(pipeline, "render_input", lambda *a: [page])
+    monkeypatch.setattr(editable, "call_vision", lambda *a: editable_payload())
+    monkeypatch.setattr(editable, "call_translation", lambda *a: json.dumps({"translations": [
+        {"segment_id": "p1b1", "text": "Certificate"}, {"segment_id": "p1b2", "text": "Name and complete body"}]}))
+    result = asyncio.run(pipeline.execute_layout_overlay_task(task_id="editable", display_no="editable", input_path=str(source), enable_qa=False))
+    assert result["output_mode"] == "editable"
+    assert result["qa_report"]["status"] == "disabled"
+    assert Path(result["output_docx"]).is_file()
+    with zipfile.ZipFile(result["debug_archive"]) as archive:
+        content = json.loads(archive.read("layout.json"))
+        assert content[0]["blocks"][1]["translation"] == "Name and complete body"
 
 
 @pytest.mark.parametrize("provider,parser", [
@@ -182,6 +253,32 @@ def test_translation_can_be_reordered():
     assert result == {"a": "One", "b": "Two"}
 
 
+@pytest.mark.parametrize("engine", ["openai/gpt-5.5", "anthropic/claude-sonnet-4.6", "qwen/qwen3.7-max"])
+def test_non_gemini_translation_ignores_vertex_route(engine, monkeypatch):
+    call = Mock(return_value='{"translations":[]}')
+    monkeypatch.setattr(translation, "generate_text", call)
+    translation.call_translation("test", engine, "google")
+    assert call.call_args.kwargs["route"] == "openrouter"
+    assert call.call_args.kwargs["model"] == engine
+
+
+def test_vision_adc_error_explains_independent_ocr_and_model_routes(monkeypatch):
+    from google.auth.exceptions import DefaultCredentialsError
+    monkeypatch.setattr(translation, "generate_vision_html", Mock(side_effect=DefaultCredentialsError("missing")))
+    with pytest.raises(ValueError, match="切换 OCR 引擎不会改变视觉模型线路"):
+        translation.call_vision(b"image", "prompt", "google/gemini-3.7-flash", "google")
+
+
+def test_overlay_defaults_to_its_own_route_without_changing_other_tools(monkeypatch):
+    monkeypatch.setattr(pipeline.settings, "GEMINI_DEFAULT_ROUTE", "google")
+    monkeypatch.setattr(pipeline.settings, "LAYOUT_OVERLAY_GEMINI_ROUTE", "openrouter")
+    assert pipeline.normalize_options()["gemini_route"] == "openrouter"
+    config = pipeline.get_layout_overlay_config()
+    assert config["default_route"] == "openrouter"
+    assert "服务账号" in config["routes"]["google"]["label"]
+    assert "gemini" in config["models"][config["default_model"]]["label"]
+
+
 def test_docx_editable_textboxes_and_page_sizes(page, tmp_path):
     clean = imaging.erase_page(np.array(Image.open(page.image_path)), page)
     page.clean_path = tmp_path / "clean.png"
@@ -279,7 +376,7 @@ def test_pipeline_pdf_text_layer_skips_ocr(tmp_path, monkeypatch):
         updates.append(value)
 
     result = asyncio.run(pipeline.execute_layout_overlay_task(task_id="test", display_no="test", input_path=str(source),
-                        source_lang="en", target_lang="es", enable_qa=False, progress_callback=progress))
+                        source_lang="en", target_lang="es", output_mode="overlay", enable_qa=False, progress_callback=progress))
     assert Path(result["output_docx"]).is_file()
     assert result["qa_report"]["status"] == "disabled"
     assert result["page_count"] == 1
@@ -290,8 +387,10 @@ def test_pipeline_pdf_text_layer_skips_ocr(tmp_path, monkeypatch):
 
 def test_layout_overlay_api_and_validation(monkeypatch):
     from app.controller import task as controller
+    monkeypatch.setattr(pipeline.settings, "LAYOUT_OVERLAY_OCR_PROVIDER", "google")
     async def fake_submit(**kwargs):
         assert kwargs["enable_qa"] is False
+        assert kwargs["output_mode"] == "editable"
         return SimpleNamespace(task_id="test", deduped=False)
     monkeypatch.setattr(controller.task_queue_service, "submit_layout_overlay_task", fake_submit)
     app = FastAPI()
@@ -303,6 +402,7 @@ def test_layout_overlay_api_and_validation(monkeypatch):
         assert response.json()["task_id"] == "test"
         assert client.post("/task/layout-overlay", files={"file": ("scan.txt", b"data")}).status_code == 400
         assert client.post("/task/layout-overlay", files={"file": ("scan.pdf", b"data")}, data={"ocr_provider": "invalid"}).status_code == 400
+        assert client.post("/task/layout-overlay", files={"file": ("scan.pdf", b"data")}, data={"output_mode": "invalid"}).status_code == 400
 
 
 def test_queue_output_registration():

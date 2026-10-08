@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     LAYOUT_OVERLAY_RENDER_DPI: int = 300
     LAYOUT_OVERLAY_MAX_QA_ROUNDS: int = 2
     LAYOUT_OVERLAY_QA_MODEL: str = ""
+    LAYOUT_OVERLAY_GEMINI_ROUTE: str = "openrouter"
     LAYOUT_OVERLAY_MIN_FONT_PT: float = 6.0
     LAYOUT_OVERLAY_FIT_WIDTH_RATIO: float = 0.90
     LAYOUT_OVERLAY_FONT_PATH: str = ""

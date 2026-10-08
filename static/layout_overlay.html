@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>原版式证件翻译</title>
+    <title>证件译文 Word</title>
     <style>
         :root{color-scheme:dark;--muted:#a4b7cb;--line:#28425d;--accent:#38bdf8}
         *{box-sizing:border-box}body{margin:0;background:#0d2138;color:#e9f2fb;font-family:"Microsoft YaHei",sans-serif}
@@ -22,18 +22,19 @@
 <body>
 <main class="page">
     <nav class="standalone-nav"><a href="/certificate-translation?tab=layout-overlay-panel">返回证件翻译工作台</a></nav>
-    <section aria-labelledby="title"><h1 id="title">原版式证件翻译</h1><p>在原件位置覆盖可编辑译文，保留照片、印章和底纹。结果包含 Word、质检报告和调试文件。</p></section>
+    <section aria-labelledby="title"><h1 id="title">证件译文 Word</h1><p>默认生成清晰可编辑的译文：完整段落自动换行，保留原件照片，印章与签名用文字注明。也可选择保留底纹的原坐标覆盖。结果包含 Word 和质检报告。</p></section>
     <form class="card" id="overlay-form">
         <div class="fields">
             <label class="full">上传 PDF 或图片<input type="file" id="file" name="file" required><small id="limits">正在读取配置…</small></label>
             <label>源语言<select id="source_lang" name="source_lang"></select></label>
             <label>目标语言<select id="target_lang" name="target_lang"></select></label>
-            <label>OCR 引擎<select id="ocr_provider" name="ocr_provider"></select><small>PDF 有可用文本层时直接提取；云端 OCR 失败会按配置回退。</small></label>
+            <label class="full">导出排版<select id="output_mode" name="output_mode"></select><small>清晰可编辑排版按证件方向重建段落与字段，适合修改和交付。原坐标覆盖受原文框大小限制，适合需要底纹的场景。</small></label>
+            <label>OCR 引擎<select id="ocr_provider" name="ocr_provider"></select><small>负责提取文字与坐标。切换 OCR 不会改变翻译模型、版式分析模型或模型线路。</small></label>
             <label>翻译模型<select id="translation_engine" name="translation_engine"></select></label>
-            <label>版式与视觉质检模型<select id="vision_model" name="vision_model"></select></label>
-            <label>视觉模型线路<select id="gemini_route" name="gemini_route"></select></label>
-            <label class="full check"><input type="checkbox" id="enable_qa" checked>启用渲染比对与修补（最多两轮）</label>
-            <div class="full"><button type="submit" id="submit" disabled>生成原版式 Word</button></div>
+            <label>版式与视觉质检模型<select id="vision_model" name="vision_model"></select><small>用于分析照片、印章保护区；关闭质检仍需进行版式分析。</small></label>
+            <label>视觉及 Gemini 模型线路<select id="gemini_route" name="gemini_route"></select><small>Google Vertex 需要服务账号凭据；API 密钥请使用 Google AI Studio 或 OpenRouter。其他翻译模型按各自供应商调用。</small></label>
+            <label class="full check"><input type="checkbox" id="enable_qa" checked>启用内容核对与 Word 渲染质检</label>
+            <div class="full"><button type="submit" id="submit" disabled>生成译文 Word</button></div>
         </div>
     </form>
     <section class="card" id="task-card" aria-live="polite" hidden>

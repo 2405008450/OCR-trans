@@ -140,7 +140,7 @@ function applyMode(mode) {
     );
     modeHint.textContent = description;
     uploadDesc.textContent = directMode
-        ? '原文和译文结构一致时可使用该模式；PDF 双文件会强制走新版程序的直接提取路径。'
+        ? 'DOCX 段落合并、拆分或排版不一致时会自动对齐，再生成对照和检查报告；PDF 双文件使用直接提取。'
         : '单个双语对照 Excel 是新版数检推荐输入；上传译文文件后会额外输出修订版。';
     pageSubtitle.textContent = directMode
         ? '直接从原文和译文双文件抽取内容，生成数值检查报告和可用修订文件。'

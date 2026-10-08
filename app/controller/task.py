@@ -1505,9 +1505,10 @@ async def submit_layout_overlay(
     file: UploadFile = File(...), source_lang: str = Form("zh"), target_lang: str = Form("en"),
     ocr_provider: str = Form(settings.LAYOUT_OVERLAY_OCR_PROVIDER),
     vision_model: str = Form(DOC_TRANSLATE_DEFAULT_MODEL),
-    gemini_route: str = Form(settings.GEMINI_DEFAULT_ROUTE),
+    gemini_route: str = Form(settings.LAYOUT_OVERLAY_GEMINI_ROUTE),
     translation_engine: str = Form(DOC_TRANSLATE_DEFAULT_TRANSLATION_ENGINE),
     enable_qa: bool = Form(True),
+    output_mode: str = Form("editable"),
 ):
     if Path(file.filename or "").suffix.lower() not in LAYOUT_OVERLAY_EXTENSIONS:
         raise HTTPException(status_code=400, detail="仅支持 PDF 和常见图片文件")
@@ -1515,7 +1516,7 @@ async def submit_layout_overlay(
         options = normalize_layout_overlay_options(
             source_lang=source_lang, target_lang=target_lang, ocr_provider=ocr_provider,
             vision_model=vision_model, gemini_route=gemini_route,
-            translation_engine=translation_engine, enable_qa=enable_qa)
+            translation_engine=translation_engine, enable_qa=enable_qa, output_mode=output_mode)
         submitted = await task_queue_service.submit_layout_overlay_task(file=file, **options)
     except UploadSizeLimitError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
