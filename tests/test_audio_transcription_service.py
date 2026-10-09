@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import zipfile
@@ -19,6 +20,52 @@ from app.service.audio_transcription_service import (
     validate_audio_transcription_filename,
 )
 from app.service.task_queue_service import TaskSubmitResult
+
+
+@pytest.mark.parametrize("name", ["ffmpeg", "ffprobe"])
+def test_configured_ffmpeg_directory_takes_priority_over_path(tmp_path, monkeypatch, name):
+    configured = tmp_path / "configured"
+    inherited = tmp_path / "inherited"
+    filename = name + (".exe" if os.name == "nt" else "")
+    for directory in (configured, inherited):
+        directory.mkdir()
+        executable = directory / filename
+        executable.write_bytes(b"test")
+        executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(inherited))
+    monkeypatch.setattr(service.settings, "FFMPEG_BIN_DIR", str(configured))
+    assert Path(service._ffmpeg_bin(name)).resolve() == (configured / filename).resolve()
+
+
+@pytest.mark.parametrize("name", ["ffmpeg", "ffprobe"])
+def test_missing_configured_ffmpeg_does_not_use_another_installation(tmp_path, monkeypatch, name):
+    filename = name + (".exe" if os.name == "nt" else "")
+    executable = tmp_path / filename
+    executable.write_bytes(b"test")
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(service.settings, "FFMPEG_BIN_DIR", str(tmp_path / "missing"))
+    with pytest.raises(AudioTranscriptionError, match="配置目录"):
+        service._ffmpeg_bin(name)
+
+
+@pytest.mark.parametrize("name", ["ffmpeg", "ffprobe"])
+def test_unconfigured_ffmpeg_uses_path(tmp_path, monkeypatch, name):
+    filename = name + (".exe" if os.name == "nt" else "")
+    executable = tmp_path / filename
+    executable.write_bytes(b"test")
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(service.settings, "FFMPEG_BIN_DIR", "")
+    assert Path(service._ffmpeg_bin(name)).resolve() == executable.resolve()
+
+
+@pytest.mark.parametrize("name", ["ffmpeg", "ffprobe"])
+def test_missing_ffmpeg_explains_path_failure(tmp_path, monkeypatch, name):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(service.settings, "FFMPEG_BIN_DIR", "")
+    with pytest.raises(AudioTranscriptionError, match="服务进程的 PATH"):
+        service._ffmpeg_bin(name)
 
 
 def test_audio_transcription_filename_and_options() -> None:

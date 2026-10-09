@@ -97,9 +97,11 @@ def validate_audio_transcription_filename(filename: str) -> str:
 
 
 def _ffmpeg_bin(name: str) -> str:
-    executable = shutil.which(name)
+    directory = settings.FFMPEG_BIN_DIR.strip()
+    executable = shutil.which(name, path=directory) if directory else shutil.which(name)
     if not executable:
-        raise AudioTranscriptionError(f"服务器未安装 {name}，无法从视频提取音轨")
+        location = f"配置目录 {directory}" if directory else "服务进程的 PATH"
+        raise AudioTranscriptionError(f"在{location}中找不到 {name}，请检查安装及路径配置，无法从视频提取音轨")
     return executable
 
 
