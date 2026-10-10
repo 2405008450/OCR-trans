@@ -676,6 +676,10 @@ def run(alignment_path: str = None,
                              False（默认）= 双文件模式：分别上传 原文(src_docx_path) + 译文(tgt_docx_path)。
                              True         = 单文件双语对照模式：只上传一个文件(src_docx_path)，
                                             文档内中英段落交替排列，无需 tgt_docx_path。
+
+    返回值（注意两种流程返回类型不同）：
+      use_legacy_mode=False → (body_final, header_final, footer_final) 三元组，元素均为 List[Dict]
+      use_legacy_mode=True  → {"body": [...], "header": [...], "footer": [...]} 扁平错误列表 dict
     """
     if use_legacy_mode:
         return _run_legacy_mode(

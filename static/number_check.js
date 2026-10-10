@@ -350,6 +350,7 @@ function buildResultHtml(data) {
     addDownload(links, reports.report_excel, 'fa-file-excel', '下载综合 Excel 报告');
     addDownload(links, reports.alignment_excel, 'fa-table', '下载生成的对照 Excel');
     addDownload(links, reports.alignment_json, 'fa-file-code', '下载对照 JSON');
+    addDownload(links, reports.legacy_errors_json, 'fa-bug', '错误列表 JSON');
     addDownload(links, reports.body_json, 'fa-file-code', '正文检查 JSON');
     addDownload(links, reports.body_errors_json, 'fa-bug', '正文错误 JSON');
     addDownload(links, reports.body_flat_errors_json, 'fa-list', '正文错误明细 JSON');

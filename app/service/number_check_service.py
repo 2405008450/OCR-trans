@@ -459,6 +459,7 @@ def _collect_outputs(
     body_rows: List[Dict[str, Any]],
     header_rows: List[Dict[str, Any]],
     footer_rows: List[Dict[str, Any]],
+    legacy_errors: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> tuple[Dict[str, str], Dict[str, int], Dict[str, str]]:
     reports: Dict[str, str] = {}
     files: Dict[str, str] = {}
@@ -480,10 +481,20 @@ def _collect_outputs(
         if path.exists():
             reports[key] = _relative_output_path(path, output_dir)
 
-    flat_errors_path = output_dir / "align_body_flat_errors.json"
-    body_issues = _count_flat_errors(flat_errors_path) or _count_ai_errors(body_rows)
-    header_issues = _count_ai_errors(header_rows)
-    footer_issues = _count_ai_errors(footer_rows)
+    legacy_json = _latest_matching_file(output_dir, "*_legacy_errors.json")
+    if legacy_json:
+        reports["legacy_errors_json"] = _relative_output_path(legacy_json, output_dir)
+
+    if legacy_errors is not None:
+        # 旧版流程返回 {"body": [...], "header": [...], "footer": [...]} 扁平错误列表
+        body_issues = len(legacy_errors.get("body") or [])
+        header_issues = len(legacy_errors.get("header") or [])
+        footer_issues = len(legacy_errors.get("footer") or [])
+    else:
+        flat_errors_path = output_dir / "align_body_flat_errors.json"
+        body_issues = _count_flat_errors(flat_errors_path) or _count_ai_errors(body_rows)
+        header_issues = _count_ai_errors(header_rows)
+        footer_issues = _count_ai_errors(footer_rows)
     report_counts = {
         "body_issues": body_issues,
         "header_issues": header_issues,
@@ -547,7 +558,21 @@ def _run_latest_number_check_sync(
         # V2 会直接打开 revised_docx_path 写入修订，因此所有格式都必须先用译文初始化输出文件。
         _copy_if_needed(target_path, revised_output_path)
 
+    # 原文+译文双文件且均为 DOCX：与单独运行数检一致，走旧版流程
+    # （use_legacy_mode=True + bilingual_mode=False，整篇提取→分块直送AI→锚点写回）。
+    # 其他格式（xlsx/pptx/pdf）旧版流程不支持，仍走模式B直接提取。
+    use_legacy_mode = bool(
+        mode == NUMBER_CHECK_MODE_DIRECT
+        and source_path
+        and target_path
+        and source_path.suffix.lower() == ".docx"
+        and target_path.suffix.lower() == ".docx"
+    )
+    _emit_log(task_id, f"[config] use_legacy_mode={use_legacy_mode}")
+
     run_kwargs = {
+        "use_legacy_mode": use_legacy_mode,
+        "bilingual_mode": False,
         "alignment_path": str(alignment_path) if alignment_path else None,
         "output_dir": str(output_dir),
         "src_docx_path": str(source_path) if source_path else None,
@@ -573,7 +598,8 @@ def _run_latest_number_check_sync(
         total_steps,
         "正在执行规则检查和 AI 复核...",
         [
-            "模式: 对照 Excel" if mode == NUMBER_CHECK_MODE_ALIGNMENT else "模式: 原文+译文",
+            "模式: 对照 Excel" if mode == NUMBER_CHECK_MODE_ALIGNMENT
+            else ("模式: 原文+译文（旧版·双文件）" if use_legacy_mode else "模式: 原文+译文"),
             f"模型: {resolved_model_name}",
         ],
     )
@@ -582,10 +608,18 @@ def _run_latest_number_check_sync(
     stderr_writer = _TaskLogWriter(task_id, sys.stderr)
     try:
         with contextlib.redirect_stdout(stdout_writer), contextlib.redirect_stderr(stderr_writer):
-            body_rows, header_rows, footer_rows = main_module.run(**run_kwargs)
+            run_result = main_module.run(**run_kwargs)
     finally:
         stdout_writer.flush()
         stderr_writer.flush()
+
+    # run() 返回值：旧版流程为 dict {"body","header","footer"}，其余流程为三元组
+    legacy_errors: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    if isinstance(run_result, dict):
+        legacy_errors = run_result
+        body_rows, header_rows, footer_rows = [], [], []
+    else:
+        body_rows, header_rows, footer_rows = run_result
 
     _update_progress(task_id, 5, total_steps, "正在整理输出文件...")
     reports, report_counts, files = _collect_outputs(
@@ -594,6 +628,7 @@ def _run_latest_number_check_sync(
         body_rows or [],
         header_rows or [],
         footer_rows or [],
+        legacy_errors=legacy_errors,
     )
 
     result: Dict[str, Any] = {

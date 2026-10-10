@@ -72,6 +72,8 @@ def test_latest_main_keeps_system_integration_contract(monkeypatch):
         "use_total_normalizer",
         "force_mode_b",
         "ai_check_all",
+        "use_legacy_mode",
+        "bilingual_mode",
     }.issubset(parameters)
 
 
@@ -129,3 +131,61 @@ def test_docx_revised_output_is_initialized_before_v2_run(tmp_path, monkeypatch)
     revised_path = captured["revised_path"]
     assert result["corrected_docx"].endswith(revised_path.name)
     assert revised_path.read_bytes() == target_content
+
+
+def _run_direct(tmp_path, monkeypatch, source_name, target_name, fake_run):
+    source_path, target_path = tmp_path / source_name, tmp_path / target_name
+    source_path.write_bytes(b"src")
+    target_path.write_bytes(b"tgt")
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+
+    monkeypatch.setattr(number_check_service, "_set_llm_env", lambda _model: "test-model")
+    monkeypatch.setattr(
+        number_check_service,
+        "_load_latest_main_module",
+        lambda: types.SimpleNamespace(run=fake_run),
+    )
+    task_id = f"direct-{source_name}"
+    number_check_service._init_task_progress(task_id)
+    return number_check_service._run_latest_number_check_sync(
+        task_id=task_id,
+        mode=number_check_service.NUMBER_CHECK_MODE_DIRECT,
+        alignment_path=None,
+        source_path=source_path,
+        target_path=target_path,
+        source_hf_path=None,
+        output_dir=output_dir,
+        gemini_route="openrouter",
+        model_name="test-model",
+        alignment_filename=None,
+        source_filename=source_name,
+        target_filename=target_name,
+    )
+
+
+def test_direct_docx_pair_uses_legacy_mode_and_handles_dict_result(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"body": [{"错误编号": "1"}, {"错误编号": "2"}], "header": [{"错误编号": "1"}], "footer": []}
+
+    result = _run_direct(tmp_path, monkeypatch, "source.docx", "target.docx", fake_run)
+
+    assert captured["use_legacy_mode"] is True
+    assert captured["bilingual_mode"] is False
+    assert result["stats"] == {"total_issues": 3, "body_issues": 2, "header_issues": 1, "footer_issues": 0}
+
+
+def test_direct_non_docx_pair_keeps_mode_b(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return [], [], []
+
+    _run_direct(tmp_path, monkeypatch, "source.xlsx", "target.xlsx", fake_run)
+
+    assert captured["use_legacy_mode"] is False
+    assert captured["force_mode_b"] is True
