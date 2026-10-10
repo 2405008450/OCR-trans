@@ -511,30 +511,38 @@ def _run_legacy_mode(src_docx_path: str,
                      revision_author: str = "翻译校对",
                      bilingual_mode: bool = False):
     """
-    模式B + DOCX 专用：跳过逐段对齐和规则检查，直接复用旧流程
+    跳过逐段对齐和规则检查，直接复用旧流程
     （整篇提取 → 按字数分块 → 直送AI → 扁平错误列表 → 锚点/上下文写回）。
+    支持 DOCX / XLSX / PPTX / PDF；页眉页脚通道仅 DOCX 有内容。
 
     bilingual_mode=False（默认，双文件模式）：
         src_docx_path/tgt_docx_path 为两个独立文件（原文+译文）。
     bilingual_mode=True（单文件双语对照模式）：
         只需 src_docx_path 一个文件（一篇文档内中英段落交替），
         写回目标即该文件本身（docx_path 未指定时默认使用 src_docx_path）。
+    写回方式由写回目标文件的格式决定。
     """
     if not src_docx_path:
         raise ValueError("use_legacy_mode=True 时必须提供 src_docx_path")
-    if _detect_format(src_docx_path) != "docx":
-        raise ValueError("use_legacy_mode=True 仅支持 DOCX 格式")
+
+    _legacy_formats = {"docx", "xlsx", "pptx", "pdf"}
 
     if bilingual_mode:
         if tgt_docx_path and tgt_docx_path != src_docx_path:
             raise ValueError("bilingual_mode=True（单文件双语对照模式）不需要传入 tgt_docx_path")
         write_target = docx_path or src_docx_path
+        _checked = [src_docx_path, write_target]
     else:
         if not tgt_docx_path:
             raise ValueError("bilingual_mode=False（双文件模式）必须提供 tgt_docx_path")
-        if _detect_format(tgt_docx_path) != "docx":
-            raise ValueError("use_legacy_mode=True 仅支持 DOCX 格式")
         write_target = docx_path or tgt_docx_path
+        _checked = [src_docx_path, tgt_docx_path, write_target]
+
+    for _p in _checked:
+        if _detect_format(_p) not in _legacy_formats:
+            raise ValueError(
+                f"use_legacy_mode=True 仅支持 DOCX / XLSX / PPTX / PDF 格式，当前为 {Path(_p).name}"
+            )
 
     from legacy_check import run_legacy_comparison, apply_legacy_errors, generate_legacy_report
 
@@ -580,40 +588,60 @@ def _run_legacy_mode(src_docx_path: str,
         _shutil.copy2(docx_path, out_path)
         print(f"✓ 输出文件: {out_path}")
 
-    from docx import Document
-    from revision import RevisionManager
+    write_fmt = _detect_format(out_path)
 
-    try:
-        from numbering_to_static import convert_numbering_to_static, has_auto_numbering, convert_toc_to_static
-        if has_auto_numbering(out_path):
-            print("🔢 检测到自动编号，转换为静态文本...")
-            if convert_numbering_to_static(out_path):
-                print("  ✓ 自动编号已静态化")
-        convert_toc_to_static(out_path)
-    except Exception as _e:
-        print(f"  ⚠ 编号静态化异常（跳过）: {_e}")
+    if write_fmt == "docx":
+        from docx import Document
+        from revision import RevisionManager
 
-    try:
-        from docx_repair import repair_dangling_rels
-        if repair_dangling_rels(out_path):
-            print("  🔧 已修复损坏关系")
-    except Exception as _e:
-        print(f"  ⚠ 关系修复异常（跳过）: {_e}")
+        try:
+            from numbering_to_static import convert_numbering_to_static, has_auto_numbering, convert_toc_to_static
+            if has_auto_numbering(out_path):
+                print("🔢 检测到自动编号，转换为静态文本...")
+                if convert_numbering_to_static(out_path):
+                    print("  ✓ 自动编号已静态化")
+            convert_toc_to_static(out_path)
+        except Exception as _e:
+            print(f"  ⚠ 编号静态化异常（跳过）: {_e}")
 
-    doc = Document(out_path)
-    doc._numbering_staticized = True
-    rm = RevisionManager(doc, author=revision_author)
+        try:
+            from docx_repair import repair_dangling_rels
+            if repair_dangling_rels(out_path):
+                print("  🔧 已修复损坏关系")
+        except Exception as _e:
+            print(f"  ⚠ 关系修复异常（跳过）: {_e}")
 
-    _, success, failed = apply_legacy_errors(errors_by_region, doc, rm, doc_path=out_path)
-    doc.save(out_path)
+        doc = Document(out_path)
+        doc._numbering_staticized = True
+        rm = RevisionManager(doc, author=revision_author)
 
-    try:
-        from replace_revision import flush_footnote_replacements
-        flushed = flush_footnote_replacements(doc, out_path)
-        if flushed:
-            print(f"  📎 脚注替换: {flushed} 处")
-    except Exception:
-        pass
+        _, success, failed = apply_legacy_errors(errors_by_region, doc, rm, doc_path=out_path)
+        doc.save(out_path)
+
+        try:
+            from replace_revision import flush_footnote_replacements
+            flushed = flush_footnote_replacements(doc, out_path)
+            if flushed:
+                print(f"  📎 脚注替换: {flushed} 处")
+        except Exception:
+            pass
+    else:
+        # XLSX / PPTX / PDF：批注 + 替换
+        from legacy_check import apply_legacy_errors_other
+
+        if write_fmt == "xlsx":
+            from excel.excel_replacer import ExcelReplacer
+            replacer = ExcelReplacer(out_path)
+        elif write_fmt == "pptx":
+            from ppt.pptx_replacer import PPTXReplacer
+            replacer = PPTXReplacer(out_path)
+        else:
+            from pdf.pdf_replacer_improved import ImprovedPDFReplacer
+            replacer = ImprovedPDFReplacer(out_path)
+
+        _, success, failed = apply_legacy_errors_other(
+            errors_by_region, replacer, write_fmt, target_path=out_path)
+        replacer.save(out_path)
 
     print(f"\n{'='*60}")
     print(f"✅ 修订完成: 成功 {success}  失败 {failed}")
@@ -668,7 +696,7 @@ def run(alignment_path: str = None,
       alignment_callback : DOCX 结构不一致时的语义对齐回调，返回含译文定位信息的文本对
       use_total_normalizer : True 时使用 normalizer_total（更全面的规范化策略），
                              默认 False 使用 normalizer（基础策略）
-      use_legacy_mode  : True 时（仅 模式B + docx）完全采用旧版流程：
+      use_legacy_mode  : True 时（模式B，支持 docx / xlsx / pptx / pdf）完全采用旧版流程：
                              整篇提取→按字数分块→直接送AI（无规则预检）→扁平错误列表→
                              仅用锚点/上下文写回。跳过逐段对齐和规则检查，
                              报告降级为错误列表（非全量行审计）。

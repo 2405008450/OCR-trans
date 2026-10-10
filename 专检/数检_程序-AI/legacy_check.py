@@ -15,7 +15,8 @@ import os
 import time
 import json
 import re
-from typing import List, Dict, Tuple
+from pathlib import Path
+from typing import Callable, List, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -40,18 +41,31 @@ _BODY_SOURCES = {"body", "table", "toc", "footnote", "endnote", "chart", "textbo
 # 整篇文本提取（三通道：正文/页眉/页脚）
 # =============================================================
 
-def _extract_body_only(docx_path: str) -> str:
-    """提取正文相关内容（不含页眉页脚），按阅读顺序拼接为整篇文本。"""
-    segs = scan_docx(docx_path)
-    lines = [s.text for s in segs if s.source in _BODY_SOURCES and s.text and s.text.strip()]
+def _is_docx(path: str) -> bool:
+    return Path(path).suffix.lower() == ".docx"
+
+
+def _extract_body_only(path: str) -> str:
+    """
+    提取正文相关内容（不含页眉页脚），按阅读顺序拼接为整篇文本。
+    DOCX 走 scan_docx（保留原有来源过滤）；XLSX / PPTX / PDF 走 extract_any.extract。
+    """
+    if _is_docx(path):
+        segs = scan_docx(path)
+        lines = [s.text for s in segs if s.source in _BODY_SOURCES and s.text and s.text.strip()]
+    else:
+        from extract_any import extract
+        lines = [s.text for s in extract(path) if s.text and s.text.strip()]
     return "\n".join(lines)
 
 
-def extract_channels(docx_path: str) -> Tuple[str, str, str]:
-    """返回 (正文, 页眉, 页脚) 三个整篇文本。"""
-    body = _extract_body_only(docx_path)
-    headers = extract_headers(docx_path)
-    footers = extract_footers(docx_path)
+def extract_channels(path: str) -> Tuple[str, str, str]:
+    """返回 (正文, 页眉, 页脚) 三个整篇文本。非 DOCX 格式没有页眉页脚通道，返回空串。"""
+    body = _extract_body_only(path)
+    if not _is_docx(path):
+        return body, "", ""
+    headers = extract_headers(path)
+    footers = extract_footers(path)
     return body, "\n".join(headers), "\n".join(footers)
 
 
@@ -425,19 +439,15 @@ def _anchor_occurrences(doc: object, region: str, anchor: str) -> int:
     return sum(entry.full_text.count(anchor) for entry in build_para_cache(doc, region))
 
 
-def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
-                        docx: object,
-                        revision_manager: object,
-                        doc_path: str = None) -> Tuple[list, int, int]:
+def collect_legacy_tasks(errors_by_region: Dict[str, List[Dict]],
+                         occurrence_counter: Optional[Callable[[str, str], int]] = None) -> list:
     """
-    将 run_legacy_comparison() 的扁平错误列表写入 Track Changes。
+    将扁平错误列表整理成写回任务（各格式共用），长锚点优先。
 
-    与 main.py::apply_revisions_from_ai_map 的区别：
-    - 不使用 para_index / prev_tgt / next_tgt 夹逼定位（旧流程没有逐段对齐信息）
-    - 仅依赖 替换锚点 / 译文上下文 做定位（replace_and_revise_in_docx 的策略1/2/3-6）
+    任务格式：(region, err_no, old_val, new_val, context, anchor, reason)
+    occurrence_counter(region, anchor) → 锚点在写回目标中出现的次数；
+    用于拦截"裸数值锚点出现多次"这类无法唯一定位的修改。不传则不做该检查。
     """
-    from replace_revision import replace_and_revise_in_docx
-
     tasks = []
     skipped = []
 
@@ -454,8 +464,8 @@ def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
 
             if not old_val or not new_val or old_val == new_val:
                 skipped.append((region, err_no, "字段缺失或无变化")); continue
-            if _is_bare_numeric_anchor(old_val):
-                occurrences = _anchor_occurrences(docx, region, old_val)
+            if occurrence_counter is not None and _is_bare_numeric_anchor(old_val):
+                occurrences = occurrence_counter(region, old_val)
                 if occurrences > 1:
                     skipped.append((
                         region, err_no,
@@ -469,6 +479,26 @@ def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
 
     # 长文本优先，避免短锚点抢先替换
     tasks.sort(key=lambda t: len(t[2]), reverse=True)
+    return tasks
+
+
+def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
+                        docx: object,
+                        revision_manager: object,
+                        doc_path: str = None) -> Tuple[list, int, int]:
+    """
+    将 run_legacy_comparison() 的扁平错误列表写入 Track Changes（DOCX）。
+
+    与 main.py::apply_revisions_from_ai_map 的区别：
+    - 不使用 para_index / prev_tgt / next_tgt 夹逼定位（旧流程没有逐段对齐信息）
+    - 仅依赖 替换锚点 / 译文上下文 做定位（replace_and_revise_in_docx 的策略1/2/3-6）
+    """
+    from replace_revision import replace_and_revise_in_docx
+
+    tasks = collect_legacy_tasks(
+        errors_by_region,
+        occurrence_counter=lambda region, anchor: _anchor_occurrences(docx, region, anchor),
+    )
 
     success, failed = 0, 0
     for i, (region, err_no, old_val, new_val, context, anchor, reason) in enumerate(tasks, 1):
@@ -483,6 +513,52 @@ def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
         else:
             failed += 1
             print(f"  ⚠️  [{i:>2}/{len(tasks)}] [{region}] 未找到: '{old_val}'  ({strategy})")
+
+    return tasks, success, failed
+
+
+def apply_legacy_errors_other(errors_by_region: Dict[str, List[Dict]],
+                              replacer: object,
+                              fmt: str,
+                              target_path: str) -> Tuple[list, int, int]:
+    """
+    将扁平错误列表写入 XLSX / PPTX / PDF（批注 + 替换）。
+
+    fmt            : 'xlsx' | 'pptx' | 'pdf'
+    replacer       : ExcelReplacer / PPTXReplacer / ImprovedPDFReplacer 实例
+    target_path    : 写回目标文件，仅用于统计裸数值锚点出现次数
+    与 DOCX 一样只依赖 替换锚点 / 译文上下文 定位，不传 prev_tgt/next_tgt。
+    """
+    if fmt not in {"xlsx", "pptx", "pdf"}:
+        raise ValueError(f"不支持的写回格式: {fmt}")
+
+    body_text = _extract_body_only(target_path)
+    tasks = collect_legacy_tasks(
+        errors_by_region,
+        occurrence_counter=lambda _region, anchor: body_text.count(anchor),
+    )
+
+    success, failed = 0, 0
+    for i, (region, err_no, old_val, new_val, context, anchor, reason) in enumerate(tasks, 1):
+        if fmt == "pdf":
+            comment = f"[修改] '{old_val}' → '{new_val}'"
+            if reason:
+                comment += f"\n理由: {reason}"
+            rep_count, _, _ = replacer.replace_and_annotate(
+                search_text=old_val, new_text=new_val, comment=comment, context=context,
+            )
+            ok = bool(rep_count)
+        else:
+            ok = replacer.replace_and_annotate(
+                old_text=old_val, new_text=new_val, reason=reason,
+                context=context, highlight=True,
+            )
+        if ok:
+            success += 1
+            print(f"  ✅ [{i:>2}/{len(tasks)}] '{old_val}' → '{new_val}'")
+        else:
+            failed += 1
+            print(f"  ⚠️  [{i:>2}/{len(tasks)}] 未找到: '{old_val}'")
 
     return tasks, success, failed
 

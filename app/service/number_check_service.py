@@ -84,6 +84,7 @@ ALIGNMENT_EXTENSIONS = {".xlsx"}
 DIRECT_SOURCE_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx", ".pdf"}
 TARGET_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx", ".pdf"}
 HEADER_FOOTER_EXTENSIONS = {".docx", ".doc"}
+LEGACY_MODE_EXTENSIONS = {".docx", ".xlsx", ".pptx", ".pdf"}
 
 REPORT_FILE_KEYS = {
     "align_body.json": "body_json",
@@ -558,15 +559,15 @@ def _run_latest_number_check_sync(
         # V2 会直接打开 revised_docx_path 写入修订，因此所有格式都必须先用译文初始化输出文件。
         _copy_if_needed(target_path, revised_output_path)
 
-    # 原文+译文双文件且均为 DOCX：与单独运行数检一致，走旧版流程
-    # （use_legacy_mode=True + bilingual_mode=False，整篇提取→分块直送AI→锚点写回）。
-    # 其他格式（xlsx/pptx/pdf）旧版流程不支持，仍走模式B直接提取。
+    # 原文+译文双文件：与单独运行数检一致，走旧版流程
+    # （use_legacy_mode=True + bilingual_mode=False，整篇提取→分块直送AI→锚点写回），
+    # 支持 docx / xlsx / pptx / pdf，写回方式由译文格式决定。
     use_legacy_mode = bool(
         mode == NUMBER_CHECK_MODE_DIRECT
         and source_path
         and target_path
-        and source_path.suffix.lower() == ".docx"
-        and target_path.suffix.lower() == ".docx"
+        and source_path.suffix.lower() in LEGACY_MODE_EXTENSIONS
+        and target_path.suffix.lower() in LEGACY_MODE_EXTENSIONS
     )
     _emit_log(task_id, f"[config] use_legacy_mode={use_legacy_mode}")
 

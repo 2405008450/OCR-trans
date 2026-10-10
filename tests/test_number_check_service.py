@@ -4,6 +4,7 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.service import number_check_service
@@ -178,14 +179,16 @@ def test_direct_docx_pair_uses_legacy_mode_and_handles_dict_result(tmp_path, mon
     assert result["stats"] == {"total_issues": 3, "body_issues": 2, "header_issues": 1, "footer_issues": 0}
 
 
-def test_direct_non_docx_pair_keeps_mode_b(tmp_path, monkeypatch):
+@pytest.mark.parametrize("ext", [".xlsx", ".pptx", ".pdf"])
+def test_direct_non_docx_pair_also_uses_legacy_mode(tmp_path, monkeypatch, ext):
     captured = {}
 
     def fake_run(**kwargs):
         captured.update(kwargs)
-        return [], [], []
+        return {"body": [], "header": [], "footer": []}
 
-    _run_direct(tmp_path, monkeypatch, "source.xlsx", "target.xlsx", fake_run)
+    result = _run_direct(tmp_path, monkeypatch, f"source{ext}", f"target{ext}", fake_run)
 
-    assert captured["use_legacy_mode"] is False
-    assert captured["force_mode_b"] is True
+    assert captured["use_legacy_mode"] is True
+    assert captured["bilingual_mode"] is False
+    assert result["stats"]["total_issues"] == 0
