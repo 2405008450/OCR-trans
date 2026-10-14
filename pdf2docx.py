@@ -159,11 +159,23 @@ def _strip_optional_code_fence(text: str) -> str:
     return normalized.strip()
 
 
+def _print_console(text: str, *, end: str = "\n") -> None:
+    """兼容 GBK 等控制台编码，仅转义日志中无法编码的字符。"""
+    stream = sys.stdout
+    try:
+        print(text, end=end, flush=True, file=stream)
+    except UnicodeEncodeError as exc:
+        # 保留业务文本原样，避免日志编码失败触发 OCR 重试或阻断状态回调。
+        encoding = getattr(stream, "encoding", None) or exc.encoding
+        safe_text = text.encode(encoding, errors="backslashreplace").decode(encoding)
+        print(safe_text, end=end, flush=True, file=stream)
+
+
 def _emit_ocr_status(message: str, status_callback=None) -> None:
     text = (message or "").strip()
     if not text:
         return
-    print(text, flush=True)
+    _print_console(text)
     if status_callback:
         status_callback(text)
 
@@ -400,7 +412,7 @@ def _ocr_single_image(
                     and not _is_explicit_empty_html(response_text)
                 ):
                     raise OCRIncompleteResultError("OCR 未返回明确的识别结果，但图片包含明显可见内容")
-                print(response_text, end="", flush=True)
+                _print_console(response_text, end="")
                 if stage_index > 0:
                     _emit_ocr_status(
                         f"OCR 已恢复：{_route_display_name(route)} / {candidate_model}",
@@ -531,7 +543,7 @@ def ocr_file(
 
             for selected_index, page_no in enumerate(selected_pages, start=1):
                 page = doc[page_no - 1]
-                print(f"\n正在处理第 {page_no}/{total} 页...")
+                _print_console(f"\n正在处理第 {page_no}/{total} 页...")
                 if page_progress_callback:
                     page_progress_callback(page_no, total)
 
@@ -574,7 +586,7 @@ def ocr_file(
             if callable(close):
                 close()
 
-        print("\nPDF OCR 完成")
+        _print_console("\nPDF OCR 完成")
         metadata = _build_ocr_metadata(
             page_results=page_results,
             total_pages=total,
@@ -590,7 +602,7 @@ def ocr_file(
         image_bytes, mime_type = frames[page_no - 1]
         if page_progress_callback:
             page_progress_callback(page_no, total)
-        print(f"正在调用 LLM 进行 OCR{f'（第 {page_no}/{total} 页）' if total > 1 else ''}...")
+        _print_console(f"正在调用 LLM 进行 OCR{f'（第 {page_no}/{total} 页）' if total > 1 else ''}...")
         try:
             result = _ocr_single_image(
                 base64.standard_b64encode(image_bytes).decode("utf-8"),
@@ -618,7 +630,7 @@ def ocr_file(
         if selected_index < len(selected_pages):
             time.sleep(1)
 
-    print("\nOCR 完成")
+    _print_console("\nOCR 完成")
     metadata = _build_ocr_metadata(
         page_results=page_results,
         total_pages=total,
@@ -972,7 +984,7 @@ def convert_html_to_docx_via_libreoffice(
     try:
         _postprocess_docx_tables(str(docx_file), _extract_table_layout_specs(html_text))
     except Exception as exc:
-        print(f"[warn] DOCX table post-processing failed; keeping LibreOffice output: {exc}")
+        _print_console(f"[warn] DOCX table post-processing failed; keeping LibreOffice output: {exc}")
 
     return str(docx_file)
 
@@ -1048,7 +1060,7 @@ class HybridToDocxConverter:
 
         # Step 3: 保存
         self.doc.save(output_path)
-        print(f"Word 文档已保存: {output_path}")
+        _print_console(f"Word 文档已保存: {output_path}")
 
     # ----------------------------------------------------------
     # 预处理
@@ -1591,11 +1603,11 @@ def main():
 
     # 检查文件是否存在
     if not API_KEY:
-        print("鉂?鏈厤缃?OPENROUTER_API_KEY")
+        _print_console("未配置 OPENROUTER_API_KEY")
         sys.exit(1)
 
     if not os.path.exists(FILE_PATH):
-        print(f"文件不存在: {FILE_PATH}")
+        _print_console(f"文件不存在: {FILE_PATH}")
         sys.exit(1)
 
     # Step 1: OCR
@@ -1605,7 +1617,7 @@ def main():
     raw_output_path = OUTPUT_DOCX.replace(".docx", "_raw.txt")
     with open(raw_output_path, "w", encoding="utf-8") as f:
         f.write(raw_output)
-    print(f"📄 原始 OCR 输出已保存: {raw_output_path}")
+    _print_console(f"📄 原始 OCR 输出已保存: {raw_output_path}")
 
     # Step 2: 转换为 Word
     html_output_path = OUTPUT_DOCX.replace(".docx", ".html")
@@ -1615,7 +1627,7 @@ def main():
         html_output_path=html_output_path,
     )
 
-    print(f"\n🎉 全部完成！输出文件: {OUTPUT_DOCX}")
+    _print_console(f"\n🎉 全部完成！输出文件: {OUTPUT_DOCX}")
 
 
 # ============================================================
