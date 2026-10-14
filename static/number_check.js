@@ -5,6 +5,9 @@ const sourceFileInput = document.getElementById('sourceFile');
 const directTargetFileInput = document.getElementById('directTargetFile');
 const modeAlignmentRadio = document.getElementById('modeAlignment');
 const modeDirectRadio = document.getElementById('modeDirect');
+const modeBilingualRadio = document.getElementById('modeBilingual');
+const bilingualFileInput = document.getElementById('bilingualFile');
+const bilingualFields = document.getElementById('bilingualFields');
 const modeHint = document.getElementById('modeHint');
 const uploadDesc = document.getElementById('uploadDesc');
 const pageSubtitle = document.getElementById('pageSubtitle');
@@ -50,6 +53,24 @@ let currentMode = 'alignment';
 let streamLogWrap = null;
 let streamLogEl = null;
 
+const MODE_TEXTS = {
+    alignment: {
+        hint: '上传含“原文”“译文”两列的双语对照 Excel；如需生成修订版，可再上传译文文件。',
+        upload: '单个双语对照 Excel 是新版数检推荐输入；上传译文文件后会额外输出修订版。',
+        subtitle: '基于已对齐双语 Excel 执行规则检查与 AI 复核，适合只有一个对照文件的场景。',
+    },
+    direct: {
+        hint: '上传原文+译文双文件，由新版数检程序直接抽取内容，支持 DOCX、XLSX、PPTX、PDF。',
+        upload: 'DOCX 段落合并、拆分或排版不一致时会自动对齐，再生成对照和检查报告；PDF 双文件使用直接提取。',
+        subtitle: '直接从原文和译文双文件抽取内容，生成数值检查报告和可用修订文件。',
+    },
+    bilingual: {
+        hint: '只上传一个文件（文档内中英段落交替排列），按旧版流程整篇直送 AI 检查，支持 DOCX、XLSX、PPTX、PDF。',
+        upload: '单文件双语对照（旧版流程）：无需译文文件，修订直接写回该文件的副本。',
+        subtitle: '从单个中英交替排列的双语文档中检查数值，生成错误列表和修订文件。',
+    },
+};
+
 init();
 
 async function init() {
@@ -64,6 +85,7 @@ function bindEvents() {
     btnReset?.addEventListener('click', resetPage);
     modeAlignmentRadio?.addEventListener('change', () => applyMode('alignment'));
     modeDirectRadio?.addEventListener('change', () => applyMode('direct'));
+    modeBilingualRadio?.addEventListener('change', () => applyMode('bilingual'));
     modelSelect?.addEventListener('change', updateModelInfo);
 }
 
@@ -83,6 +105,9 @@ async function loadConfig() {
         sourceHfFileInput.accept = (data.source_hf_file_extensions || ['.docx', '.doc']).join(',');
         sourceFileInput.accept = (data.direct_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx', '.pdf']).join(',');
         directTargetFileInput.accept = (data.direct_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx', '.pdf']).join(',');
+        if (bilingualFileInput) {
+            bilingualFileInput.accept = (data.bilingual_file_extensions || ['.docx', '.doc', '.xlsx', '.pptx', '.pdf']).join(',');
+        }
     } catch (error) {
         console.error(error);
         modelConfig = {
@@ -93,6 +118,7 @@ async function loadConfig() {
         modeConfig = {
             alignment: { description: '上传含“原文”“译文”两列的双语对照 Excel；如需生成修订版，可再上传译文文件。' },
             direct: { description: '上传原文+译文双文件，由新版数检程序直接抽取内容，支持 DOCX、XLSX、PPTX、PDF。' },
+            bilingual: { description: MODE_TEXTS.bilingual.hint },
         };
     }
 
@@ -121,30 +147,24 @@ function updateModelInfo() {
 }
 
 function getSelectedMode() {
+    if (modeBilingualRadio?.checked) return 'bilingual';
     return modeDirectRadio?.checked ? 'direct' : 'alignment';
 }
 
 function applyMode(mode) {
-    currentMode = mode === 'direct' ? 'direct' : 'alignment';
+    currentMode = ['direct', 'bilingual'].includes(mode) ? mode : 'alignment';
     modeAlignmentRadio.checked = currentMode === 'alignment';
     modeDirectRadio.checked = currentMode === 'direct';
+    if (modeBilingualRadio) modeBilingualRadio.checked = currentMode === 'bilingual';
 
-    const directMode = currentMode === 'direct';
-    alignmentFields.style.display = directMode ? 'none' : 'block';
-    directFields.style.display = directMode ? 'block' : 'none';
+    alignmentFields.style.display = currentMode === 'alignment' ? 'block' : 'none';
+    directFields.style.display = currentMode === 'direct' ? 'block' : 'none';
+    if (bilingualFields) bilingualFields.style.display = currentMode === 'bilingual' ? 'block' : 'none';
 
-    const description = modeConfig[currentMode]?.description || (
-        directMode
-            ? '上传原文+译文双文件，由新版数检程序直接抽取内容，支持 DOCX、XLSX、PPTX、PDF。'
-            : '上传含“原文”“译文”两列的双语对照 Excel；如需生成修订版，可再上传译文文件。'
-    );
-    modeHint.textContent = description;
-    uploadDesc.textContent = directMode
-        ? 'DOCX 段落合并、拆分或排版不一致时会自动对齐，再生成对照和检查报告；PDF 双文件使用直接提取。'
-        : '单个双语对照 Excel 是新版数检推荐输入；上传译文文件后会额外输出修订版。';
-    pageSubtitle.textContent = directMode
-        ? '直接从原文和译文双文件抽取内容，生成数值检查报告和可用修订文件。'
-        : '基于已对齐双语 Excel 执行规则检查与 AI 复核，适合只有一个对照文件的场景。';
+    const texts = MODE_TEXTS[currentMode];
+    modeHint.textContent = modeConfig[currentMode]?.description || texts.hint;
+    uploadDesc.textContent = texts.upload;
+    pageSubtitle.textContent = texts.subtitle;
 }
 
 function ensureLogPanel() {
@@ -180,6 +200,14 @@ async function runNumberCheck() {
         formData.append('alignment_file', alignmentFile);
         if (targetFileInput.files[0]) formData.append('target_file', targetFileInput.files[0]);
         if (sourceHfFileInput.files[0]) formData.append('source_hf_file', sourceHfFileInput.files[0]);
+    } else if (mode === 'bilingual') {
+        const bilingualFile = bilingualFileInput?.files[0];
+        if (!bilingualFile) {
+            alert('请选择双语对照文件。');
+            return;
+        }
+        // 单文件双语对照：仅上传一个文件，后端以 source_file 接收，不需要译文。
+        formData.append('source_file', bilingualFile);
     } else {
         const sourceFile = sourceFileInput.files[0];
         const targetFile = directTargetFileInput.files[0];
@@ -389,6 +417,7 @@ function resetPage() {
     sourceHfFileInput.value = '';
     sourceFileInput.value = '';
     directTargetFileInput.value = '';
+    if (bilingualFileInput) bilingualFileInput.value = '';
     uploadSection.style.display = 'block';
     processingSection.style.display = 'none';
     resultSection.style.display = 'none';

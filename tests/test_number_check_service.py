@@ -192,3 +192,51 @@ def test_direct_non_docx_pair_also_uses_legacy_mode(tmp_path, monkeypatch, ext):
     assert captured["use_legacy_mode"] is True
     assert captured["bilingual_mode"] is False
     assert result["stats"]["total_issues"] == 0
+
+
+def test_bilingual_single_file_mode_passes_only_source_and_revises_that_file(tmp_path, monkeypatch):
+    source_path = tmp_path / "bilingual.docx"
+    source_path.write_bytes(b"bilingual-docx")
+    output_dir = tmp_path / "outputs"
+    output_dir.mkdir()
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        assert Path(kwargs["revised_docx_path"]).read_bytes() == b"bilingual-docx"
+        return {"body": [{"错误编号": "1"}], "header": [], "footer": []}
+
+    monkeypatch.setattr(number_check_service, "_set_llm_env", lambda _model: "test-model")
+    monkeypatch.setattr(
+        number_check_service,
+        "_load_latest_main_module",
+        lambda: types.SimpleNamespace(run=fake_run),
+    )
+    task_id = "bilingual-single"
+    number_check_service._init_task_progress(task_id)
+    result = number_check_service._run_latest_number_check_sync(
+        task_id=task_id,
+        mode=number_check_service.NUMBER_CHECK_MODE_BILINGUAL,
+        alignment_path=None,
+        source_path=source_path,
+        target_path=None,
+        source_hf_path=None,
+        output_dir=output_dir,
+        gemini_route="openrouter",
+        model_name="test-model",
+        alignment_filename=None,
+        source_filename="bilingual.docx",
+        target_filename=None,
+    )
+
+    assert captured["use_legacy_mode"] is True
+    assert captured["bilingual_mode"] is True
+    assert captured["tgt_docx_path"] is None
+    assert captured["docx_path"] == str(source_path)
+    assert result["stats"]["body_issues"] == 1
+    assert result["corrected_docx"].endswith(Path(captured["revised_docx_path"]).name)
+
+
+def test_bilingual_mode_is_normalized():
+    assert number_check_service._normalize_number_check_mode("bilingual") == number_check_service.NUMBER_CHECK_MODE_BILINGUAL
+    assert number_check_service._normalize_number_check_mode("bilingual_single") == number_check_service.NUMBER_CHECK_MODE_BILINGUAL

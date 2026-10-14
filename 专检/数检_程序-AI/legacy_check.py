@@ -21,6 +21,7 @@ from typing import Callable, List, Dict, Optional, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from ai_errors import AICheckIncompleteError
 from full_content import scan_docx
 from header_extractor import extract_headers
 from footer_extractor import extract_footers
@@ -116,18 +117,119 @@ _PROMPT_TEMPLATE = """# 角色
 """
 
 
-def _compare_texts(original_text: str, translated_text: str) -> str:
-    """调用 LLM 对比一段原文/译文，返回原始响应字符串。"""
-    prompt = _PROMPT_TEMPLATE.format(orig=original_text, trans=translated_text)
+_MAX_ATTEMPTS = 3
+
+
+class _InvalidAIReply(Exception):
+    """模型有响应，但内容不能作为有效检查结果（空 / 被截断 / 无法解析）。"""
+
+
+def _chat(system_prompt: str, prompt: str) -> Tuple[str, str]:
+    """调用 LLM，返回 (content, finish_reason)。无 choices 视为无效响应。"""
     resp = client.chat.completions.create(
         model=_MODEL,
         messages=[
-            {"role": "system", "content": "你是中译英译文合规审校员，只输出JSON数组，不做多余解释。"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
         temperature=0,
     )
-    return resp.choices[0].message.content or ""
+    if not getattr(resp, "choices", None):
+        raise _InvalidAIReply("返回为空（无 choices）")
+    choice = resp.choices[0]
+    return choice.message.content or "", getattr(choice, "finish_reason", None) or ""
+
+
+def _parse_ai_reply(raw: str, finish_reason: str) -> List[Dict]:
+    """
+    校验并解析模型回复，返回错误列表。
+
+    只有"成功调用 + 非空 + 未截断 + 解析为 JSON 数组"才算有效回复：
+      有效且为 []  → 模型明确表示无错误
+    其余情况一律抛 _InvalidAIReply，绝不返回 [] 冒充"无错误"。
+    """
+    if not raw or not raw.strip():
+        raise _InvalidAIReply("返回为空")
+    if finish_reason == "length":
+        raise _InvalidAIReply("返回被截断")
+
+    text = re.sub(r"```(?:json)?", "", raw).strip()
+    candidates = [text]
+    bracketed = re.search(r"\[.*\]", text, re.S)
+    if bracketed:
+        candidates.append(bracketed.group())
+    data = None
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+
+    # 兜底：逐个 {} 对象提取（格式略有偏差的回复）；一个对象都提不出来则判无效
+    try:
+        parsed = parse_json_content(raw)
+    except Exception:
+        parsed = []
+    if parsed:
+        return parsed
+    raise _InvalidAIReply("返回无法解析为 JSON 数组")
+
+
+def _request_errors(call, where: str) -> List[Dict]:
+    """
+    带重试地请求一块文本的检查结果。
+    call() 返回 (content, finish_reason)。重试耗尽仍无有效回复则抛 AICheckIncompleteError。
+    """
+    reason = "未知原因"
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            raw, finish_reason = call()
+            parsed = _parse_ai_reply(raw, finish_reason)
+            if not parsed:
+                print("      ✓ 模型已正常返回：未发现问题")
+            return parsed
+        except _InvalidAIReply as e:
+            reason = str(e)
+            detail = reason
+        except Exception as e:
+            reason = "API调用失败"
+            detail = f"调用失败: {e}"
+        if attempt < _MAX_ATTEMPTS - 1:
+            wait = (attempt + 1) * 10
+            print(f"  ⚠️ {detail}，{wait}秒后重试...")
+            time.sleep(wait)
+        else:
+            print(f"  ❌ {where} {detail}（已尝试 {_MAX_ATTEMPTS} 次）")
+    raise AICheckIncompleteError(
+        f"AI 检查未完成，结果不可信，请重新检查。{where}：{reason}（已重试 {_MAX_ATTEMPTS - 1} 次）。"
+    )
+
+
+def _filter_errors(parsed: List[Dict]) -> List[Dict]:
+    """去掉无需修改的条目，并裁剪建议值与锚点的重复部分。"""
+    filtered = []
+    for item in parsed:
+        tran_val = (item.get("译文数值") or "").strip()
+        tran_sug = (item.get("译文修改建议值") or "").strip()
+        context_str = (item.get("译文上下文") or "").strip()
+        anchor_str = (item.get("替换锚点") or tran_val).strip()
+        fixed = _fix_suggestion_overlap(context_str, anchor_str, tran_sug)
+        if fixed != tran_sug:
+            item["译文修改建议值"] = fixed
+            tran_sug = fixed
+        if not tran_sug or tran_sug == tran_val:
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def _compare_texts(original_text: str, translated_text: str) -> Tuple[str, str]:
+    """调用 LLM 对比一段原文/译文，返回 (原始响应, finish_reason)。"""
+    prompt = _PROMPT_TEMPLATE.format(orig=original_text, trans=translated_text)
+    return _chat("你是中译英译文合规审校员，只输出JSON数组，不做多余解释。", prompt)
 
 
 def _fix_suggestion_overlap(context: str, anchor: str, suggestion: str) -> str:
@@ -144,43 +246,13 @@ def _compare_with_split(orig_txt: str, trans_txt: str, name: str) -> List[Dict]:
     pairs = split_text_pair(orig_txt, trans_txt)
     num_parts = len(pairs)
 
-    def _process_one(orig_chunk: str, trans_chunk: str) -> List[Dict]:
-        raw = None
-        for attempt in range(3):
-            try:
-                raw = _compare_texts(orig_chunk, trans_chunk)
-                break
-            except Exception as e:
-                if attempt < 2:
-                    wait = (attempt + 1) * 10
-                    print(f"  ⚠️ 调用失败: {e}，{wait}秒后重试...")
-                    time.sleep(wait)
-                else:
-                    print(f"  ❌ 调用 API 失败（已重试2次）: {e}")
-        if not raw:
-            return []
-        parsed = parse_json_content(raw)
-        if not isinstance(parsed, list):
-            return []
-
-        filtered = []
-        for item in parsed:
-            tran_val = (item.get("译文数值") or "").strip()
-            tran_sug = (item.get("译文修改建议值") or "").strip()
-            context_str = (item.get("译文上下文") or "").strip()
-            anchor_str = (item.get("替换锚点") or tran_val).strip()
-            fixed = _fix_suggestion_overlap(context_str, anchor_str, tran_sug)
-            if fixed != tran_sug:
-                item["译文修改建议值"] = fixed
-                tran_sug = fixed
-            if not tran_sug or tran_sug == tran_val:
-                continue
-            filtered.append(item)
-        return filtered
+    def _process_one(orig_chunk: str, trans_chunk: str, where: str) -> List[Dict]:
+        parsed = _request_errors(lambda: _compare_texts(orig_chunk, trans_chunk), where)
+        return _filter_errors(parsed)
 
     if num_parts <= 1:
         print(f"  📄 {name}文本较短（{_count_chars(orig_txt)} 字），直接对比")
-        return _process_one(orig_txt, trans_txt)
+        return _process_one(orig_txt, trans_txt, f"{name}")
 
     print(f"  📄 {name}文本较长（原文 {_count_chars(orig_txt)} 字），分割为 {num_parts} 块进行对比")
 
@@ -192,7 +264,7 @@ def _compare_with_split(orig_txt: str, trans_txt: str, name: str) -> List[Dict]:
         if not orig_chunk.strip() or not trans_chunk.strip():
             print(f"      ⚠️ 块内容为空，跳过")
             continue
-        items = _process_one(orig_chunk, trans_chunk)
+        items = _process_one(orig_chunk, trans_chunk, f"{name}第 {i}/{num_parts} 块")
         chunk_count = 0
         for item in items:
             dedup_key = (
@@ -261,18 +333,10 @@ _BILINGUAL_PROMPT_TEMPLATE = """# 文件类型：双语对照或者多语种对�
 """
 
 
-def _compare_bilingual_text(text: str) -> str:
-    """调用 LLM 对比单份双语对照文本，返回原始响应字符串。"""
+def _compare_bilingual_text(text: str) -> Tuple[str, str]:
+    """调用 LLM 对比单份双语对照文本，返回 (原始响应, finish_reason)。"""
     prompt = _BILINGUAL_PROMPT_TEMPLATE.format(doc=text)
-    resp = client.chat.completions.create(
-        model=_MODEL,
-        messages=[
-            {"role": "system", "content": "你是中译英以及其他语种译文合规审校员，只输出JSON数组，不做多余解释。"},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0,
-    )
-    return resp.choices[0].message.content or ""
+    return _chat("你是中译英以及其他语种译文合规审校员，只输出JSON数组，不做多余解释。", prompt)
 
 
 def _compare_bilingual_with_split(text: str, name: str) -> List[Dict]:
@@ -286,43 +350,13 @@ def _compare_bilingual_with_split(text: str, name: str) -> List[Dict]:
         chunks = [text]
     num_parts = len(chunks)
 
-    def _process_one(chunk: str) -> List[Dict]:
-        raw = None
-        for attempt in range(3):
-            try:
-                raw = _compare_bilingual_text(chunk)
-                break
-            except Exception as e:
-                if attempt < 2:
-                    wait = (attempt + 1) * 10
-                    print(f"  ⚠️ 调用失败: {e}，{wait}秒后重试...")
-                    time.sleep(wait)
-                else:
-                    print(f"  ❌ 调用 API 失败（已重试2次）: {e}")
-        if not raw:
-            return []
-        parsed = parse_json_content(raw)
-        if not isinstance(parsed, list):
-            return []
-
-        filtered = []
-        for item in parsed:
-            tran_val = (item.get("译文数值") or "").strip()
-            tran_sug = (item.get("译文修改建议值") or "").strip()
-            context_str = (item.get("译文上下文") or "").strip()
-            anchor_str = (item.get("替换锚点") or tran_val).strip()
-            fixed = _fix_suggestion_overlap(context_str, anchor_str, tran_sug)
-            if fixed != tran_sug:
-                item["译文修改建议值"] = fixed
-                tran_sug = fixed
-            if not tran_sug or tran_sug == tran_val:
-                continue
-            filtered.append(item)
-        return filtered
+    def _process_one(chunk: str, where: str) -> List[Dict]:
+        parsed = _request_errors(lambda: _compare_bilingual_text(chunk), where)
+        return _filter_errors(parsed)
 
     if num_parts <= 1:
         print(f"  📄 {name}文本较短（{_count_chars(text)} 字），直接对比")
-        return _process_one(chunks[0] if chunks else text)
+        return _process_one(chunks[0] if chunks else text, f"{name}")
 
     print(f"  📄 {name}文本较长（{_count_chars(text)} 字），分割为 {num_parts} 块进行对比")
 
@@ -334,7 +368,7 @@ def _compare_bilingual_with_split(text: str, name: str) -> List[Dict]:
         if not chunk.strip():
             print(f"      ⚠️ 块内容为空，跳过")
             continue
-        items = _process_one(chunk)
+        items = _process_one(chunk, f"{name}第 {i}/{num_parts} 块")
         chunk_count = 0
         for item in items:
             dedup_key = (

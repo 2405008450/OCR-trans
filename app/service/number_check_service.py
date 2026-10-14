@@ -79,8 +79,11 @@ NUMBER_CHECK_MAIN_FILE = NUMBER_CHECK_LATEST_ROOT / "main.py"
 
 NUMBER_CHECK_MODE_ALIGNMENT = "alignment"
 NUMBER_CHECK_MODE_DIRECT = "direct"
+# 旧版流程·单文件双语对照模式：仅上传一个 DOCX（文档内中英段落交替排列）
+NUMBER_CHECK_MODE_BILINGUAL = "bilingual"
 
 ALIGNMENT_EXTENSIONS = {".xlsx"}
+BILINGUAL_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx", ".pdf"}
 DIRECT_SOURCE_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx", ".pdf"}
 TARGET_EXTENSIONS = {".docx", ".doc", ".xlsx", ".pptx", ".pdf"}
 HEADER_FOOTER_EXTENSIONS = {".docx", ".doc"}
@@ -162,9 +165,10 @@ def _normalize_number_check_mode(mode: Optional[str]) -> str:
         "alignment_excel": NUMBER_CHECK_MODE_ALIGNMENT,
         "single": NUMBER_CHECK_MODE_ALIGNMENT,
         "double": NUMBER_CHECK_MODE_DIRECT,
+        "bilingual_single": NUMBER_CHECK_MODE_BILINGUAL,
     }
     candidate = aliases.get(candidate, candidate)
-    if candidate not in {NUMBER_CHECK_MODE_ALIGNMENT, NUMBER_CHECK_MODE_DIRECT}:
+    if candidate not in {NUMBER_CHECK_MODE_ALIGNMENT, NUMBER_CHECK_MODE_DIRECT, NUMBER_CHECK_MODE_BILINGUAL}:
         raise ValueError(f"不支持的数字专检模式: {mode}")
     return candidate
 
@@ -547,43 +551,57 @@ def _run_latest_number_check_sync(
     with _specialist_import_lock:
         main_module = _load_latest_main_module()
 
+    # 单文件双语对照（旧版）：只有一个文件，修订写回该文件的副本。
+    bilingual_mode = mode == NUMBER_CHECK_MODE_BILINGUAL
+    if bilingual_mode:
+        if not source_path or source_path.suffix.lower() not in LEGACY_MODE_EXTENSIONS:
+            raise ValueError("单文件双语对照模式仅支持 DOCX / XLSX / PPTX / PDF 文件")
+        target_path = None
+
+    # 修订写入的基础文件：双文件/对照 Excel 为译文，单文件双语对照为该文件本身。
+    revise_base_path = source_path if bilingual_mode else target_path
+    revise_base_name = source_filename if bilingual_mode else target_filename
+
     revised_output_path: Optional[Path] = None
-    if target_path:
+    if revise_base_path:
         revised_output_path = ensure_unique_path(
             output_dir / build_user_visible_filename(
-                target_filename or target_path.name,
+                revise_base_name or revise_base_path.name,
                 suffix="number_checked",
-                ext=target_path.suffix.lower() or ".docx",
+                ext=revise_base_path.suffix.lower() or ".docx",
             )
         )
         # V2 会直接打开 revised_docx_path 写入修订，因此所有格式都必须先用译文初始化输出文件。
-        _copy_if_needed(target_path, revised_output_path)
+        _copy_if_needed(revise_base_path, revised_output_path)
 
-    # 原文+译文双文件：与单独运行数检一致，走旧版流程
-    # （use_legacy_mode=True + bilingual_mode=False，整篇提取→分块直送AI→锚点写回），
-    # 支持 docx / xlsx / pptx / pdf，写回方式由译文格式决定。
+    # 旧版流程（use_legacy_mode=True，整篇提取→分块直送AI→锚点写回），与单独运行数检一致：
+    #  - 单文件双语对照：bilingual_mode=True，只传 src_docx_path
+    #  - 原文+译文双文件：bilingual_mode=False，支持 docx / xlsx / pptx / pdf
     use_legacy_mode = bool(
-        mode == NUMBER_CHECK_MODE_DIRECT
-        and source_path
-        and target_path
-        and source_path.suffix.lower() in LEGACY_MODE_EXTENSIONS
-        and target_path.suffix.lower() in LEGACY_MODE_EXTENSIONS
+        bilingual_mode
+        or (
+            mode == NUMBER_CHECK_MODE_DIRECT
+            and source_path
+            and target_path
+            and source_path.suffix.lower() in LEGACY_MODE_EXTENSIONS
+            and target_path.suffix.lower() in LEGACY_MODE_EXTENSIONS
+        )
     )
-    _emit_log(task_id, f"[config] use_legacy_mode={use_legacy_mode}")
+    _emit_log(task_id, f"[config] use_legacy_mode={use_legacy_mode}, bilingual_mode={bilingual_mode}")
 
     run_kwargs = {
         "use_legacy_mode": use_legacy_mode,
-        "bilingual_mode": False,
+        "bilingual_mode": bilingual_mode,
         "alignment_path": str(alignment_path) if alignment_path else None,
         "output_dir": str(output_dir),
         "src_docx_path": str(source_path) if source_path else None,
         "tgt_docx_path": str(target_path) if target_path else None,
         "src_hf_path": str(source_hf_path) if source_hf_path else None,
-        "docx_path": str(target_path) if target_path else None,
+        "docx_path": str(revise_base_path) if revise_base_path else None,
         "revised_docx_path": str(revised_output_path) if revised_output_path else None,
         "revision_author": "数值检查",
         "use_total_normalizer": True,
-        "force_mode_b": mode == NUMBER_CHECK_MODE_DIRECT,
+        "force_mode_b": mode in {NUMBER_CHECK_MODE_DIRECT, NUMBER_CHECK_MODE_BILINGUAL},
         "ai_check_all": False,
         "alignment_callback": lambda source_segments, target_segments: align_number_check_segments(
             source_segments,
@@ -600,6 +618,7 @@ def _run_latest_number_check_sync(
         "正在执行规则检查和 AI 复核...",
         [
             "模式: 对照 Excel" if mode == NUMBER_CHECK_MODE_ALIGNMENT
+            else "模式: 单文件双语对照（旧版）" if bilingual_mode
             else ("模式: 原文+译文（旧版·双文件）" if use_legacy_mode else "模式: 原文+译文"),
             f"模型: {resolved_model_name}",
         ],
@@ -694,6 +713,12 @@ async def run_number_check_task(
                 _validate_upload(target_file, "待修订译文文件", TARGET_EXTENSIONS)
             if source_hf_file:
                 _validate_upload(source_hf_file, "页眉页脚原文文件", HEADER_FOOTER_EXTENSIONS)
+        elif normalized_mode == NUMBER_CHECK_MODE_BILINGUAL:
+            if source_file is None:
+                raise ValueError("单文件双语对照模式缺少 source_file")
+            if target_file is not None:
+                raise ValueError("单文件双语对照模式不需要上传译文文件")
+            _validate_upload(source_file, "双语对照文件", BILINGUAL_EXTENSIONS)
         else:
             if source_file is None or target_file is None:
                 raise ValueError("原文+译文模式缺少 source_file 或 target_file")

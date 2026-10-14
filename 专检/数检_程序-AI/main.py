@@ -4,6 +4,7 @@ from pathlib import Path
 from report_generator import generate_combined_report
 from extract_values import merge_ai_results, run_number_check, check_text_pairs
 from program_check import _llm_check_block
+from ai_errors import AICheckIncompleteError
 from normalizer import DEFAULT_STRATEGIES as _DEFAULT_STRATEGIES_BASIC
 from normalizer_total import DEFAULT_STRATEGIES as _DEFAULT_STRATEGIES_TOTAL
 
@@ -434,6 +435,29 @@ def apply_revisions_pdf(
 # 单区域检查流程（规则 + AI）→ 返回 (final_rows, ai_map)
 # =============================================================
 
+_PENDING_REASON_LABEL = {
+    "api_error": "API调用失败",
+    "parse_failed": "返回无法解析",
+    "empty_content": "返回为空",
+    "ok": "模型漏返部分条目",
+}
+
+
+def _raise_if_ai_incomplete(label: str, ai_map: dict) -> None:
+    """
+    _llm_check_block 在重试后仍无有效结果的行会被标记 _pending。
+    这些行不是"AI 判定无错误"，而是"AI 没有给出结果"，必须报错让用户重新检查。
+    """
+    pending = {idx: v for idx, v in ai_map.items() if v.get("_pending")}
+    if not pending:
+        return
+    reasons = sorted({_PENDING_REASON_LABEL.get(v.get("_error_status"), "未知原因") for v in pending.values()})
+    raise AICheckIncompleteError(
+        f"AI 检查未完成，结果不可信，请重新检查。{label}有 {len(pending)}/{len(ai_map)} 行"
+        f"未获得有效 AI 结果（{'、'.join(reasons)}）。"
+    )
+
+
 def _check_region(label: str, pairs: list,
                   block_size: int, normalize_strategies: dict,
                   check_all: bool = False) -> tuple:
@@ -464,6 +488,7 @@ def _check_region(label: str, pairs: list,
         for pos, (idx, _) in enumerate(block):
             ai_map[idx] = results[pos]
 
+    _raise_if_ai_incomplete(label, ai_map)
     final_rows = merge_ai_results(rows, ai_map)
     ai_err = sum(1 for r in final_rows if r.get("AI是否正确") == "❗错误")
     print(f"  [{label}] AI错误: {ai_err} / {len(final_rows)}")
@@ -830,6 +855,7 @@ def run(alignment_path: str = None,
         for pos, (idx, _) in enumerate(block):
             body_ai_map[idx] = results[pos]
 
+    _raise_if_ai_incomplete("正文", body_ai_map)
     body_final = merge_ai_results(body_rows, body_ai_map)
     body_ai_err = sum(1 for r in body_final if r.get("AI是否正确") == "❗错误")
     print(f"  [正文] AI错误: {body_ai_err} / {len(body_final)}")

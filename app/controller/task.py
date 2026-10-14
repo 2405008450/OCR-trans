@@ -83,9 +83,11 @@ from app.service.msg_convert_service import (
 )
 from app.service.number_check_service import (
     ALIGNMENT_EXTENSIONS,
+    BILINGUAL_EXTENSIONS,
     DIRECT_SOURCE_EXTENSIONS,
     HEADER_FOOTER_EXTENSIONS,
     NUMBER_CHECK_MODE_ALIGNMENT,
+    NUMBER_CHECK_MODE_BILINGUAL,
     NUMBER_CHECK_MODE_DIRECT,
     TARGET_EXTENSIONS,
     _get_task_progress as get_number_check_progress,
@@ -598,6 +600,8 @@ async def run_number_check(
         resolved_mode = NUMBER_CHECK_MODE_ALIGNMENT
     elif resolved_mode == "double":
         resolved_mode = NUMBER_CHECK_MODE_DIRECT
+    elif resolved_mode == "bilingual_single":
+        resolved_mode = NUMBER_CHECK_MODE_BILINGUAL
 
     source_upload = source_file or original_file
     target_upload = target_file or translated_file
@@ -609,6 +613,11 @@ async def run_number_check(
     elif resolved_mode == NUMBER_CHECK_MODE_DIRECT:
         if source_upload is None or target_upload is None:
             raise HTTPException(status_code=400, detail="原文+译文模式需要同时上传 source_file 和 target_file")
+    elif resolved_mode == NUMBER_CHECK_MODE_BILINGUAL:
+        if source_upload is None:
+            raise HTTPException(status_code=400, detail="单文件双语对照模式需要上传 source_file")
+        if target_upload is not None:
+            raise HTTPException(status_code=400, detail="单文件双语对照模式不需要上传 target_file")
     else:
         raise HTTPException(status_code=400, detail=f"不支持的数字专检模式: {mode}")
 
@@ -645,6 +654,10 @@ async def get_number_check_config():
                 "label": "原文+译文双文件模式",
                 "description": "直接上传原文和译文双文件，由新版数检程序抽取内容并生成报告，支持 DOCX、XLSX、PPTX、PDF。",
             },
+            NUMBER_CHECK_MODE_BILINGUAL: {
+                "label": "单文件双语对照（旧版）",
+                "description": "只上传一个文件（文档内中英段落交替排列），按旧版流程整篇直送 AI 检查，修订直接写回该文件副本，支持 DOCX、XLSX、PPTX、PDF。",
+            },
         },
         "alignment_file_extensions": alignment_file_extensions,
         "direct_file_extensions": direct_file_extensions,
@@ -652,6 +665,7 @@ async def get_number_check_config():
         "source_hf_file_extensions": source_hf_file_extensions,
         "single_file_extensions": alignment_file_extensions,
         "double_file_extensions": direct_file_extensions,
+        "bilingual_file_extensions": sorted(BILINGUAL_EXTENSIONS),
     }
 
 
