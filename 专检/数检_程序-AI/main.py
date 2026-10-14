@@ -4,6 +4,7 @@ from pathlib import Path
 from report_generator import generate_combined_report
 from extract_values import merge_ai_results, run_number_check, check_text_pairs
 from program_check import _llm_check_block
+from ai_errors import AICheckIncompleteError
 from normalizer import DEFAULT_STRATEGIES as _DEFAULT_STRATEGIES_BASIC
 from normalizer_total import DEFAULT_STRATEGIES as _DEFAULT_STRATEGIES_TOTAL
 
@@ -434,6 +435,29 @@ def apply_revisions_pdf(
 # 单区域检查流程（规则 + AI）→ 返回 (final_rows, ai_map)
 # =============================================================
 
+_PENDING_REASON_LABEL = {
+    "api_error": "API调用失败",
+    "parse_failed": "返回无法解析",
+    "empty_content": "返回为空",
+    "ok": "模型漏返部分条目",
+}
+
+
+def _raise_if_ai_incomplete(label: str, ai_map: dict) -> None:
+    """
+    _llm_check_block 在重试后仍无有效结果的行会被标记 _pending。
+    这些行不是"AI 判定无错误"，而是"AI 没有给出结果"，必须报错让用户重新检查。
+    """
+    pending = {idx: v for idx, v in ai_map.items() if v.get("_pending")}
+    if not pending:
+        return
+    reasons = sorted({_PENDING_REASON_LABEL.get(v.get("_error_status"), "未知原因") for v in pending.values()})
+    raise AICheckIncompleteError(
+        f"AI 检查未完成，结果不可信，请重新检查。{label}有 {len(pending)}/{len(ai_map)} 行"
+        f"未获得有效 AI 结果（{'、'.join(reasons)}）。"
+    )
+
+
 def _check_region(label: str, pairs: list,
                   block_size: int, normalize_strategies: dict,
                   check_all: bool = False) -> tuple:
@@ -464,6 +488,7 @@ def _check_region(label: str, pairs: list,
         for pos, (idx, _) in enumerate(block):
             ai_map[idx] = results[pos]
 
+    _raise_if_ai_incomplete(label, ai_map)
     final_rows = merge_ai_results(rows, ai_map)
     ai_err = sum(1 for r in final_rows if r.get("AI是否正确") == "❗错误")
     print(f"  [{label}] AI错误: {ai_err} / {len(final_rows)}")
@@ -511,30 +536,38 @@ def _run_legacy_mode(src_docx_path: str,
                      revision_author: str = "翻译校对",
                      bilingual_mode: bool = False):
     """
-    模式B + DOCX 专用：跳过逐段对齐和规则检查，直接复用旧流程
+    跳过逐段对齐和规则检查，直接复用旧流程
     （整篇提取 → 按字数分块 → 直送AI → 扁平错误列表 → 锚点/上下文写回）。
+    支持 DOCX / XLSX / PPTX / PDF；页眉页脚通道仅 DOCX 有内容。
 
     bilingual_mode=False（默认，双文件模式）：
         src_docx_path/tgt_docx_path 为两个独立文件（原文+译文）。
     bilingual_mode=True（单文件双语对照模式）：
         只需 src_docx_path 一个文件（一篇文档内中英段落交替），
         写回目标即该文件本身（docx_path 未指定时默认使用 src_docx_path）。
+    写回方式由写回目标文件的格式决定。
     """
     if not src_docx_path:
         raise ValueError("use_legacy_mode=True 时必须提供 src_docx_path")
-    if _detect_format(src_docx_path) != "docx":
-        raise ValueError("use_legacy_mode=True 仅支持 DOCX 格式")
+
+    _legacy_formats = {"docx", "xlsx", "pptx", "pdf"}
 
     if bilingual_mode:
         if tgt_docx_path and tgt_docx_path != src_docx_path:
             raise ValueError("bilingual_mode=True（单文件双语对照模式）不需要传入 tgt_docx_path")
         write_target = docx_path or src_docx_path
+        _checked = [src_docx_path, write_target]
     else:
         if not tgt_docx_path:
             raise ValueError("bilingual_mode=False（双文件模式）必须提供 tgt_docx_path")
-        if _detect_format(tgt_docx_path) != "docx":
-            raise ValueError("use_legacy_mode=True 仅支持 DOCX 格式")
         write_target = docx_path or tgt_docx_path
+        _checked = [src_docx_path, tgt_docx_path, write_target]
+
+    for _p in _checked:
+        if _detect_format(_p) not in _legacy_formats:
+            raise ValueError(
+                f"use_legacy_mode=True 仅支持 DOCX / XLSX / PPTX / PDF 格式，当前为 {Path(_p).name}"
+            )
 
     from legacy_check import run_legacy_comparison, apply_legacy_errors, generate_legacy_report
 
@@ -580,40 +613,60 @@ def _run_legacy_mode(src_docx_path: str,
         _shutil.copy2(docx_path, out_path)
         print(f"✓ 输出文件: {out_path}")
 
-    from docx import Document
-    from revision import RevisionManager
+    write_fmt = _detect_format(out_path)
 
-    try:
-        from numbering_to_static import convert_numbering_to_static, has_auto_numbering, convert_toc_to_static
-        if has_auto_numbering(out_path):
-            print("🔢 检测到自动编号，转换为静态文本...")
-            if convert_numbering_to_static(out_path):
-                print("  ✓ 自动编号已静态化")
-        convert_toc_to_static(out_path)
-    except Exception as _e:
-        print(f"  ⚠ 编号静态化异常（跳过）: {_e}")
+    if write_fmt == "docx":
+        from docx import Document
+        from revision import RevisionManager
 
-    try:
-        from docx_repair import repair_dangling_rels
-        if repair_dangling_rels(out_path):
-            print("  🔧 已修复损坏关系")
-    except Exception as _e:
-        print(f"  ⚠ 关系修复异常（跳过）: {_e}")
+        try:
+            from numbering_to_static import convert_numbering_to_static, has_auto_numbering, convert_toc_to_static
+            if has_auto_numbering(out_path):
+                print("🔢 检测到自动编号，转换为静态文本...")
+                if convert_numbering_to_static(out_path):
+                    print("  ✓ 自动编号已静态化")
+            convert_toc_to_static(out_path)
+        except Exception as _e:
+            print(f"  ⚠ 编号静态化异常（跳过）: {_e}")
 
-    doc = Document(out_path)
-    doc._numbering_staticized = True
-    rm = RevisionManager(doc, author=revision_author)
+        try:
+            from docx_repair import repair_dangling_rels
+            if repair_dangling_rels(out_path):
+                print("  🔧 已修复损坏关系")
+        except Exception as _e:
+            print(f"  ⚠ 关系修复异常（跳过）: {_e}")
 
-    _, success, failed = apply_legacy_errors(errors_by_region, doc, rm, doc_path=out_path)
-    doc.save(out_path)
+        doc = Document(out_path)
+        doc._numbering_staticized = True
+        rm = RevisionManager(doc, author=revision_author)
 
-    try:
-        from replace_revision import flush_footnote_replacements
-        flushed = flush_footnote_replacements(doc, out_path)
-        if flushed:
-            print(f"  📎 脚注替换: {flushed} 处")
-    except Exception:
-        pass
+        _, success, failed = apply_legacy_errors(errors_by_region, doc, rm, doc_path=out_path)
+        doc.save(out_path)
+
+        try:
+            from replace_revision import flush_footnote_replacements
+            flushed = flush_footnote_replacements(doc, out_path)
+            if flushed:
+                print(f"  📎 脚注替换: {flushed} 处")
+        except Exception:
+            pass
+    else:
+        # XLSX / PPTX / PDF：批注 + 替换
+        from legacy_check import apply_legacy_errors_other
+
+        if write_fmt == "xlsx":
+            from excel.excel_replacer import ExcelReplacer
+            replacer = ExcelReplacer(out_path)
+        elif write_fmt == "pptx":
+            from ppt.pptx_replacer import PPTXReplacer
+            replacer = PPTXReplacer(out_path)
+        else:
+            from pdf.pdf_replacer_improved import ImprovedPDFReplacer
+            replacer = ImprovedPDFReplacer(out_path)
+
+        _, success, failed = apply_legacy_errors_other(
+            errors_by_region, replacer, write_fmt, target_path=out_path)
+        replacer.save(out_path)
 
     print(f"\n{'='*60}")
     print(f"✅ 修订完成: 成功 {success}  失败 {failed}")
@@ -668,7 +721,7 @@ def run(alignment_path: str = None,
       alignment_callback : DOCX 结构不一致时的语义对齐回调，返回含译文定位信息的文本对
       use_total_normalizer : True 时使用 normalizer_total（更全面的规范化策略），
                              默认 False 使用 normalizer（基础策略）
-      use_legacy_mode  : True 时（仅 模式B + docx）完全采用旧版流程：
+      use_legacy_mode  : True 时（模式B，支持 docx / xlsx / pptx / pdf）完全采用旧版流程：
                              整篇提取→按字数分块→直接送AI（无规则预检）→扁平错误列表→
                              仅用锚点/上下文写回。跳过逐段对齐和规则检查，
                              报告降级为错误列表（非全量行审计）。
@@ -676,6 +729,10 @@ def run(alignment_path: str = None,
                              False（默认）= 双文件模式：分别上传 原文(src_docx_path) + 译文(tgt_docx_path)。
                              True         = 单文件双语对照模式：只上传一个文件(src_docx_path)，
                                             文档内中英段落交替排列，无需 tgt_docx_path。
+
+    返回值（注意两种流程返回类型不同）：
+      use_legacy_mode=False → (body_final, header_final, footer_final) 三元组，元素均为 List[Dict]
+      use_legacy_mode=True  → {"body": [...], "header": [...], "footer": [...]} 扁平错误列表 dict
     """
     if use_legacy_mode:
         return _run_legacy_mode(
@@ -798,6 +855,7 @@ def run(alignment_path: str = None,
         for pos, (idx, _) in enumerate(block):
             body_ai_map[idx] = results[pos]
 
+    _raise_if_ai_incomplete("正文", body_ai_map)
     body_final = merge_ai_results(body_rows, body_ai_map)
     body_ai_err = sum(1 for r in body_final if r.get("AI是否正确") == "❗错误")
     print(f"  [正文] AI错误: {body_ai_err} / {len(body_final)}")

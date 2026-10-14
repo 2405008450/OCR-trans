@@ -45,7 +45,11 @@
                                 </label>
                                 <label class="toggle-row">
                                     <input type="radio" name="checkMode" id="modeDirect" value="direct">
-                                    <span>原文+译文双文件</span>
+                                    <span>原文+译文双文件（旧版）</span>
+                                </label>
+                                <label class="toggle-row">
+                                    <input type="radio" name="checkMode" id="modeBilingual" value="bilingual">
+                                    <span>单文件双语对照（旧版）</span>
                                 </label>
                             </div>
                             <small id="modeHint">上传含“原文”“译文”两列的双语对照 Excel；如需生成修订版，可再上传译文文件。</small>
@@ -67,13 +71,13 @@
                                 </div>
                             </div>
                             <div class="option-group">
-                                <label for="targetFile"><i class="fas fa-file-pen"></i> 待修订译文文件（可选，支持 PDF）</label>
+                                <label for="targetFile"><i class="fas fa-file-pen"></i> 待修订译文文件（可选）</label>
                                 <div class="field-wrap">
                                     <input type="file" id="targetFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
                                 </div>
                             </div>
                             <div class="option-group">
-                                <label for="sourceHfFile"><i class="fas fa-heading"></i> 页眉页脚原文 DOCX（可选）</label>
+                                <label for="sourceHfFile"><i class="fas fa-heading"></i> 原文 DOCX（可选）</label>
                                 <div class="field-wrap">
                                     <input type="file" id="sourceHfFile" accept=".docx,.doc">
                                 </div>
@@ -82,15 +86,24 @@
 
                         <div id="directFields" style="grid-column: 1 / -1; display:none;">
                             <div class="option-group">
-                                <label for="sourceFile"><i class="fas fa-file-lines"></i> 原文文件（支持 PDF）</label>
+                                <label for="sourceFile"><i class="fas fa-file-lines"></i> 原文文件</label>
                                 <div class="field-wrap">
                                     <input type="file" id="sourceFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
                                 </div>
                             </div>
                             <div class="option-group">
-                                <label for="directTargetFile"><i class="fas fa-file-pen"></i> 译文文件（支持 PDF）</label>
+                                <label for="directTargetFile"><i class="fas fa-file-pen"></i> 译文文件</label>
                                 <div class="field-wrap">
                                     <input type="file" id="directTargetFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="bilingualFields" style="grid-column: 1 / -1; display:none;">
+                            <div class="option-group">
+                                <label for="bilingualFile"><i class="fas fa-file-lines"></i> 双语对照文件（文档内中英段落交替）</label>
+                                <div class="field-wrap">
+                                    <input type="file" id="bilingualFile" accept=".docx,.doc,.xlsx,.pptx,.pdf">
                                 </div>
                             </div>
                         </div>
@@ -134,7 +147,7 @@
             </section>
         </main>
     </div>
-    <script src="/static/number_check.js"></script>
+    <script src="/static/number_check.js?v=20261014-bilingual"></script>
     <script src="/static/header.js"></script>
 </body>
 </html>

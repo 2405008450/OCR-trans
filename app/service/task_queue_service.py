@@ -47,6 +47,7 @@ from app.service.msg_convert_service import (
 from app.service.office_text_transform_service import execute_english_variant_task
 from app.service.number_check_service import (
     NUMBER_CHECK_MODE_ALIGNMENT,
+    NUMBER_CHECK_MODE_BILINGUAL,
     _get_task_progress as get_number_check_progress,
     run_number_check_task,
 )
@@ -382,6 +383,11 @@ class TaskQueueService:
                 ('target', target_file, 'target.docx'),
                 ('source_hf', source_hf_file, 'source_hf.docx'),
             ]
+        elif mode == NUMBER_CHECK_MODE_BILINGUAL:
+            if source_file is None:
+                raise ValueError('source_file is required for bilingual mode')
+            display_name = source_file.filename or 'source.docx'
+            upload_specs = [('source', source_file, 'source.docx')]
         else:
             source_name = source_file.filename if source_file else 'source.docx'
             target_name = target_file.filename if target_file else 'target.docx'
@@ -1263,6 +1269,8 @@ class TaskQueueService:
             missing = []
             if not self._get_input_value(input_files, 'source_path', 'original_path'):
                 missing.append('source_path')
+            if mode == NUMBER_CHECK_MODE_BILINGUAL:
+                return missing
             if not self._get_input_value(input_files, 'target_path', 'translated_path'):
                 missing.append('target_path')
             return missing

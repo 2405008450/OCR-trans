@@ -15,11 +15,13 @@ import os
 import time
 import json
 import re
-from typing import List, Dict, Tuple
+from pathlib import Path
+from typing import Callable, List, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from ai_errors import AICheckIncompleteError
 from full_content import scan_docx
 from header_extractor import extract_headers
 from footer_extractor import extract_footers
@@ -40,18 +42,31 @@ _BODY_SOURCES = {"body", "table", "toc", "footnote", "endnote", "chart", "textbo
 # 整篇文本提取（三通道：正文/页眉/页脚）
 # =============================================================
 
-def _extract_body_only(docx_path: str) -> str:
-    """提取正文相关内容（不含页眉页脚），按阅读顺序拼接为整篇文本。"""
-    segs = scan_docx(docx_path)
-    lines = [s.text for s in segs if s.source in _BODY_SOURCES and s.text and s.text.strip()]
+def _is_docx(path: str) -> bool:
+    return Path(path).suffix.lower() == ".docx"
+
+
+def _extract_body_only(path: str) -> str:
+    """
+    提取正文相关内容（不含页眉页脚），按阅读顺序拼接为整篇文本。
+    DOCX 走 scan_docx（保留原有来源过滤）；XLSX / PPTX / PDF 走 extract_any.extract。
+    """
+    if _is_docx(path):
+        segs = scan_docx(path)
+        lines = [s.text for s in segs if s.source in _BODY_SOURCES and s.text and s.text.strip()]
+    else:
+        from extract_any import extract
+        lines = [s.text for s in extract(path) if s.text and s.text.strip()]
     return "\n".join(lines)
 
 
-def extract_channels(docx_path: str) -> Tuple[str, str, str]:
-    """返回 (正文, 页眉, 页脚) 三个整篇文本。"""
-    body = _extract_body_only(docx_path)
-    headers = extract_headers(docx_path)
-    footers = extract_footers(docx_path)
+def extract_channels(path: str) -> Tuple[str, str, str]:
+    """返回 (正文, 页眉, 页脚) 三个整篇文本。非 DOCX 格式没有页眉页脚通道，返回空串。"""
+    body = _extract_body_only(path)
+    if not _is_docx(path):
+        return body, "", ""
+    headers = extract_headers(path)
+    footers = extract_footers(path)
     return body, "\n".join(headers), "\n".join(footers)
 
 
@@ -102,18 +117,119 @@ _PROMPT_TEMPLATE = """# 角色
 """
 
 
-def _compare_texts(original_text: str, translated_text: str) -> str:
-    """调用 LLM 对比一段原文/译文，返回原始响应字符串。"""
-    prompt = _PROMPT_TEMPLATE.format(orig=original_text, trans=translated_text)
+_MAX_ATTEMPTS = 3
+
+
+class _InvalidAIReply(Exception):
+    """模型有响应，但内容不能作为有效检查结果（空 / 被截断 / 无法解析）。"""
+
+
+def _chat(system_prompt: str, prompt: str) -> Tuple[str, str]:
+    """调用 LLM，返回 (content, finish_reason)。无 choices 视为无效响应。"""
     resp = client.chat.completions.create(
         model=_MODEL,
         messages=[
-            {"role": "system", "content": "你是中译英译文合规审校员，只输出JSON数组，不做多余解释。"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
         temperature=0,
     )
-    return resp.choices[0].message.content or ""
+    if not getattr(resp, "choices", None):
+        raise _InvalidAIReply("返回为空（无 choices）")
+    choice = resp.choices[0]
+    return choice.message.content or "", getattr(choice, "finish_reason", None) or ""
+
+
+def _parse_ai_reply(raw: str, finish_reason: str) -> List[Dict]:
+    """
+    校验并解析模型回复，返回错误列表。
+
+    只有"成功调用 + 非空 + 未截断 + 解析为 JSON 数组"才算有效回复：
+      有效且为 []  → 模型明确表示无错误
+    其余情况一律抛 _InvalidAIReply，绝不返回 [] 冒充"无错误"。
+    """
+    if not raw or not raw.strip():
+        raise _InvalidAIReply("返回为空")
+    if finish_reason == "length":
+        raise _InvalidAIReply("返回被截断")
+
+    text = re.sub(r"```(?:json)?", "", raw).strip()
+    candidates = [text]
+    bracketed = re.search(r"\[.*\]", text, re.S)
+    if bracketed:
+        candidates.append(bracketed.group())
+    data = None
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+
+    # 兜底：逐个 {} 对象提取（格式略有偏差的回复）；一个对象都提不出来则判无效
+    try:
+        parsed = parse_json_content(raw)
+    except Exception:
+        parsed = []
+    if parsed:
+        return parsed
+    raise _InvalidAIReply("返回无法解析为 JSON 数组")
+
+
+def _request_errors(call, where: str) -> List[Dict]:
+    """
+    带重试地请求一块文本的检查结果。
+    call() 返回 (content, finish_reason)。重试耗尽仍无有效回复则抛 AICheckIncompleteError。
+    """
+    reason = "未知原因"
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            raw, finish_reason = call()
+            parsed = _parse_ai_reply(raw, finish_reason)
+            if not parsed:
+                print("      ✓ 模型已正常返回：未发现问题")
+            return parsed
+        except _InvalidAIReply as e:
+            reason = str(e)
+            detail = reason
+        except Exception as e:
+            reason = "API调用失败"
+            detail = f"调用失败: {e}"
+        if attempt < _MAX_ATTEMPTS - 1:
+            wait = (attempt + 1) * 10
+            print(f"  ⚠️ {detail}，{wait}秒后重试...")
+            time.sleep(wait)
+        else:
+            print(f"  ❌ {where} {detail}（已尝试 {_MAX_ATTEMPTS} 次）")
+    raise AICheckIncompleteError(
+        f"AI 检查未完成，结果不可信，请重新检查。{where}：{reason}（已重试 {_MAX_ATTEMPTS - 1} 次）。"
+    )
+
+
+def _filter_errors(parsed: List[Dict]) -> List[Dict]:
+    """去掉无需修改的条目，并裁剪建议值与锚点的重复部分。"""
+    filtered = []
+    for item in parsed:
+        tran_val = (item.get("译文数值") or "").strip()
+        tran_sug = (item.get("译文修改建议值") or "").strip()
+        context_str = (item.get("译文上下文") or "").strip()
+        anchor_str = (item.get("替换锚点") or tran_val).strip()
+        fixed = _fix_suggestion_overlap(context_str, anchor_str, tran_sug)
+        if fixed != tran_sug:
+            item["译文修改建议值"] = fixed
+            tran_sug = fixed
+        if not tran_sug or tran_sug == tran_val:
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def _compare_texts(original_text: str, translated_text: str) -> Tuple[str, str]:
+    """调用 LLM 对比一段原文/译文，返回 (原始响应, finish_reason)。"""
+    prompt = _PROMPT_TEMPLATE.format(orig=original_text, trans=translated_text)
+    return _chat("你是中译英译文合规审校员，只输出JSON数组，不做多余解释。", prompt)
 
 
 def _fix_suggestion_overlap(context: str, anchor: str, suggestion: str) -> str:
@@ -130,43 +246,13 @@ def _compare_with_split(orig_txt: str, trans_txt: str, name: str) -> List[Dict]:
     pairs = split_text_pair(orig_txt, trans_txt)
     num_parts = len(pairs)
 
-    def _process_one(orig_chunk: str, trans_chunk: str) -> List[Dict]:
-        raw = None
-        for attempt in range(3):
-            try:
-                raw = _compare_texts(orig_chunk, trans_chunk)
-                break
-            except Exception as e:
-                if attempt < 2:
-                    wait = (attempt + 1) * 10
-                    print(f"  ⚠️ 调用失败: {e}，{wait}秒后重试...")
-                    time.sleep(wait)
-                else:
-                    print(f"  ❌ 调用 API 失败（已重试2次）: {e}")
-        if not raw:
-            return []
-        parsed = parse_json_content(raw)
-        if not isinstance(parsed, list):
-            return []
-
-        filtered = []
-        for item in parsed:
-            tran_val = (item.get("译文数值") or "").strip()
-            tran_sug = (item.get("译文修改建议值") or "").strip()
-            context_str = (item.get("译文上下文") or "").strip()
-            anchor_str = (item.get("替换锚点") or tran_val).strip()
-            fixed = _fix_suggestion_overlap(context_str, anchor_str, tran_sug)
-            if fixed != tran_sug:
-                item["译文修改建议值"] = fixed
-                tran_sug = fixed
-            if not tran_sug or tran_sug == tran_val:
-                continue
-            filtered.append(item)
-        return filtered
+    def _process_one(orig_chunk: str, trans_chunk: str, where: str) -> List[Dict]:
+        parsed = _request_errors(lambda: _compare_texts(orig_chunk, trans_chunk), where)
+        return _filter_errors(parsed)
 
     if num_parts <= 1:
         print(f"  📄 {name}文本较短（{_count_chars(orig_txt)} 字），直接对比")
-        return _process_one(orig_txt, trans_txt)
+        return _process_one(orig_txt, trans_txt, f"{name}")
 
     print(f"  📄 {name}文本较长（原文 {_count_chars(orig_txt)} 字），分割为 {num_parts} 块进行对比")
 
@@ -178,7 +264,7 @@ def _compare_with_split(orig_txt: str, trans_txt: str, name: str) -> List[Dict]:
         if not orig_chunk.strip() or not trans_chunk.strip():
             print(f"      ⚠️ 块内容为空，跳过")
             continue
-        items = _process_one(orig_chunk, trans_chunk)
+        items = _process_one(orig_chunk, trans_chunk, f"{name}第 {i}/{num_parts} 块")
         chunk_count = 0
         for item in items:
             dedup_key = (
@@ -247,18 +333,10 @@ _BILINGUAL_PROMPT_TEMPLATE = """# 文件类型：双语对照或者多语种对�
 """
 
 
-def _compare_bilingual_text(text: str) -> str:
-    """调用 LLM 对比单份双语对照文本，返回原始响应字符串。"""
+def _compare_bilingual_text(text: str) -> Tuple[str, str]:
+    """调用 LLM 对比单份双语对照文本，返回 (原始响应, finish_reason)。"""
     prompt = _BILINGUAL_PROMPT_TEMPLATE.format(doc=text)
-    resp = client.chat.completions.create(
-        model=_MODEL,
-        messages=[
-            {"role": "system", "content": "你是中译英以及其他语种译文合规审校员，只输出JSON数组，不做多余解释。"},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0,
-    )
-    return resp.choices[0].message.content or ""
+    return _chat("你是中译英以及其他语种译文合规审校员，只输出JSON数组，不做多余解释。", prompt)
 
 
 def _compare_bilingual_with_split(text: str, name: str) -> List[Dict]:
@@ -272,43 +350,13 @@ def _compare_bilingual_with_split(text: str, name: str) -> List[Dict]:
         chunks = [text]
     num_parts = len(chunks)
 
-    def _process_one(chunk: str) -> List[Dict]:
-        raw = None
-        for attempt in range(3):
-            try:
-                raw = _compare_bilingual_text(chunk)
-                break
-            except Exception as e:
-                if attempt < 2:
-                    wait = (attempt + 1) * 10
-                    print(f"  ⚠️ 调用失败: {e}，{wait}秒后重试...")
-                    time.sleep(wait)
-                else:
-                    print(f"  ❌ 调用 API 失败（已重试2次）: {e}")
-        if not raw:
-            return []
-        parsed = parse_json_content(raw)
-        if not isinstance(parsed, list):
-            return []
-
-        filtered = []
-        for item in parsed:
-            tran_val = (item.get("译文数值") or "").strip()
-            tran_sug = (item.get("译文修改建议值") or "").strip()
-            context_str = (item.get("译文上下文") or "").strip()
-            anchor_str = (item.get("替换锚点") or tran_val).strip()
-            fixed = _fix_suggestion_overlap(context_str, anchor_str, tran_sug)
-            if fixed != tran_sug:
-                item["译文修改建议值"] = fixed
-                tran_sug = fixed
-            if not tran_sug or tran_sug == tran_val:
-                continue
-            filtered.append(item)
-        return filtered
+    def _process_one(chunk: str, where: str) -> List[Dict]:
+        parsed = _request_errors(lambda: _compare_bilingual_text(chunk), where)
+        return _filter_errors(parsed)
 
     if num_parts <= 1:
         print(f"  📄 {name}文本较短（{_count_chars(text)} 字），直接对比")
-        return _process_one(chunks[0] if chunks else text)
+        return _process_one(chunks[0] if chunks else text, f"{name}")
 
     print(f"  📄 {name}文本较长（{_count_chars(text)} 字），分割为 {num_parts} 块进行对比")
 
@@ -320,7 +368,7 @@ def _compare_bilingual_with_split(text: str, name: str) -> List[Dict]:
         if not chunk.strip():
             print(f"      ⚠️ 块内容为空，跳过")
             continue
-        items = _process_one(chunk)
+        items = _process_one(chunk, f"{name}第 {i}/{num_parts} 块")
         chunk_count = 0
         for item in items:
             dedup_key = (
@@ -425,19 +473,15 @@ def _anchor_occurrences(doc: object, region: str, anchor: str) -> int:
     return sum(entry.full_text.count(anchor) for entry in build_para_cache(doc, region))
 
 
-def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
-                        docx: object,
-                        revision_manager: object,
-                        doc_path: str = None) -> Tuple[list, int, int]:
+def collect_legacy_tasks(errors_by_region: Dict[str, List[Dict]],
+                         occurrence_counter: Optional[Callable[[str, str], int]] = None) -> list:
     """
-    将 run_legacy_comparison() 的扁平错误列表写入 Track Changes。
+    将扁平错误列表整理成写回任务（各格式共用），长锚点优先。
 
-    与 main.py::apply_revisions_from_ai_map 的区别：
-    - 不使用 para_index / prev_tgt / next_tgt 夹逼定位（旧流程没有逐段对齐信息）
-    - 仅依赖 替换锚点 / 译文上下文 做定位（replace_and_revise_in_docx 的策略1/2/3-6）
+    任务格式：(region, err_no, old_val, new_val, context, anchor, reason)
+    occurrence_counter(region, anchor) → 锚点在写回目标中出现的次数；
+    用于拦截"裸数值锚点出现多次"这类无法唯一定位的修改。不传则不做该检查。
     """
-    from replace_revision import replace_and_revise_in_docx
-
     tasks = []
     skipped = []
 
@@ -454,8 +498,8 @@ def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
 
             if not old_val or not new_val or old_val == new_val:
                 skipped.append((region, err_no, "字段缺失或无变化")); continue
-            if _is_bare_numeric_anchor(old_val):
-                occurrences = _anchor_occurrences(docx, region, old_val)
+            if occurrence_counter is not None and _is_bare_numeric_anchor(old_val):
+                occurrences = occurrence_counter(region, old_val)
                 if occurrences > 1:
                     skipped.append((
                         region, err_no,
@@ -469,6 +513,26 @@ def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
 
     # 长文本优先，避免短锚点抢先替换
     tasks.sort(key=lambda t: len(t[2]), reverse=True)
+    return tasks
+
+
+def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
+                        docx: object,
+                        revision_manager: object,
+                        doc_path: str = None) -> Tuple[list, int, int]:
+    """
+    将 run_legacy_comparison() 的扁平错误列表写入 Track Changes（DOCX）。
+
+    与 main.py::apply_revisions_from_ai_map 的区别：
+    - 不使用 para_index / prev_tgt / next_tgt 夹逼定位（旧流程没有逐段对齐信息）
+    - 仅依赖 替换锚点 / 译文上下文 做定位（replace_and_revise_in_docx 的策略1/2/3-6）
+    """
+    from replace_revision import replace_and_revise_in_docx
+
+    tasks = collect_legacy_tasks(
+        errors_by_region,
+        occurrence_counter=lambda region, anchor: _anchor_occurrences(docx, region, anchor),
+    )
 
     success, failed = 0, 0
     for i, (region, err_no, old_val, new_val, context, anchor, reason) in enumerate(tasks, 1):
@@ -483,6 +547,52 @@ def apply_legacy_errors(errors_by_region: Dict[str, List[Dict]],
         else:
             failed += 1
             print(f"  ⚠️  [{i:>2}/{len(tasks)}] [{region}] 未找到: '{old_val}'  ({strategy})")
+
+    return tasks, success, failed
+
+
+def apply_legacy_errors_other(errors_by_region: Dict[str, List[Dict]],
+                              replacer: object,
+                              fmt: str,
+                              target_path: str) -> Tuple[list, int, int]:
+    """
+    将扁平错误列表写入 XLSX / PPTX / PDF（批注 + 替换）。
+
+    fmt            : 'xlsx' | 'pptx' | 'pdf'
+    replacer       : ExcelReplacer / PPTXReplacer / ImprovedPDFReplacer 实例
+    target_path    : 写回目标文件，仅用于统计裸数值锚点出现次数
+    与 DOCX 一样只依赖 替换锚点 / 译文上下文 定位，不传 prev_tgt/next_tgt。
+    """
+    if fmt not in {"xlsx", "pptx", "pdf"}:
+        raise ValueError(f"不支持的写回格式: {fmt}")
+
+    body_text = _extract_body_only(target_path)
+    tasks = collect_legacy_tasks(
+        errors_by_region,
+        occurrence_counter=lambda _region, anchor: body_text.count(anchor),
+    )
+
+    success, failed = 0, 0
+    for i, (region, err_no, old_val, new_val, context, anchor, reason) in enumerate(tasks, 1):
+        if fmt == "pdf":
+            comment = f"[修改] '{old_val}' → '{new_val}'"
+            if reason:
+                comment += f"\n理由: {reason}"
+            rep_count, _, _ = replacer.replace_and_annotate(
+                search_text=old_val, new_text=new_val, comment=comment, context=context,
+            )
+            ok = bool(rep_count)
+        else:
+            ok = replacer.replace_and_annotate(
+                old_text=old_val, new_text=new_val, reason=reason,
+                context=context, highlight=True,
+            )
+        if ok:
+            success += 1
+            print(f"  ✅ [{i:>2}/{len(tasks)}] '{old_val}' → '{new_val}'")
+        else:
+            failed += 1
+            print(f"  ⚠️  [{i:>2}/{len(tasks)}] 未找到: '{old_val}'")
 
     return tasks, success, failed
 
