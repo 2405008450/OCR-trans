@@ -35,6 +35,9 @@ from app.service.audio_transcription_service import (
     normalize_audio_transcription_options,
     validate_audio_transcription_filename,
 )
+from app.service.audio_convert_service import (
+    AudioConvertError, discover_audio_files, get_audio_convert_config,
+)
 from app.service.business_licence_service import (
     BUSINESS_LICENCE_DEFAULT_MODEL,
     BUSINESS_LICENCE_DEFAULT_ROUTE,
@@ -159,6 +162,15 @@ class WordCountSubmitBody(BaseModel):
     ocr_mode: Literal["auto", "on", "off"] = "auto"
     ocr_model: Optional[str] = None
     relative_paths: Optional[List[str]] = None
+
+
+class AudioConvertDiscoverBody(BaseModel):
+    directory_path: str
+    recursive: bool = True
+
+
+class AudioConvertSubmitBody(AudioConvertDiscoverBody):
+    relative_paths: List[str]
 
 
 class WordCountDiscoverBody(BaseModel):
@@ -998,6 +1010,47 @@ async def get_alignment_status(task_id: str):
 @router.get("/word-count/config")
 async def get_word_count_page_config():
     return build_word_count_config()
+
+
+@router.get("/audio-convert/config")
+async def audio_convert_config():
+    return await asyncio.to_thread(get_audio_convert_config)
+
+
+@router.post("/audio-convert/discover")
+async def audio_convert_discover(body: AudioConvertDiscoverBody):
+    try:
+        return await asyncio.to_thread(discover_audio_files, **body.model_dump())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/audio-convert")
+async def audio_convert_submit(body: AudioConvertSubmitBody):
+    try:
+        result = await task_queue_service.submit_audio_convert_task(**body.model_dump())
+    except (ValueError, OSError, AudioConvertError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ACCEPTED", "task_id": result.task_id, "deduped": result.deduped}
+
+
+@router.post("/audio-convert/upload")
+async def audio_convert_upload(files: List[UploadFile] = File(...)):
+    try:
+        result = await task_queue_service.submit_audio_convert_upload_task(files=files)
+    except UploadSizeLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except (ValueError, OSError, AudioConvertError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ACCEPTED", "task_id": result.task_id, "deduped": result.deduped}
+
+
+@router.get("/audio-convert/status/{task_id}")
+async def audio_convert_status(task_id: str):
+    task = task_queue_service.get_task_status(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="音频转换任务不存在")
+    return task
 
 
 @router.post("/word-count/discover")

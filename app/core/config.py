@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     AUDIO_TRANSCRIPTION_POLL_INTERVAL_SECONDS: float = float(os.getenv("AUDIO_TRANSCRIPTION_POLL_INTERVAL_SECONDS", "2"))
     # 可显式指定工具目录，避免服务进程的 PATH 未更新。
     FFMPEG_BIN_DIR: str = os.getenv("FFMPEG_BIN_DIR", "")
+    AUDIO_CONVERT_MAX_FILES: int = int(os.getenv("AUDIO_CONVERT_MAX_FILES", "50"))
+    AUDIO_CONVERT_MAX_FILE_MB: int = int(os.getenv("AUDIO_CONVERT_MAX_FILE_MB", "200"))
+    AUDIO_CONVERT_MAX_TOTAL_MB: int = int(os.getenv("AUDIO_CONVERT_MAX_TOTAL_MB", "200"))
+    AUDIO_CONVERT_TIMEOUT_SECONDS: int = int(os.getenv("AUDIO_CONVERT_TIMEOUT_SECONDS", "1800"))
 
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8001"))

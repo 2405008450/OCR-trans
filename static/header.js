@@ -4,6 +4,7 @@
     const UPLOAD_TIMEOUT_MS = 240000;
     const PAGE_TRANSITION_DELAY_MS = 180;
     const RELEASE_NOTES = [
+        '10月15日_新增 M4A 转 WAV，支持共享路径扫描、多文件上传和批量下载',
         '8月8日_新增音频转写，支持 Qwen 逐词时间戳并导出 TXT、SRT、VTT、TSV 和 JSON',
         '7月31日_邮件转文档新增 EML 支持，可与 MSG 混合批量转换并保留正文内嵌图片',
         '7月22日_字数统计对齐 Word 核心指标，中日韩与拉丁候选明细支持折叠查看并补齐字符数；单文件 Word 行数优先实时重新分页，页面同步增加仅供参考提示',
@@ -28,6 +29,7 @@
         { href: '/word-count', icon: 'fa-calculator', text: '\u5b57\u6570\u7edf\u8ba1' },
         { href: '/file-rename', icon: 'fa-file-signature', text: '文件名整理' },
         { href: '/audio-transcription', icon: 'fa-closed-captioning', text: '音频转写' },
+        { href: '/audio-convert', icon: 'fa-file-audio', text: '音频转换' },
     ];
     const navActiveAliases = {
         '/certificate-translation': ['/certificate-translation', '/doc-translate', '/drivers-license', '/business-licence'],

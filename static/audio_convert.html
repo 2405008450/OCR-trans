@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音频转换 · M4A 转 WAV</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg:#07111f; --panel:rgba(255,255,255,.07); --line:rgba(255,255,255,.12);
+            --text:#f8fafc; --muted:rgba(226,232,240,.72); --cyan:#38bdf8;
+            --green:#22c55e; --red:#ef4444;
+        }
+        * { box-sizing:border-box; }
+        body {
+            margin:0; min-height:100vh; color:var(--text);
+            font-family:"Segoe UI","Microsoft YaHei",sans-serif;
+            background:radial-gradient(circle at 18% 6%,rgba(56,189,248,.20),transparent 28%),
+                radial-gradient(circle at 90% 16%,rgba(34,197,94,.13),transparent 24%),
+                linear-gradient(145deg,#050b14 0%,#07111f 48%,#102235 100%);
+        }
+        .page { width:min(1280px,calc(100% - 32px)); margin:0 auto; padding:24px 0 54px; }
+        .title-row { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin-bottom:18px; }
+        h1 { margin:0 0 8px; font-size:30px; letter-spacing:0; }
+        .subtitle { margin:0; color:var(--muted); line-height:1.7; }
+        .convert-layout { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:18px; align-items:start; }
+        .convert-card { min-width:0; border:1px solid var(--line); border-radius:8px; background:var(--panel); box-shadow:0 18px 44px rgba(0,0,0,.22); }
+        .panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 18px 0; }
+        .panel-head h2 { margin:0; font-size:17px; }
+        .panel-body { padding:18px; }
+        .muted { color:var(--muted); font-size:12px; line-height:1.7; }
+        .field-label { display:block; margin-bottom:8px; color:#e2e8f0; font-size:13px; font-weight:700; }
+        .input-controls { min-width:0; margin:0; padding:0; border:0; }
+        .source-tabs { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; padding:4px; margin-bottom:18px; border:1px solid var(--line); border-radius:8px; background:rgba(15,23,42,.58); }
+        .source-tabs input { position:absolute; opacity:0; pointer-events:none; }
+        .source-tabs label { min-width:0; padding:9px 8px; border-radius:6px; color:var(--muted); text-align:center; cursor:pointer; font-size:13px; font-weight:700; }
+        .source-tabs input:checked + label { color:#082032; background:var(--cyan); box-shadow:0 4px 12px rgba(56,189,248,.2); }
+        .source-tabs input:focus-visible + label { outline:2px solid var(--text); outline-offset:1px; }
+        input[type="checkbox"] { accent-color:var(--cyan); }
+        input[type="text"] { width:100%; min-height:44px; padding:0 13px; border:1px solid var(--line); border-radius:8px; outline:none; color:var(--text); background:rgba(15,23,42,.72); font:inherit; font-size:13px; }
+        input[type="text"]::placeholder { color:rgba(226,232,240,.44); }
+        input[type="text"]:focus { border-color:rgba(56,189,248,.68); box-shadow:0 0 0 3px rgba(56,189,248,.13); }
+        .check-row { display:flex; align-items:center; gap:9px; margin-top:12px; color:var(--muted); font-size:13px; }
+        button,.download-link,.action-link { min-height:42px; padding:0 16px; border:0; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; gap:8px; color:#082032; background:var(--cyan); font:inherit; font-size:13px; font-weight:800; cursor:pointer; text-decoration:none; transition:background .16s ease,border-color .16s ease; }
+        button:hover:not(:disabled),.download-link:hover,.action-link:hover { background:#7dd3fc; }
+        button.secondary,.action-link.secondary { color:#e2e8f0; background:rgba(255,255,255,.08); border:1px solid var(--line); }
+        button.secondary:hover:not(:disabled),.action-link.secondary:hover { background:rgba(255,255,255,.13); border-color:rgba(56,189,248,.4); }
+        button:disabled { opacity:.48; cursor:not-allowed; }
+        button:focus-visible,.download-link:focus-visible,.action-link:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+        .convert-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+        .selection-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin:18px 0 10px; }
+        .selection-toolbar .convert-actions { margin:0; gap:6px; }
+        .selection-toolbar button { min-height:32px; padding:0 10px; font-size:11px; }
+        .selection-toolbar p { margin:0; }
+        .submit-actions { padding-top:16px; margin-top:18px; border-top:1px solid var(--line); }
+        .drop-zone { display:flex; align-items:center; gap:14px; min-height:100px; padding:18px; border:1px dashed rgba(56,189,248,.48); border-radius:8px; color:var(--text); background:rgba(15,23,42,.48); cursor:pointer; transition:background .16s ease,border-color .16s ease; }
+        .drop-zone:hover,.drop-zone.dragging { border-color:var(--cyan); background:rgba(56,189,248,.09); }
+        .drop-zone:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+        .drop-zone>i { color:var(--cyan); font-size:28px; }
+        .drop-zone strong { display:block; margin-bottom:5px; font-size:13px; }
+        .candidate-list { max-height:360px; overflow:auto; border:1px solid var(--line); border-radius:8px; background:rgba(2,6,23,.35); }
+        .candidate-list:empty::before { content:"扫描共享路径或上传文件后，在这里选择需要转换的音频。"; display:block; padding:28px 18px; color:var(--muted); text-align:center; font-size:12px; line-height:1.7; }
+        .candidate-row { display:flex; align-items:center; gap:10px; padding:12px; border-bottom:1px solid rgba(255,255,255,.07); cursor:pointer; overflow-wrap:anywhere; }
+        .candidate-row:last-child { border-bottom:0; }
+        .candidate-row:hover,.candidate-row:has(input:checked) { background:rgba(56,189,248,.10); }
+        .candidate-row:has(input:disabled) { opacity:.5; cursor:not-allowed; }
+        .candidate-copy { flex:1; min-width:0; font-size:13px; font-weight:700; }
+        .candidate-row small { display:block; margin-top:4px; color:var(--muted); font-size:11px; font-weight:400; }
+        .notice { margin:0 0 18px; padding:10px 12px; border:1px solid rgba(56,189,248,.32); border-radius:8px; color:#bae6fd; background:rgba(56,189,248,.08); font-size:13px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+        #selectionMessage { margin:14px 0 0; }
+        .notice.error { color:#fecaca; border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.08); }
+        [hidden] { display:none!important; }
+        .steps { display:grid; gap:14px; margin:0; padding:0; list-style:none; counter-reset:step; }
+        .steps li { display:grid; grid-template-columns:26px minmax(0,1fr); align-items:start; gap:10px; color:#e2e8f0; font-size:13px; line-height:1.7; counter-increment:step; }
+        .steps li::before { content:counter(step); display:grid; place-items:center; width:26px; height:26px; border:1px solid rgba(56,189,248,.25); border-radius:6px; color:var(--cyan); background:rgba(56,189,248,.10); font-size:12px; font-weight:700; }
+        .info-section { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
+        .info-section h3 { margin:0 0 10px; font-size:13px; }
+        .info-section p { margin:8px 0 0; }
+        .roots { overflow-wrap:anywhere; white-space:pre-line; }
+        .inline-link { color:var(--cyan); text-decoration:none; }
+        .inline-link:hover { text-decoration:underline; }
+        .result-panel { margin-top:18px; }
+        #taskIdText { margin:0 0 14px; overflow-wrap:anywhere; }
+        .progress-track { height:9px; overflow:hidden; border-radius:999px; background:rgba(255,255,255,.09); }
+        .progress-fill { height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--cyan),var(--green)); transition:width .3s ease; }
+        #taskMessage { margin:10px 0 18px; color:var(--muted); font-size:13px; line-height:1.7; }
+        #archiveDownload { display:flex; flex-wrap:wrap; gap:10px; }
+        #resultList:not(:empty) { margin-top:16px; border:1px solid var(--line); border-radius:8px; background:rgba(2,6,23,.35); }
+        .result-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px; border-bottom:1px solid rgba(255,255,255,.07); overflow-wrap:anywhere; font-size:13px; }
+        .result-row:last-child { border-bottom:0; }
+        .result-row>div { min-width:0; }
+        .result-row .download-link { flex-shrink:0; min-height:32px; padding:0 12px; font-size:12px; }
+        .failure { color:#fecaca; white-space:pre-wrap; font-size:12px; }
+        #retryStatus { margin-top:14px; }
+        @media(max-width:960px) { .convert-layout { grid-template-columns:1fr; } }
+        @media(max-width:600px) {
+            .page { width:calc(100% - 20px); }
+            .title-row { display:block; }
+            .title-row>.action-link { margin-top:14px; }
+            .panel-head { padding:16px 16px 0; }
+            .panel-body { padding:16px; }
+            .selection-toolbar { align-items:flex-start; flex-direction:column; }
+            .result-row { align-items:flex-start; flex-direction:column; }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="title-row">
+        <div>
+            <h1>音频转换</h1>
+            <p class="subtitle">M4A 转 WAV，输出 PCM 16 位音频，保留原采样率和声道数。</p>
+        </div>
+        <a class="action-link secondary" href="/dashboard"><i class="fas fa-gauge-high" aria-hidden="true"></i> 任务工作台</a>
+    </div>
+    <main class="main-content">
+        <div class="convert-layout">
+            <section class="convert-card">
+                <div class="panel-head"><h2><i class="fas fa-folder-open" aria-hidden="true"></i> 选择 M4A 文件</h2></div>
+                <div class="panel-body">
+                <div id="configNotice" class="notice" role="status">正在读取服务配置…</div>
+                <fieldset id="inputControls" class="input-controls" disabled>
+                    <legend class="field-label">文件来源</legend>
+                    <div class="source-tabs" role="radiogroup" aria-label="文件来源">
+                        <input id="sourcePath" type="radio" name="inputSource" value="path" checked>
+                        <label for="sourcePath"><i class="fas fa-folder-tree" aria-hidden="true"></i> 共享路径</label>
+                        <input id="sourceUpload" type="radio" name="inputSource" value="upload">
+                        <label for="sourceUpload"><i class="fas fa-cloud-arrow-up" aria-hidden="true"></i> 上传文件</label>
+                    </div>
+                    <div id="pathPanel">
+                        <label class="field-label" for="directoryPath">目录或文件路径</label>
+                        <input id="directoryPath" type="text" placeholder="例如：\\win-server\服务器资料7\ 或 \\win-server\服务器资料7\客户\录音.m4a">
+                        <label class="check-row"><input id="recursiveInput" type="checkbox" checked> 包含子目录</label>
+                        <div class="convert-actions"><button id="scanFilesBtn" type="button"><i class="fas fa-magnifying-glass" aria-hidden="true"></i> 扫描文件</button></div>
+                    </div>
+                    <div id="uploadPanel" hidden>
+                        <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="选择或拖放 M4A 文件">
+                            <i class="fas fa-file-arrow-up" aria-hidden="true"></i>
+                            <div><strong>点击选择或拖入 M4A 文件</strong><span class="muted">支持同时选择多个文件</span></div>
+                        </div>
+                        <input id="fileInput" type="file" accept=".m4a" multiple hidden>
+                    </div>
+                    <div id="selectionMessage" class="notice" role="status" hidden></div>
+                    <div class="selection-toolbar">
+                        <p id="selectionSummary" class="muted" aria-live="polite">尚未选择文件</p>
+                        <div class="convert-actions"><button id="selectAll" class="secondary" type="button">全选</button><button id="clearSelection" class="secondary" type="button">清空选择</button></div>
+                    </div>
+                    <div id="candidateFileList" class="candidate-list"></div>
+                </fieldset>
+                <div class="convert-actions submit-actions"><button id="submitBtn" type="button" disabled>开始转换</button></div>
+                </div>
+            </section>
+            <aside class="convert-card">
+                <div class="panel-head"><h2><i class="fas fa-circle-info" aria-hidden="true"></i> 转换与下载</h2></div>
+                <div class="panel-body">
+                <ol class="steps"><li>扫描共享路径，或上传 M4A 文件。</li><li>勾选文件并提交转换。</li><li>下载单个 WAV，或打包下载全部成功结果。</li></ol>
+                <div class="info-section">
+                <h3>处理说明</h3>
+                <p class="muted" id="limitHint"></p>
+                <p class="muted">结果保存在系统结果目录，源文件保留。WAV 通常比 M4A 更大。</p>
+                </div>
+                <div class="info-section">
+                <h3>可访问的共享路径</h3><div id="allowedRoots" class="muted roots"></div>
+                <p class="muted">任务提交后可在<a class="inline-link" href="/dashboard">工作台</a>查看进度和下载结果。</p>
+                </div>
+                </div>
+            </aside>
+        </div>
+        <section id="taskPanel" class="convert-card result-panel" hidden aria-live="polite">
+            <div class="panel-head"><h2 id="taskTitle">转换进度</h2></div>
+            <div class="panel-body">
+            <p id="taskIdText" class="muted"></p>
+            <div class="progress-track" role="progressbar" aria-label="转换进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressFill" class="progress-fill"></div></div>
+            <p id="taskMessage"></p><div id="taskError" class="notice error" hidden></div>
+            <div id="archiveDownload"></div><div id="resultList"></div>
+            <button id="retryStatus" class="secondary" type="button" hidden>重新查询进度</button>
+            </div>
+        </section>
+    </main>
+</div>
+<script src="/static/audio_convert.js"></script>
+<script src="/static/header.js"></script>
+</body>
+</html>

@@ -25,6 +25,7 @@ TASK_TYPE_LABELS = {
     'file_rename': '文件名整理',
     'audio_check': '音频质量检查',
     'audio_transcription': '音频转写',
+    'audio_convert': '音频转换',
 }
 
 

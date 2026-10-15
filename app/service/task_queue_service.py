@@ -19,6 +19,12 @@ from app.db.session import SessionLocal
 from app.repository import task_repo
 from app.service import zhongfanyi_service as zf_service
 from app.service.audio_check_service import execute_audio_check_task
+from app.service.audio_convert_service import (
+    AudioConvertError, execute_audio_convert_task, ffmpeg_binary,
+    limits as audio_convert_limits, prepare_audio_convert_request,
+    validate_filename as validate_audio_convert_filename,
+    validate_sizes as validate_audio_convert_sizes,
+)
 from app.service.audio_transcription_service import execute_audio_transcription_task
 from app.service.business_licence_service import (
     BUSINESS_LICENCE_DEFAULT_MODEL,
@@ -117,6 +123,7 @@ class TaskQueueService:
         'english_variant': 1,
         'audio_check': 1,
         'audio_transcription': 1,
+        'audio_convert': 1,
     }
     SHARED_TASK_GROUPS: Dict[str, str] = {
         'number_check': 'specialist_text',
@@ -907,6 +914,76 @@ class TaskQueueService:
                 self._fail_reserved_task(reserved_task.task_id, exc)
             raise
 
+    async def submit_audio_convert_task(self, *, directory_path: str, relative_paths: list[str], recursive: bool = True) -> TaskSubmitResult:
+        params = await asyncio.to_thread(
+            prepare_audio_convert_request, directory_path=directory_path,
+            relative_paths=relative_paths, recursive=recursive,
+        )
+        reserved_task = None
+        try:
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='audio_convert', filename=f"音频转换（{len(relative_paths)} 个文件）",
+                params=params, staged_uploads=[],
+            )
+            if not submit_result.deduped:
+                self._update_task_input_files(reserved_task.task_id, {'directory_path': params['directory_path']})
+                self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            raise
+
+    async def submit_audio_convert_upload_task(self, *, files: list[UploadFile]) -> TaskSubmitResult:
+        ffmpeg_binary()
+        config = audio_convert_limits()
+        if not files or len(files) > config['max_files']:
+            raise ValueError(f"每批请选择 1 至 {config['max_files']} 个 M4A 文件")
+        for file in files:
+            validate_audio_convert_filename(file.filename or '')
+        staged_uploads = []
+        reserved_task = None
+        moved_paths = []
+        try:
+            total = 0
+            for index, file in enumerate(files):
+                remaining = config['max_total_mb'] * 1048576 - total
+                if remaining <= 0:
+                    raise UploadSizeLimitError(f"整批输入不能超过 {config['max_total_mb']} MB")
+                item = await self._stage_upload('audio_convert', f'input_{index}', file, 'input.m4a',
+                                                max_bytes=min(config['max_file_mb'] * 1048576, remaining))
+                staged_uploads.append(item)
+                total += item.size
+            validate_audio_convert_sizes([item.size for item in staged_uploads])
+            submit_result, reserved_task = self._reserve_task_submission(
+                task_type='audio_convert', filename=f"音频转换（{len(files)} 个文件）",
+                params={'input_source': 'upload'}, staged_uploads=staged_uploads,
+            )
+            if submit_result.deduped:
+                self._cleanup_staged_uploads(staged_uploads)
+                return submit_result
+            inputs = []
+            for item in staged_uploads:
+                path = self._move_staged_upload(item, Path(settings.UPLOAD_DIR) / 'audio_convert' / reserved_task.display_no,
+                                               reserved_task.display_no, reserved_task.task_id)
+                moved_paths.append(Path(path))
+                inputs.append({'path': path, 'filename': item.original_filename})
+            self._update_task_input_files(reserved_task.task_id, {'files': inputs})
+            self._notify_dispatcher()
+            return submit_result
+        except Exception as exc:
+            for path in moved_paths:
+                path.unlink(missing_ok=True)
+            if reserved_task is not None:
+                self._fail_reserved_task(reserved_task.task_id, exc)
+            if isinstance(exc, UploadSizeLimitError):
+                raise UploadSizeLimitError(
+                    f"音频大小超过限制：单文件 {config['max_file_mb']} MB，整批 {config['max_total_mb']} MB"
+                ) from exc
+            raise
+        finally:
+            self._cleanup_staged_uploads(staged_uploads)
+
     async def submit_word_count_task(
         self,
         *,
@@ -1219,6 +1296,9 @@ class TaskQueueService:
         return None
 
     def _get_missing_input_fields(self, task_type: str, params: Dict[str, Any], input_files: Dict[str, Any]) -> list[str]:
+        if task_type == 'audio_convert':
+            key = 'directory_path' if params.get('input_source') == 'path' else 'files'
+            return [] if input_files.get(key) else [key]
         if task_type == 'layout_overlay':
             return [] if self._get_input_value(input_files, 'input_path') else ['input_path']
         if task_type in {'doc_translate', 'business_licence', 'pdf2docx', 'svg_editable', 'msg_convert', 'english_variant', 'audio_check', 'audio_transcription'}:
@@ -1489,6 +1569,12 @@ class TaskQueueService:
             elif task_type == 'audio_check':
                 result = await self._execute_audio_check(task_id, display_no, input_files, params, update)
                 output_path = result.get('report_markdown') if result else None
+            elif task_type == 'audio_convert':
+                result = await execute_audio_convert_task(
+                    task_id=task_id, display_no=display_no, input_files=input_files, params=params,
+                    progress_callback=update, executor=self._task_executor,
+                )
+                output_path = result.get('archive_zip')
             elif task_type == 'audio_transcription':
                 result = await self._execute_audio_transcription(task_id, display_no, input_files, params, update)
                 output_path = result.get('archive_zip') if result else None
@@ -1500,7 +1586,8 @@ class TaskQueueService:
                     task_repo.mark_cancelled(db, task_id)
                     self._append_task_log(task_id, '[cancel] user cancelled before completion')
                     raise TaskCancelledError('user cancelled')
-                task_repo.complete_task(db, task_id, result_json=json.dumps(result, ensure_ascii=False) if result is not None else None, output_path=output_path, output_files_json=json.dumps(output_files, ensure_ascii=False) if output_files else None)
+                completion_options = {'message': result['summary_text']} if task_type == 'audio_convert' else {}
+                task_repo.complete_task(db, task_id, result_json=json.dumps(result, ensure_ascii=False) if result is not None else None, output_path=output_path, output_files_json=json.dumps(output_files, ensure_ascii=False) if output_files else None, **completion_options)
             self._append_task_log(task_id, '[done] completed')
         except TaskCancelledError:
             self._append_task_log(task_id, '[cancel] completed cancel')
@@ -1510,6 +1597,9 @@ class TaskQueueService:
             if brief_tb:
                 self._append_task_log(task_id, brief_tb.rstrip())
             with SessionLocal() as db:
+                if isinstance(exc, AudioConvertError) and exc.result is not None:
+                    failed_task = task_repo.get_task_by_task_id(db, task_id)
+                    failed_task.result_json = json.dumps(exc.result, ensure_ascii=False)
                 task_repo.fail_task(db, task_id, str(exc))
 
     async def _execute_number_check(self, task_id: str, display_no: str, input_files: Dict[str, Any], params: Dict[str, Any], update: Callable[[int, str], Any]) -> Dict[str, Any]:
@@ -1842,7 +1932,7 @@ class TaskQueueService:
             add_result('ocr_text_archive', ftype='report')
         elif task_type == 'pdf_merge':
             add_result('output_pdf')
-        elif task_type == 'pdf_tools':
+        elif task_type in {'pdf_tools', 'audio_convert'}:
             add_result('output_pdf')
             add_result('archive_zip')
             for item in result.get('output_files', []):

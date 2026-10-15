@@ -26,6 +26,7 @@ HTML_CACHE_HEADERS = {
 }
 LOCAL_STATIC_ASSET_PATTERN = re.compile(r'(?P<quote>["\'])(?P<url>/static/[^"\']+)(?P=quote)')
 RELEASE_NOTES = [
+    "10月15日_新增 M4A 转 WAV，支持共享路径扫描、多文件上传和批量下载",
     "8月8日_新增音频转写，支持 Qwen 逐词时间戳并导出 TXT、SRT、VTT、TSV 和 JSON",
     "7月31日_邮件转文档新增 EML 支持，可与 MSG 混合批量转换并保留正文内嵌图片",
     "7月22日_字数统计对齐 Word 核心指标，中日韩与拉丁候选明细支持折叠查看并补齐字符数；单文件 Word 行数优先实时重新分页，页面同步增加仅供参考提示",
@@ -50,6 +51,7 @@ TOOL_NAV_GROUPS = [
     ("转换与处理", "fa-shuffle", [
         ("/pdf2docx", "fa-file-word", "文档预处理", "PDF / 图片转可编辑 Word"),
         ("/msg-convert", "fa-envelope-open-text", "邮件转文档", "MSG / EML 转 Word / PDF，保留正文与内嵌图片"),
+        ("/audio-convert", "fa-file-audio", "音频转换", "M4A 转 WAV，共享路径与多文件上传"),
         ("/pdf-tools", "fa-screwdriver-wrench", "PDF 工具箱", "合并、拆分、压缩、提取、删页和旋转"),
         ("/word-count", "fa-calculator", "字数统计", "批量扫描并生成统计报告"),
         ("/file-rename", "fa-file-signature", "文件名整理", "清理序号前缀、自动编号或正则重命名"),
@@ -737,6 +739,11 @@ async def audio_check_page():
 @app.get("/audio-transcription", response_class=HTMLResponse)
 async def audio_transcription_page():
     return _render_page("audio_transcription.html", "/audio-transcription")
+
+
+@app.get("/audio-convert", response_class=HTMLResponse)
+async def audio_convert_page():
+    return _render_page("audio_convert.html", "/audio-convert")
 
 
 @app.get("/pdf2docx", response_class=HTMLResponse)
